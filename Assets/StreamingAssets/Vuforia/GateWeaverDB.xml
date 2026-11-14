@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<QCARConfig>
+  <Tracking>
+    <ImageTarget name="Output" size="0.800000 0.800000" />
+    <ImageTarget name="NOT" size="0.800000 0.800000" />
+    <ImageTarget name="NAND" size="0.800000 0.800000" />
+    <ImageTarget name="XOR" size="0.800000 0.800000" />
+    <ImageTarget name="OR" size="0.800000 0.800000" />
+    <ImageTarget name="AND" size="0.800000 0.800000" />
+    <ImageTarget name="InputA" size="0.800000 0.800000" />
+    <ImageTarget name="InputB" size="0.800000 0.800000" />
+  </Tracking>
+</QCARConfig>
