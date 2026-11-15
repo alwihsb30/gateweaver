@@ -45,6 +45,7 @@ public class GateNode : MonoBehaviour
     private Coroutine debounceCoroutine;
     private bool lastDetectedRotationBit = false;
     private bool rotationInitialized = false;
+    private bool isSimulationOverride = false;
 
     private void Awake()
     {
@@ -74,7 +75,7 @@ public class GateNode : MonoBehaviour
 
     private void Update()
     {
-        if (nodeType == NodeType.InputSource && isTracked && enablePhysicalRotationInput)
+        if (nodeType == NodeType.InputSource && isTracked && enablePhysicalRotationInput && !isSimulationOverride)
         {
             CheckPhysicalRotationInput();
         }
@@ -151,6 +152,26 @@ public class GateNode : MonoBehaviour
         rotationInitialized = false;
         connectedInputs.Clear();
         connectedTarget = null;
+        UpdateVisuals();
+    }
+
+    public void SetSimulationOverride(bool active)
+    {
+        isSimulationOverride = active;
+        rotationInitialized = false;
+    }
+
+    public void SetInputState(bool state)
+    {
+        if (nodeType != NodeType.InputSource)
+        {
+            return;
+        }
+
+        initialInputState = state;
+        currentOutputValue = state;
+        rotationInitialized = false;
+        EvaluateGateLogic();
         UpdateVisuals();
     }
 

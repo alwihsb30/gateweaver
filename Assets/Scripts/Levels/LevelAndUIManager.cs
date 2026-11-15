@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
@@ -167,6 +168,12 @@ public class LevelAndUIManager : MonoBehaviour
 
     public virtual void LoadLevel(int index)
     {
+        StopAllCoroutines();
+        isVerifying = false;
+
+        if (inputANode != null) inputANode.SetSimulationOverride(false);
+        if (inputBNode != null) inputBNode.SetSimulationOverride(false);
+
         if (levels == null || levels.Count == 0)
         {
             InitializeDefaultLevels();
@@ -189,6 +196,126 @@ public class LevelAndUIManager : MonoBehaviour
     {
         if (levels == null || levels.Count == 0) return;
         LoadLevel((currentLevelIndex + 1) % levels.Count);
+    }
+
+    public void OnVerifyButtonClicked()
+    {
+        if (!isVerifying)
+        {
+            StartCoroutine(VerifyTruthTableRoutine());
+        }
+    }
+
+    private IEnumerator VerifyTruthTableRoutine()
+    {
+        isVerifying = true;
+        LevelScenario currentLevel = levels[Mathf.Clamp(currentLevelIndex, 0, levels.Count - 1)];
+
+        if (circuitManager != null)
+        {
+            circuitManager.EvaluateCircuit();
+        }
+
+        if (circuitManager != null && circuitManager.activeGateCardsCount > currentLevel.maxGateCardsQuota)
+        {
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = $"Gagal! Melebihi kuota maksimal gerbang ({circuitManager.activeGateCardsCount}/{currentLevel.maxGateCardsQuota}).";
+                txtFeedback.color = Color.red;
+            }
+            isVerifying = false;
+            yield break;
+        }
+
+        if (inputANode == null || !inputANode.isTracked || inputBNode == null || !inputBNode.isTracked)
+        {
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = "Gagal! Pastikan kartu Input A dan Input B keduanya sudah terdeteksi kamera.";
+                txtFeedback.color = new Color(1f, 0.5f, 0f);
+            }
+            isVerifying = false;
+            yield break;
+        }
+
+        if (outputNode == null || !outputNode.isTracked || outputNode.connectedInputs.Count == 0)
+        {
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = "Gagal! Kartu Output belum terdeteksi kamera atau belum tersambung.";
+                txtFeedback.color = new Color(1f, 0.5f, 0f);
+            }
+            isVerifying = false;
+            yield break;
+        }
+
+        bool originalInputA = inputANode.initialInputState;
+        bool originalInputB = inputBNode.initialInputState;
+        inputANode.SetSimulationOverride(true);
+        inputBNode.SetSimulationOverride(true);
+
+        for (int i = 0; i < 4; i++)
+        {
+            bool testA = (i == 2 || i == 3);
+            bool testB = (i == 1 || i == 3);
+
+            inputANode.SetInputState(testA);
+            inputBNode.SetInputState(testB);
+            if (circuitManager != null) circuitManager.EvaluateCircuit();
+
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = $"Menguji baris {i + 1}/4: A={(testA ? 1 : 0)}, B={(testB ? 1 : 0)}...";
+                txtFeedback.color = Color.yellow;
+            }
+
+            yield return new WaitForSeconds(0.45f);
+            if (circuitManager != null) circuitManager.EvaluateCircuit();
+
+            bool actualOutput = outputNode.currentOutputValue;
+            bool expectedOutput = currentLevel.expectedTruthTable[i];
+            if (actualOutput != expectedOutput)
+            {
+                RestoreInitialInputStates(originalInputA, originalInputB);
+                if (txtFeedback != null)
+                {
+                    txtFeedback.text = $"Gagal pada uji A={(testA ? 1 : 0)}, B={(testB ? 1 : 0)} (Hasil: {(actualOutput ? 1 : 0)}, Target: {(expectedOutput ? 1 : 0)}).";
+                    txtFeedback.color = Color.red;
+                }
+                isVerifying = false;
+                yield break;
+            }
+        }
+
+        RestoreInitialInputStates(originalInputA, originalInputB);
+        if (txtFeedback != null)
+        {
+            txtFeedback.text = "BERHASIL! Rangkaian lolos seluruh 4 baris Tabel Kebenaran.";
+            txtFeedback.color = Color.green;
+        }
+        if (nextLevelButtonObj != null) nextLevelButtonObj.SetActive(true);
+
+        isVerifying = false;
+    }
+
+    private void RestoreInitialInputStates(bool stateA, bool stateB)
+    {
+        if (inputANode != null)
+        {
+            inputANode.SetSimulationOverride(false);
+            inputANode.SetInputState(stateA);
+        }
+
+        if (inputBNode != null)
+        {
+            inputBNode.SetSimulationOverride(false);
+            inputBNode.SetInputState(stateB);
+        }
+
+        if (circuitManager != null)
+        {
+            circuitManager.EvaluateCircuit();
+        }
     }
 
     public void OnToggleInputAClicked()
