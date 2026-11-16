@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using TMPro;
 
 public enum NodeType
 {
@@ -36,8 +37,11 @@ public class GateNode : MonoBehaviour
     public float rotationAngleThreshold = 45f;
     public float trackingLossDebounceTime = 0.4f;
 
-    [Header("5. Indikator Opsional")]
+    [Header("5. Umpan Balik Visual 3D/AR di Atas Kartu")]
     public Renderer statusIndicatorRenderer;
+    public TMP_Text statusLabel;
+    public float labelHeightOffset = 0.045f;
+    public float labelFontSize = 0.55f;
 
     [HideInInspector]
     public LineRenderer lineRenderer;
@@ -46,6 +50,9 @@ public class GateNode : MonoBehaviour
     private bool lastDetectedRotationBit = false;
     private bool rotationInitialized = false;
     private bool isSimulationOverride = false;
+
+    private static readonly Color BrightGreenTextColor = new Color(0.2f, 1f, 0.3f, 1f);
+    private static readonly Color BrightRedOrangeTextColor = new Color(1f, 0.35f, 0.15f, 1f);
 
     private void Awake()
     {
@@ -60,6 +67,19 @@ public class GateNode : MonoBehaviour
         lineRenderer.startWidth = laserWidth;
         lineRenderer.endWidth = laserWidth;
         lineRenderer.enabled = false;
+
+        if (statusLabel == null)
+        {
+            GameObject labelObj = new GameObject("Label_Status3D");
+            labelObj.transform.SetParent(transform, false);
+            labelObj.transform.localPosition = new Vector3(0f, labelHeightOffset, 0f);
+            TextMeshPro tmp3D = labelObj.AddComponent<TextMeshPro>();
+            tmp3D.fontSize = labelFontSize;
+            tmp3D.alignment = TextAlignmentOptions.Center;
+            tmp3D.textWrappingMode = TextWrappingModes.NoWrap;
+            tmp3D.fontStyle = FontStyles.Bold;
+            statusLabel = tmp3D;
+        }
     }
 
     private void Start()
@@ -78,6 +98,25 @@ public class GateNode : MonoBehaviour
         if (nodeType == NodeType.InputSource && isTracked && enablePhysicalRotationInput && !isSimulationOverride)
         {
             CheckPhysicalRotationInput();
+        }
+
+        if (isTracked)
+        {
+            UpdateLabelBillboard();
+        }
+    }
+
+    private void UpdateLabelBillboard()
+    {
+        if (statusLabel == null || Camera.main == null)
+        {
+            return;
+        }
+
+        Vector3 dirFromCamera = statusLabel.transform.position - Camera.main.transform.position;
+        if (dirFromCamera.sqrMagnitude > 0.0001f)
+        {
+            statusLabel.transform.rotation = Quaternion.LookRotation(dirFromCamera, Camera.main.transform.up);
         }
     }
 
@@ -263,6 +302,34 @@ public class GateNode : MonoBehaviour
         if (statusIndicatorRenderer != null && statusIndicatorRenderer.material != null)
         {
             statusIndicatorRenderer.material.color = activeColor;
+        }
+
+        if (statusLabel != null)
+        {
+            if (statusLabel.gameObject.activeSelf != isTracked)
+            {
+                statusLabel.gameObject.SetActive(isTracked);
+            }
+
+            if (isTracked)
+            {
+                if (nodeType == NodeType.InputSource)
+                {
+                    string inputName = gameObject.name.ToUpperInvariant().Contains("B") ? "B" : "A";
+                    statusLabel.text = $"INPUT {inputName}: {(currentOutputValue ? "1" : "0")}";
+                }
+                else if (nodeType == NodeType.OutputActuator)
+                {
+                    statusLabel.text = $"OUTPUT: {(currentOutputValue ? "1 (AKTIF)" : "0 (MATI)")}";
+                }
+                else
+                {
+                    statusLabel.text = $"{nodeType} -> {(currentOutputValue ? "1" : "0")}";
+                }
+
+                statusLabel.color = currentOutputValue ? BrightGreenTextColor : BrightRedOrangeTextColor;
+                UpdateLabelBillboard();
+            }
         }
     }
 }

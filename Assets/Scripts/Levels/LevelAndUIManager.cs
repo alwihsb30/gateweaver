@@ -28,7 +28,9 @@ public class LevelAndUIManager : MonoBehaviour
     public TMP_Text txtQuotaStatus;
     public TMP_Text txtFeedback;
     public GameObject nextLevelButtonObj;
+    public TMP_Text txtNextLevelButtonLabel;
     public GameObject resetLevelButtonObj;
+    public TMP_Text txtResetLevelButtonLabel;
     public TMP_Text txtBtnToggleA;
     public TMP_Text txtBtnToggleB;
 
@@ -37,6 +39,8 @@ public class LevelAndUIManager : MonoBehaviour
     public int currentLevelIndex = 0;
 
     protected bool isVerifying = false;
+    private bool awaitingPostVictoryChoice = false;
+    private bool[] levelCompletedFlags;
 
     private void Awake()
     {
@@ -166,10 +170,30 @@ public class LevelAndUIManager : MonoBehaviour
         }
     }
 
+    private void EnsureLevelCompletedFlagsInitialized()
+    {
+        int count = levels != null ? levels.Count : 0;
+        if (levelCompletedFlags == null || levelCompletedFlags.Length != count)
+        {
+            levelCompletedFlags = new bool[count];
+        }
+    }
+
+    private bool AreAllLevelsCompleted()
+    {
+        if (levelCompletedFlags == null || levelCompletedFlags.Length == 0) return false;
+        for (int i = 0; i < levelCompletedFlags.Length; i++)
+        {
+            if (!levelCompletedFlags[i]) return false;
+        }
+        return true;
+    }
+
     public virtual void LoadLevel(int index)
     {
         StopAllCoroutines();
         isVerifying = false;
+        awaitingPostVictoryChoice = false;
 
         if (inputANode != null) inputANode.SetSimulationOverride(false);
         if (inputBNode != null) inputBNode.SetSimulationOverride(false);
@@ -179,11 +203,16 @@ public class LevelAndUIManager : MonoBehaviour
             InitializeDefaultLevels();
         }
 
+        EnsureLevelCompletedFlagsInitialized();
+
         currentLevelIndex = Mathf.Clamp(index, 0, levels.Count - 1);
         LevelScenario currentLevel = levels[currentLevelIndex];
 
+        if (txtNextLevelButtonLabel != null) txtNextLevelButtonLabel.text = "Level Berikutnya";
         if (nextLevelButtonObj != null) nextLevelButtonObj.SetActive(false);
-        if (txtLevelTitle != null) txtLevelTitle.text = currentLevel.levelTitle;
+        if (txtResetLevelButtonLabel != null) txtResetLevelButtonLabel.text = "Reset Level";
+        if (resetLevelButtonObj != null) resetLevelButtonObj.SetActive(true);
+        if (txtLevelTitle != null) txtLevelTitle.text = $"[{currentLevelIndex + 1}/{levels.Count}] {currentLevel.levelTitle}";
         if (txtMissionDesc != null) txtMissionDesc.text = currentLevel.missionDescription;
         if (txtFeedback != null)
         {
@@ -192,9 +221,28 @@ public class LevelAndUIManager : MonoBehaviour
         }
     }
 
+    public void ResetCurrentLevel()
+    {
+        if (awaitingPostVictoryChoice)
+        {
+            EnsureLevelCompletedFlagsInitialized();
+            Array.Clear(levelCompletedFlags, 0, levelCompletedFlags.Length);
+            LoadLevel(0);
+            return;
+        }
+        LoadLevel(currentLevelIndex);
+    }
+
     public virtual void NextLevel()
     {
         if (levels == null || levels.Count == 0) return;
+        EnsureLevelCompletedFlagsInitialized();
+        if (awaitingPostVictoryChoice || AreAllLevelsCompleted())
+        {
+            Array.Clear(levelCompletedFlags, 0, levelCompletedFlags.Length);
+            LoadLevel(0);
+            return;
+        }
         LoadLevel((currentLevelIndex + 1) % levels.Count);
     }
 
@@ -288,11 +336,34 @@ public class LevelAndUIManager : MonoBehaviour
         }
 
         RestoreInitialInputStates(originalInputA, originalInputB);
-        if (txtFeedback != null)
+
+        EnsureLevelCompletedFlagsInitialized();
+        if (currentLevelIndex >= 0 && currentLevelIndex < levelCompletedFlags.Length)
         {
-            txtFeedback.text = "BERHASIL! Rangkaian lolos seluruh 4 baris Tabel Kebenaran.";
-            txtFeedback.color = Color.green;
+            levelCompletedFlags[currentLevelIndex] = true;
         }
+
+        bool isGameCleared = AreAllLevelsCompleted() || currentLevelIndex == levels.Count - 1;
+        if (isGameCleared)
+        {
+            awaitingPostVictoryChoice = true;
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = $"SELAMAT! Seluruh {levels.Count} Misi GateWeaver AR Berhasil Diselesaikan!";
+                txtFeedback.color = Color.green;
+            }
+            if (txtNextLevelButtonLabel != null) txtNextLevelButtonLabel.text = "Main Lagi";
+        }
+        else
+        {
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = "BERHASIL! Rangkaian lolos seluruh 4 baris Tabel Kebenaran.";
+                txtFeedback.color = Color.green;
+            }
+            if (txtNextLevelButtonLabel != null) txtNextLevelButtonLabel.text = "Level Berikutnya";
+        }
+
         if (nextLevelButtonObj != null) nextLevelButtonObj.SetActive(true);
 
         isVerifying = false;
