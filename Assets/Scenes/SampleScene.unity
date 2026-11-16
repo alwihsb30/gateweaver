@@ -4780,7 +4780,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CircuitManager
   allNodes: []
-  maxSnapDistance: 1.5
+  maxSnapDistance: 3
   inputSourceRangeMultiplier: 1.8
   activeGateCardsCount: 0
 --- !u!4 &1992497467
