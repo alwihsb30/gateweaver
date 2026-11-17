@@ -81,14 +81,28 @@ public class LevelAndUIManager : MonoBehaviour
     [Tooltip("Panel UI prosedural Live Truth Table Scanner (otomatis dibangun di Canvas bila kosong)")]
     public GameObject truthTableScannerPanelObj;
 
+    [Header("5. Audio Prosedural, Haptik & Sistem Bintang (Hari 16)")]
+    [Tooltip("Status mute efek suara prosedural (dapat diubah lewat tombol Audio ON/OFF pada panel)")]
+    public bool isAudioMuted = false;
+
+    private const int AudioSampleRate = 44100;
+    private const float AudioEnvelopeSeconds = 0.005f;
+    private const float HapticCooldownSeconds = 0.85f;
+
     private bool isVerifying = false;
     private bool isSandboxMode = false;
     private bool awaitingPostVictoryChoice = false;
     private bool[] levelCompletedFlags;
+    private int[] levelBestStars;
+    private int attemptsOnCurrentLevel = 0;
 
     // Komponen Matrix UI Prosedural
     private TMP_Text txtBooleanFormula;
     private TMP_Text txtCurrentOutputReadout;
+    private TMP_Text txtStarMastery;
+    private TMP_Text txtAudioToggleLabel;
+    private Image audioToggleBackground;
+    private Button audioToggleButton;
     private readonly Image[] matrixRowBackgrounds = new Image[TruthTableRowCount];
     private readonly TMP_Text[] matrixRowTargetTexts = new TMP_Text[TruthTableRowCount];
     private readonly TMP_Text[] matrixRowMeasuredTexts = new TMP_Text[TruthTableRowCount];
@@ -99,6 +113,22 @@ public class LevelAndUIManager : MonoBehaviour
     private int scanningRowIndex = -1;
     private string lastTopologySignature = string.Empty;
     private bool hasLastTopologySignature = false;
+
+    // Synthesizer Audio Prosedural & Pelacak Event Audio/Haptik
+    private AudioSource sfxAudioSource;
+    private AudioClip clipToggleInput;
+    private AudioClip clipSnapConnect;
+    private readonly AudioClip[] clipScanRows = new AudioClip[TruthTableRowCount];
+    private AudioClip clipRowPass;
+    private AudioClip clipRowFail;
+    private AudioClip clipVictoryFanfare;
+
+    private float lastHapticTime = -10f;
+    private bool inputsBaselineInitialized = false;
+    private bool lastInputAState = false;
+    private bool lastInputBState = false;
+    private int lastActiveConnectionCount = 0;
+    private bool wasCircuitComplete = false;
 
     private static readonly Color MatrixPanelBgColor = new Color(0.04f, 0.08f, 0.15f, 0.80f);
     private static readonly Color MatrixAccentCyanColor = new Color(0.18f, 0.88f, 1.00f, 0.95f);
@@ -117,6 +147,8 @@ public class LevelAndUIManager : MonoBehaviour
 
     private void Awake()
     {
+        ConfigureMobileRuntimeOptimization();
+
         // Isi otomatis 5 skenario default jika daftar levels di Inspector masih kosong
         if (levels == null || levels.Count == 0)
         {
@@ -124,7 +156,7 @@ public class LevelAndUIManager : MonoBehaviour
         }
         else
         {
-            EnsureLevelCompletedFlagsInitialized();
+            EnsureLevelProgressArraysInitialized();
         }
 
         // Cari otomatis CircuitManager jika belum di-assign di Inspector
@@ -136,6 +168,7 @@ public class LevelAndUIManager : MonoBehaviour
         AutoBindCoreNodesIfNeeded();
         AutoBindToggleButtonsTextIfNeeded();
         AutoBindActionButtonsIfNeeded();
+        InitializeProceduralAudio();
         InitializeTruthTableMatrixUI();
     }
 
@@ -149,6 +182,31 @@ public class LevelAndUIManager : MonoBehaviour
         UpdateQuotaStatusUI();
         UpdateInputToggleButtonsUI();
         UpdateTruthTableMatrixLive();
+        MonitorInputStateAudio();
+    }
+
+    private void OnDestroy()
+    {
+        StopAllCoroutines();
+
+        if (audioToggleButton != null)
+        {
+            audioToggleButton.onClick.RemoveListener(ToggleAudioMute);
+            audioToggleButton = null;
+        }
+
+        DestroyProceduralAudioClips();
+        Screen.sleepTimeout = SleepTimeout.SystemSetting;
+    }
+
+    /// <summary>
+    /// Mengunci frame rate target 60 FPS dan mencegah layar smartphone redup/mati otomatis
+    /// selama sesi pemindaian kartu AR berlangsung.
+    /// </summary>
+    private static void ConfigureMobileRuntimeOptimization()
+    {
+        Application.targetFrameRate = 60;
+        Screen.sleepTimeout = SleepTimeout.NeverSleep;
     }
 
     /// <summary>
@@ -282,7 +340,7 @@ public class LevelAndUIManager : MonoBehaviour
         panelRect.anchorMax = new Vector2(0f, 1f);
         panelRect.pivot = new Vector2(0f, 1f);
         panelRect.anchoredPosition = new Vector2(22f, -176f);
-        panelRect.sizeDelta = new Vector2(460f, 344f);
+        panelRect.sizeDelta = new Vector2(460f, 384f);
 
         Image panelImage = truthTableScannerPanelObj.GetComponent<Image>();
         if (panelImage != null)
@@ -294,9 +352,10 @@ public class LevelAndUIManager : MonoBehaviour
         // Garis aksen sian di tepi atas panel
         CreateMatrixPanelAccentBar(panelRect);
 
-        // Header & Rumus Aljabar Boolean Aktif
-        CreateMatrixText("Txt_ScannerBadge", panelRect, new Vector2(14f, -10f), new Vector2(432f, 22f),
+        // Header & Rumus Aljabar Boolean Aktif + Tombol Mute Audio
+        CreateMatrixText("Txt_ScannerBadge", panelRect, new Vector2(14f, -10f), new Vector2(308f, 22f),
             "MATRIX TABEL KEBENARAN & RUMUS", 13f, TextAlignmentOptions.Left, MatrixAccentCyanColor, safeFont);
+        CreateAudioToggleButton(panelRect, safeFont);
 
         txtBooleanFormula = CreateMatrixText("Txt_BooleanFormula", panelRect, new Vector2(14f, -34f), new Vector2(432f, 38f),
             "Rumus Rakitan: Y = (Belum Terhubung)", 17f, TextAlignmentOptions.Left, Color.white, safeFont);
@@ -346,8 +405,47 @@ public class LevelAndUIManager : MonoBehaviour
             matrixRowStatusTexts[i] = CreateMatrixColumnText($"Col_Status_{i}", rowRect, 270f, 162f, 44f, "-", 14f, Color.white, safeFont);
         }
 
+        // Baris footer rating bintang efisiensi & jumlah uji
+        RectTransform starRowRect = CreateMatrixRowContainer("Row_StarMastery", panelRect, -342f, 32f, MatrixHeaderBgColor);
+        txtStarMastery = CreateMatrixText("Txt_StarMastery", starRowRect, new Vector2(10f, -2f), new Vector2(412f, 28f),
+            "Bintang Level: [...] | Total: 0/15 | Uji ke-0", 13f, TextAlignmentOptions.Left, Color.white, safeFont);
+        txtStarMastery.enableAutoSizing = true;
+        txtStarMastery.fontSizeMin = 10f;
+        txtStarMastery.fontSizeMax = 13.5f;
+
         RefreshTruthTableTargets();
         ResetTruthTableScanResults();
+        UpdateAudioToggleButtonUI();
+        UpdateStarMasteryUI();
+    }
+
+    private void CreateAudioToggleButton(RectTransform parent, TMP_FontAsset fontAsset)
+    {
+        GameObject btnObj = new GameObject("Btn_AudioToggle", typeof(RectTransform), typeof(Image), typeof(Button));
+        btnObj.transform.SetParent(parent, false);
+
+        RectTransform rect = btnObj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(328f, -8f);
+        rect.sizeDelta = new Vector2(118f, 24f);
+
+        audioToggleBackground = btnObj.GetComponent<Image>();
+        audioToggleBackground.raycastTarget = true;
+
+        audioToggleButton = btnObj.GetComponent<Button>();
+        audioToggleButton.targetGraphic = audioToggleBackground;
+        audioToggleButton.onClick.AddListener(ToggleAudioMute);
+
+        txtAudioToggleLabel = CreateMatrixText("Txt_AudioToggle", rect, Vector2.zero, new Vector2(118f, 24f),
+            "Audio: ON", 12f, TextAlignmentOptions.Center, Color.white, fontAsset);
+        RectTransform labelRect = txtAudioToggleLabel.rectTransform;
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.pivot = new Vector2(0.5f, 0.5f);
+        labelRect.offsetMin = Vector2.zero;
+        labelRect.offsetMax = Vector2.zero;
     }
 
     private Canvas FindTargetCanvas()
@@ -607,15 +705,33 @@ public class LevelAndUIManager : MonoBehaviour
 
         int activeGates = circuitManager != null ? circuitManager.activeGateCardsCount : 0;
         bool outputTracked = outputNode != null && outputNode.isTracked;
-        string topologySignature = $"{currentFormula}|{activeGates}|{outputTracked}";
+        int currentConnectionCount = circuitManager != null ? circuitManager.GetActiveConnectionCount() : 0;
+        string topologySignature = $"{currentFormula}|{activeGates}|{outputTracked}|{currentConnectionCount}";
 
         if (!isVerifying)
         {
-            if (hasLastTopologySignature && topologySignature != lastTopologySignature && HasAnyScannedMatrixRow())
+            bool isCircuitComplete = circuitManager != null && circuitManager.IsCircuitCompleteToOutput(outputNode);
+
+            if (hasLastTopologySignature && topologySignature != lastTopologySignature)
             {
-                ResetTruthTableScanResults();
+                if (HasAnyScannedMatrixRow())
+                {
+                    ResetTruthTableScanResults();
+                }
+
+                if (currentConnectionCount > lastActiveConnectionCount)
+                {
+                    PlaySfx(clipSnapConnect);
+                }
             }
 
+            if (!wasCircuitComplete && isCircuitComplete)
+            {
+                TriggerHapticPulse();
+            }
+
+            lastActiveConnectionCount = currentConnectionCount;
+            wasCircuitComplete = isCircuitComplete;
             lastTopologySignature = topologySignature;
             hasLastTopologySignature = true;
         }
@@ -679,14 +795,391 @@ public class LevelAndUIManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Memastikan array pelacakan penyelesaian level sesuai dengan jumlah skenario level yang aktif.
+    /// Memantau perubahan nilai logika Input A dan Input B dari tombol UI maupun rotasi fisik kartu AR,
+    /// lalu memainkan efek klik elektronik prosedural di luar fase verifikasi otomatis.
     /// </summary>
-    private void EnsureLevelCompletedFlagsInitialized()
+    private void MonitorInputStateAudio()
+    {
+        if (isVerifying)
+        {
+            return;
+        }
+
+        bool currentA = inputANode != null && inputANode.currentOutputValue;
+        bool currentB = inputBNode != null && inputBNode.currentOutputValue;
+
+        if (!inputsBaselineInitialized)
+        {
+            lastInputAState = currentA;
+            lastInputBState = currentB;
+            inputsBaselineInitialized = true;
+            return;
+        }
+
+        if (currentA != lastInputAState || currentB != lastInputBState)
+        {
+            PlaySfx(clipToggleInput);
+            lastInputAState = currentA;
+            lastInputBState = currentB;
+        }
+    }
+
+    private void SyncAudioStateBaselines(bool resetTopologySignature)
+    {
+        lastInputAState = inputANode != null && inputANode.currentOutputValue;
+        lastInputBState = inputBNode != null && inputBNode.currentOutputValue;
+        inputsBaselineInitialized = true;
+        lastActiveConnectionCount = circuitManager != null ? circuitManager.GetActiveConnectionCount() : 0;
+        wasCircuitComplete = circuitManager != null && circuitManager.IsCircuitCompleteToOutput(outputNode);
+
+        if (resetTopologySignature)
+        {
+            hasLastTopologySignature = false;
+            lastTopologySignature = string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Menginisialisasi AudioSource runtime serta membangkitkan seluruh AudioClip PCM 44100 Hz mono prosedural sekali saja.
+    /// </summary>
+    private void InitializeProceduralAudio()
+    {
+        sfxAudioSource = GetComponent<AudioSource>();
+        if (sfxAudioSource == null)
+        {
+            sfxAudioSource = gameObject.AddComponent<AudioSource>();
+        }
+
+        sfxAudioSource.playOnAwake = false;
+        sfxAudioSource.loop = false;
+        sfxAudioSource.spatialBlend = 0f;
+        sfxAudioSource.volume = 1f;
+
+        if (clipToggleInput == null)
+        {
+            clipToggleInput = CreateMultiSegmentToneClip("SFX_ToggleInput", new float[] { 680f, 920f }, 0.03f, 0.25f, false);
+        }
+
+        if (clipSnapConnect == null)
+        {
+            clipSnapConnect = CreateSweepAudioClip("SFX_SnapConnect", 420f, 840f, 0.10f, 0.24f, true);
+        }
+
+        float[] scanFrequencies = new float[] { 520f, 620f, 720f, 820f };
+        for (int i = 0; i < TruthTableRowCount; i++)
+        {
+            if (clipScanRows[i] == null)
+            {
+                clipScanRows[i] = CreateSweepAudioClip($"SFX_ScanRow_{i}", scanFrequencies[i], scanFrequencies[i], 0.065f, 0.22f, false);
+            }
+        }
+
+        if (clipRowPass == null)
+        {
+            clipRowPass = CreateSweepAudioClip("SFX_RowPass", 1046f, 1046f, 0.09f, 0.24f, true);
+        }
+
+        if (clipRowFail == null)
+        {
+            clipRowFail = CreateRowFailBuzzClip();
+        }
+
+        if (clipVictoryFanfare == null)
+        {
+            clipVictoryFanfare = CreateMultiSegmentToneClip(
+                "SFX_VictoryFanfare",
+                new float[] { 523.25f, 659.25f, 783.99f, 1046.50f },
+                0.105f,
+                0.23f,
+                true);
+        }
+    }
+
+    private void DestroyProceduralAudioClips()
+    {
+        DestroyAudioClipRef(ref clipToggleInput);
+        DestroyAudioClipRef(ref clipSnapConnect);
+        for (int i = 0; i < clipScanRows.Length; i++)
+        {
+            DestroyAudioClipRef(ref clipScanRows[i]);
+        }
+        DestroyAudioClipRef(ref clipRowPass);
+        DestroyAudioClipRef(ref clipRowFail);
+        DestroyAudioClipRef(ref clipVictoryFanfare);
+    }
+
+    private static void DestroyAudioClipRef(ref AudioClip clip)
+    {
+        if (clip != null)
+        {
+            Destroy(clip);
+            clip = null;
+        }
+    }
+
+    private void PlaySfx(AudioClip clip)
+    {
+        if (isAudioMuted || sfxAudioSource == null || clip == null)
+        {
+            return;
+        }
+
+        sfxAudioSource.PlayOneShot(clip);
+    }
+
+    /// <summary>
+    /// Mengaktifkan / menonaktifkan efek suara prosedural dari tombol HUD "Audio: ON/OFF".
+    /// </summary>
+    public void ToggleAudioMute()
+    {
+        isAudioMuted = !isAudioMuted;
+        UpdateAudioToggleButtonUI();
+
+        if (!isAudioMuted)
+        {
+            PlaySfx(clipToggleInput);
+        }
+    }
+
+    private void UpdateAudioToggleButtonUI()
+    {
+        if (txtAudioToggleLabel != null)
+        {
+            txtAudioToggleLabel.text = isAudioMuted ? "Audio: OFF" : "Audio: ON";
+            txtAudioToggleLabel.color = isAudioMuted
+                ? new Color(1.00f, 0.65f, 0.35f, 1f)
+                : new Color(0.85f, 0.98f, 1.00f, 1f);
+        }
+
+        if (audioToggleBackground != null)
+        {
+            audioToggleBackground.color = isAudioMuted
+                ? new Color(0.28f, 0.14f, 0.12f, 0.92f)
+                : new Color(0.10f, 0.34f, 0.48f, 0.92f);
+        }
+    }
+
+    /// <summary>
+    /// Memicu umpan balik getar Android (Handheld.Vibrate) dengan jeda cooldown minimum agar tidak bergetar berulang.
+    /// </summary>
+    private void TriggerHapticPulse()
+    {
+        float now = Time.unscaledTime;
+        if (now - lastHapticTime < HapticCooldownSeconds)
+        {
+            return;
+        }
+
+        lastHapticTime = now;
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        Handheld.Vibrate();
+#endif
+    }
+
+    private static AudioClip CreateSweepAudioClip(string clipName, float startFreq, float endFreq, float durationSec, float amplitude, bool addShimmerHarmonic)
+    {
+        int sampleCount = Mathf.Max(2, Mathf.RoundToInt(durationSec * AudioSampleRate));
+        float[] samples = new float[sampleCount];
+        double phase = 0.0;
+
+        for (int i = 0; i < sampleCount; i++)
+        {
+            float t = (float)i / (sampleCount - 1);
+            float freq = Mathf.Lerp(startFreq, endFreq, t);
+            phase += (2.0 * Math.PI * freq) / AudioSampleRate;
+
+            double wave = Math.Sin(phase);
+            if (addShimmerHarmonic)
+            {
+                wave = (wave + 0.22 * Math.Sin(phase * 2.0)) * 0.82;
+            }
+
+            samples[i] = (float)(wave * amplitude);
+        }
+
+        ApplyFadeEnvelope(samples, sampleCount, AudioEnvelopeSeconds);
+        return CreateAudioClipFromSamples(clipName, samples);
+    }
+
+    private static AudioClip CreateMultiSegmentToneClip(string clipName, float[] frequencies, float segmentDurationSec, float amplitude, bool applyPerNoteDecay)
+    {
+        int segmentSamples = Mathf.Max(2, Mathf.RoundToInt(segmentDurationSec * AudioSampleRate));
+        int totalSamples = segmentSamples * frequencies.Length;
+        float[] samples = new float[totalSamples];
+        double phase = 0.0;
+
+        for (int s = 0; s < frequencies.Length; s++)
+        {
+            double phaseStep = (2.0 * Math.PI * frequencies[s]) / AudioSampleRate;
+            for (int j = 0; j < segmentSamples; j++)
+            {
+                phase += phaseStep;
+                float env = 1f;
+                if (applyPerNoteDecay)
+                {
+                    float localT = (float)j / segmentSamples;
+                    env = 1f - (0.35f * localT);
+                }
+
+                double wave = Math.Sin(phase) + (applyPerNoteDecay ? 0.18 * Math.Sin(phase * 2.0) : 0.0);
+                samples[(s * segmentSamples) + j] = (float)(wave * amplitude * env);
+            }
+        }
+
+        ApplyFadeEnvelope(samples, totalSamples, AudioEnvelopeSeconds);
+        return CreateAudioClipFromSamples(clipName, samples);
+    }
+
+    private static AudioClip CreateRowFailBuzzClip()
+    {
+        const float durationSec = 0.15f;
+        const float baseFreq = 190f;
+        const float amplitude = 0.22f;
+
+        int sampleCount = Mathf.Max(2, Mathf.RoundToInt(durationSec * AudioSampleRate));
+        float[] samples = new float[sampleCount];
+        double phase = 0.0;
+        double phaseStep = (2.0 * Math.PI * baseFreq) / AudioSampleRate;
+
+        for (int i = 0; i < sampleCount; i++)
+        {
+            phase += phaseStep;
+            double wave = (0.72 * Math.Sin(phase)) + (0.28 * Math.Sin(phase * 3.0)) + (0.12 * Math.Sin(phase * 5.0));
+            samples[i] = (float)(wave * amplitude * 0.85);
+        }
+
+        ApplyFadeEnvelope(samples, sampleCount, AudioEnvelopeSeconds);
+        return CreateAudioClipFromSamples("SFX_RowFailBuzz", samples);
+    }
+
+    private static void ApplyFadeEnvelope(float[] samples, int sampleCount, float fadeDurationSec)
+    {
+        int fadeSamples = Mathf.Clamp(Mathf.RoundToInt(fadeDurationSec * AudioSampleRate), 1, sampleCount / 2);
+        for (int i = 0; i < fadeSamples; i++)
+        {
+            float t = (float)i / fadeSamples;
+            float smoothFactor = 0.5f * (1f - Mathf.Cos(Mathf.PI * t));
+            samples[i] *= smoothFactor;
+            samples[sampleCount - 1 - i] *= smoothFactor;
+        }
+    }
+
+    private static AudioClip CreateAudioClipFromSamples(string clipName, float[] samples)
+    {
+        AudioClip clip = AudioClip.Create(clipName, samples.Length, 1, AudioSampleRate, false);
+        clip.SetData(samples, 0);
+        return clip;
+    }
+
+    /// <summary>
+    /// Memastikan array pelacakan penyelesaian level & rating bintang sesuai dengan jumlah skenario level yang aktif.
+    /// </summary>
+    private void EnsureLevelProgressArraysInitialized()
     {
         int count = levels != null ? levels.Count : 0;
         if (levelCompletedFlags == null || levelCompletedFlags.Length != count)
         {
             levelCompletedFlags = new bool[count];
+        }
+
+        if (levelBestStars == null || levelBestStars.Length != count)
+        {
+            levelBestStars = new int[count];
+        }
+    }
+
+    private static int CalculateEarnedStars(int attempts, bool withinQuota)
+    {
+        if (withinQuota && attempts <= 2)
+        {
+            return 3;
+        }
+
+        if (attempts <= 4)
+        {
+            return 2;
+        }
+
+        return 1;
+    }
+
+    private int GetTotalStars()
+    {
+        if (levelBestStars == null || levelBestStars.Length == 0)
+        {
+            return 0;
+        }
+
+        int total = 0;
+        for (int i = 0; i < levelBestStars.Length; i++)
+        {
+            total += levelBestStars[i];
+        }
+
+        return total;
+    }
+
+    private int GetMaxTotalStars()
+    {
+        int count = levels != null ? levels.Count : 0;
+        return count * 3;
+    }
+
+    private static string FormatStarsAscii(int stars)
+    {
+        switch (Mathf.Clamp(stars, 0, 3))
+        {
+            case 3:
+                return "[***]";
+            case 2:
+                return "[**.]";
+            case 1:
+                return "[*..]";
+            default:
+                return "[...]";
+        }
+    }
+
+    private void UpdateStarMasteryUI()
+    {
+        if (txtStarMastery == null)
+        {
+            return;
+        }
+
+        EnsureLevelProgressArraysInitialized();
+        int totalStars = GetTotalStars();
+        int maxTotalStars = GetMaxTotalStars();
+
+        if (isSandboxMode)
+        {
+            txtStarMastery.text = $"Mode Sandbox | Total Bintang: {totalStars}/{maxTotalStars}";
+            txtStarMastery.color = MatrixBrightCyanColor;
+            return;
+        }
+
+        int safeIndex = (levelBestStars != null && levelBestStars.Length > 0)
+            ? Mathf.Clamp(currentLevelIndex, 0, levelBestStars.Length - 1)
+            : -1;
+        int currentBestStars = safeIndex >= 0 ? levelBestStars[safeIndex] : 0;
+
+        txtStarMastery.text = $"Bintang Level: {FormatStarsAscii(currentBestStars)} | Total: {totalStars}/{maxTotalStars} | Uji ke-{attemptsOnCurrentLevel}";
+
+        switch (currentBestStars)
+        {
+            case 3:
+                txtStarMastery.color = new Color(1.00f, 0.86f, 0.25f, 1f);
+                break;
+            case 2:
+                txtStarMastery.color = MatrixBrightCyanColor;
+                break;
+            case 1:
+                txtStarMastery.color = new Color(1.00f, 0.65f, 0.28f, 1f);
+                break;
+            default:
+                txtStarMastery.color = new Color(0.82f, 0.90f, 0.96f, 1f);
+                break;
         }
     }
 
@@ -780,7 +1273,7 @@ public class LevelAndUIManager : MonoBehaviour
             }
         };
 
-        levelCompletedFlags = new bool[levels.Count];
+        EnsureLevelProgressArraysInitialized();
     }
 
     /// <summary>
@@ -828,6 +1321,7 @@ public class LevelAndUIManager : MonoBehaviour
         isVerifying = false;
         isSandboxMode = false;
         awaitingPostVictoryChoice = false;
+        attemptsOnCurrentLevel = 0;
 
         if (inputANode != null)
         {
@@ -845,7 +1339,7 @@ public class LevelAndUIManager : MonoBehaviour
         }
         else
         {
-            EnsureLevelCompletedFlagsInitialized();
+            EnsureLevelProgressArraysInitialized();
         }
 
         currentLevelIndex = Mathf.Clamp(index, 0, levels.Count - 1);
@@ -904,6 +1398,8 @@ public class LevelAndUIManager : MonoBehaviour
         ResetTruthTableScanResults();
         UpdateQuotaStatusUI();
         UpdateInputToggleButtonsUI();
+        UpdateStarMasteryUI();
+        SyncAudioStateBaselines(true);
     }
 
     /// <summary>
@@ -915,6 +1411,7 @@ public class LevelAndUIManager : MonoBehaviour
         isVerifying = false;
         isSandboxMode = true;
         awaitingPostVictoryChoice = false;
+        attemptsOnCurrentLevel = 0;
 
         if (inputANode != null)
         {
@@ -974,6 +1471,8 @@ public class LevelAndUIManager : MonoBehaviour
         ResetTruthTableScanResults();
         UpdateQuotaStatusUI();
         UpdateInputToggleButtonsUI();
+        UpdateStarMasteryUI();
+        SyncAudioStateBaselines(true);
     }
 
     /// <summary>
@@ -992,7 +1491,7 @@ public class LevelAndUIManager : MonoBehaviour
             return;
         }
 
-        EnsureLevelCompletedFlagsInitialized();
+        EnsureLevelProgressArraysInitialized();
 
         bool isLastLevelCleared = (currentLevelIndex == levels.Count - 1) && levelCompletedFlags[currentLevelIndex];
         if (awaitingPostVictoryChoice || AreAllLevelsCompleted() || isLastLevelCleared)
@@ -1022,8 +1521,10 @@ public class LevelAndUIManager : MonoBehaviour
 
     private void RestartFromFirstLevel()
     {
-        EnsureLevelCompletedFlagsInitialized();
+        EnsureLevelProgressArraysInitialized();
         Array.Clear(levelCompletedFlags, 0, levelCompletedFlags.Length);
+        Array.Clear(levelBestStars, 0, levelBestStars.Length);
+        attemptsOnCurrentLevel = 0;
 
         if (inputANode != null)
         {
@@ -1067,6 +1568,12 @@ public class LevelAndUIManager : MonoBehaviour
             InitializeDefaultLevels();
         }
 
+        if (!isSandboxMode)
+        {
+            attemptsOnCurrentLevel++;
+            UpdateStarMasteryUI();
+        }
+
         LevelScenario currentLevel = levels[Mathf.Clamp(currentLevelIndex, 0, levels.Count - 1)];
 
         if (circuitManager != null)
@@ -1083,6 +1590,8 @@ public class LevelAndUIManager : MonoBehaviour
                 txtFeedback.color = Color.red;
             }
 
+            PlaySfx(clipRowFail);
+            SyncAudioStateBaselines(false);
             isVerifying = false;
             yield break;
         }
@@ -1099,6 +1608,8 @@ public class LevelAndUIManager : MonoBehaviour
                     txtFeedback.color = new Color(1f, 0.5f, 0f);
                 }
 
+                PlaySfx(clipRowFail);
+                SyncAudioStateBaselines(false);
                 isVerifying = false;
                 yield break;
             }
@@ -1113,6 +1624,8 @@ public class LevelAndUIManager : MonoBehaviour
                     txtFeedback.color = new Color(1f, 0.5f, 0f);
                 }
 
+                PlaySfx(clipRowFail);
+                SyncAudioStateBaselines(false);
                 isVerifying = false;
                 yield break;
             }
@@ -1133,6 +1646,8 @@ public class LevelAndUIManager : MonoBehaviour
                                 txtFeedback.color = new Color(1f, 0.5f, 0f);
                             }
 
+                            PlaySfx(clipRowFail);
+                            SyncAudioStateBaselines(false);
                             isVerifying = false;
                             yield break;
                         }
@@ -1149,6 +1664,8 @@ public class LevelAndUIManager : MonoBehaviour
                 txtFeedback.color = new Color(1f, 0.5f, 0f);
             }
 
+            PlaySfx(clipRowFail);
+            SyncAudioStateBaselines(false);
             isVerifying = false;
             yield break;
         }
@@ -1177,6 +1694,7 @@ public class LevelAndUIManager : MonoBehaviour
             bool testB = (i == 1 || i == 3);
 
             SetTruthTableRowScanning(i);
+            PlaySfx(clipScanRows[i]);
 
             if (inputANode != null)
             {
@@ -1220,7 +1738,9 @@ public class LevelAndUIManager : MonoBehaviour
             if (!isSandboxMode && !rowPassed)
             {
                 scanningRowIndex = -1;
+                PlaySfx(clipRowFail);
                 RestoreInitialInputStates(originalInputA, originalInputB);
+                SyncAudioStateBaselines(false);
 
                 if (txtFeedback != null)
                 {
@@ -1231,11 +1751,14 @@ public class LevelAndUIManager : MonoBehaviour
                 isVerifying = false;
                 yield break;
             }
+
+            PlaySfx(clipRowPass);
         }
 
         // Tahap D: Hasil Akhir Pemindaian / Verifikasi
         scanningRowIndex = -1;
         RestoreInitialInputStates(originalInputA, originalInputB);
+        SyncAudioStateBaselines(false);
 
         if (isSandboxMode)
         {
@@ -1253,11 +1776,19 @@ public class LevelAndUIManager : MonoBehaviour
             yield break;
         }
 
-        EnsureLevelCompletedFlagsInitialized();
+        EnsureLevelProgressArraysInitialized();
         if (currentLevelIndex >= 0 && currentLevelIndex < levelCompletedFlags.Length)
         {
             levelCompletedFlags[currentLevelIndex] = true;
         }
+
+        bool withinQuota = circuitManager == null || circuitManager.activeGateCardsCount <= currentLevel.maxGateCardsQuota;
+        int earnedStars = CalculateEarnedStars(attemptsOnCurrentLevel, withinQuota);
+        if (currentLevelIndex >= 0 && currentLevelIndex < levelBestStars.Length && earnedStars > levelBestStars[currentLevelIndex])
+        {
+            levelBestStars[currentLevelIndex] = earnedStars;
+        }
+        UpdateStarMasteryUI();
 
         bool isLastLevel = (levels != null && levels.Count > 0 && currentLevelIndex == levels.Count - 1);
         bool isGameCleared = AreAllLevelsCompleted() || isLastLevel;
@@ -1270,7 +1801,7 @@ public class LevelAndUIManager : MonoBehaviour
 
             if (txtFeedback != null)
             {
-                txtFeedback.text = $"SELAMAT! Seluruh {levels.Count} Misi GateWeaver AR Berhasil Diselesaikan!";
+                txtFeedback.text = $"SELAMAT! Seluruh {levels.Count} Misi Selesai! Rating: {FormatStarsAscii(earnedStars)} (Total: {GetTotalStars()}/{GetMaxTotalStars()})";
                 txtFeedback.color = Color.green;
             }
 
@@ -1300,7 +1831,7 @@ public class LevelAndUIManager : MonoBehaviour
 
             if (txtFeedback != null)
             {
-                txtFeedback.text = "BERHASIL! Rangkaian lolos seluruh 4 baris Tabel Kebenaran.";
+                txtFeedback.text = $"BERHASIL! Lolos 4 baris & raih {FormatStarsAscii(earnedStars)} (Uji ke-{attemptsOnCurrentLevel}).";
                 txtFeedback.color = Color.green;
             }
 
@@ -1314,6 +1845,10 @@ public class LevelAndUIManager : MonoBehaviour
                 nextLevelButtonObj.SetActive(true);
             }
         }
+
+        yield return new WaitForSeconds(0.10f);
+        PlaySfx(clipVictoryFanfare);
+        TriggerHapticPulse();
 
         isVerifying = false;
     }

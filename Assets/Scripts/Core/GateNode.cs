@@ -187,6 +187,7 @@ public class GateNode : MonoBehaviour
     private Material dioramaBodyMaterial;
     private Material dioramaAccentMaterial;
     private Material dioramaEmissiveMaterial;
+    private Material customIndicatorMaterial;
 
     private Coroutine debounceCoroutine;
     private bool lastDetectedRotationBit = false;
@@ -196,6 +197,7 @@ public class GateNode : MonoBehaviour
     private float totemSpinPhase = 0f;
     private float totemBobPhase = 0f;
 
+    private static int activeGateNodeCount = 0;
     private static Mesh sharedTorusMesh;
     private static Mesh sharedDiamondSpireMesh;
 
@@ -222,6 +224,8 @@ public class GateNode : MonoBehaviour
 
     private void Awake()
     {
+        activeGateNodeCount++;
+
         InitializeLineRenderer();
         Initialize3DVisualFeedback();
         InitializeArcAndTerminalVisuals();
@@ -264,6 +268,12 @@ public class GateNode : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (debounceCoroutine != null)
+        {
+            StopCoroutine(debounceCoroutine);
+            debounceCoroutine = null;
+        }
+
         DestroyProceduralMaterial(ref lineMaterial);
         DestroyProceduralMaterial(ref dataPacketMaterial);
         DestroyProceduralMaterial(ref socketMaterial);
@@ -272,6 +282,14 @@ public class GateNode : MonoBehaviour
         DestroyProceduralMaterial(ref dioramaBodyMaterial);
         DestroyProceduralMaterial(ref dioramaAccentMaterial);
         DestroyProceduralMaterial(ref dioramaEmissiveMaterial);
+        DestroyProceduralMaterial(ref customIndicatorMaterial);
+
+        activeGateNodeCount = Mathf.Max(0, activeGateNodeCount - 1);
+        if (activeGateNodeCount == 0)
+        {
+            DestroyProceduralMesh(ref sharedTorusMesh);
+            DestroyProceduralMesh(ref sharedDiamondSpireMesh);
+        }
     }
 
     /// <summary>
@@ -338,6 +356,15 @@ public class GateNode : MonoBehaviour
         {
             Destroy(mat);
             mat = null;
+        }
+    }
+
+    private static void DestroyProceduralMesh(ref Mesh mesh)
+    {
+        if (mesh != null)
+        {
+            Destroy(mesh);
+            mesh = null;
         }
     }
 
@@ -1884,9 +1911,17 @@ public class GateNode : MonoBehaviour
         }
 
         // 3. Perbarui indikator tambahan opsional di Inspector (jika terpasang manual)
-        if (statusIndicatorRenderer != null && statusIndicatorRenderer.material != null)
+        if (statusIndicatorRenderer != null)
         {
-            statusIndicatorRenderer.material.color = activeLaserColor;
+            if (customIndicatorMaterial == null)
+            {
+                customIndicatorMaterial = statusIndicatorRenderer.material;
+            }
+
+            if (customIndicatorMaterial != null)
+            {
+                customIndicatorMaterial.color = activeLaserColor;
+            }
         }
 
         // 4. Perbarui visibilitas, teks, warna, dan orientasi 3D TextMeshPro di atas kartu

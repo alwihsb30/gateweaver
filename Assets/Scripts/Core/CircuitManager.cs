@@ -398,6 +398,46 @@ public class CircuitManager : MonoBehaviour
         return $"Y = {bodyExpression}";
     }
 
+    /// <summary>
+    /// Menghitung jumlah koneksi aktif antar-kartu yang saat ini terdeteksi dan saling ter-track.
+    /// Digunakan oleh LevelAndUIManager untuk mendeteksi event snap koneksi baru bagi efek audio.
+    /// </summary>
+    public int GetActiveConnectionCount()
+    {
+        if (allNodes == null || allNodes.Count == 0)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        for (int i = 0; i < allNodes.Count; i++)
+        {
+            GateNode node = allNodes[i];
+            if (node != null
+                && node.isTracked
+                && node.connectedTarget != null
+                && node.connectedTarget.isTracked)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Memastikan rangkaian membentuk ekspresi aljabar Boolean utuh hingga Card_Output
+    /// tanpa cabang kosong ('?'), tanpa siklus, dan bukan kondisi belum terhubung.
+    /// </summary>
+    public bool IsCircuitCompleteToOutput(GateNode targetOutputNode = null)
+    {
+        string expression = GetCircuitBooleanExpression(targetOutputNode);
+        return !string.IsNullOrEmpty(expression)
+            && expression != "Y = (Belum Terhubung)"
+            && !expression.Contains("?")
+            && !expression.Contains("(Siklus)");
+    }
+
     private string BuildBooleanExpressionRecursive(GateNode node)
     {
         if (node == null || !node.isTracked)
