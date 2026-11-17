@@ -83,10 +83,10 @@ public class LevelAndUIManager : MonoBehaviour
     public TMP_Text txtBtnToggleB;
 
     [Header("3. Daftar Skenario Level & Status Aktif")]
-    [Tooltip("Daftar 5 skenario level berjenjang Kurikulum Merdeka (otomatis terisi di Awake jika kosong)")]
+    [Tooltip("Daftar 7 skenario level berjenjang Kurikulum Merdeka (otomatis terisi di Awake jika kosong)")]
     public List<LevelScenario> levels = new List<LevelScenario>();
 
-    [Tooltip("Indeks level yang sedang aktif (0..4 = Level 1..5)")]
+    [Tooltip("Indeks level yang sedang aktif (0..6 = Level 1..7)")]
     public int currentLevelIndex = 0;
 
     [Header("4. Panel Matrix & Rumus Boolean Real-Time (Hari 15)")]
@@ -167,7 +167,7 @@ public class LevelAndUIManager : MonoBehaviour
     {
         ConfigureMobileRuntimeOptimization();
 
-        // Isi otomatis 5 skenario default jika daftar levels di Inspector masih kosong
+        // Isi otomatis 7 skenario default jika daftar levels di Inspector masih kosong
         if (levels == null || levels.Count == 0)
         {
             InitializeDefaultLevels();
@@ -439,7 +439,7 @@ public class LevelAndUIManager : MonoBehaviour
         // Baris footer rating bintang efisiensi & jumlah uji
         RectTransform starRowRect = CreateMatrixRowContainer("Row_StarMastery", panelRect, -342f, 32f, MatrixHeaderBgColor);
         txtStarMastery = CreateMatrixText("Txt_StarMastery", starRowRect, new Vector2(10f, -2f), new Vector2(412f, 28f),
-            "Bintang Level: [...] | Total: 0/15 | Uji ke-0", 13f, TextAlignmentOptions.Left, Color.white, safeFont);
+            "Bintang Level: [...] | Total: 0/21 | Uji ke-0", 13f, TextAlignmentOptions.Left, Color.white, safeFont);
         txtStarMastery.enableAutoSizing = true;
         txtStarMastery.fontSizeMin = 10f;
         txtStarMastery.fontSizeMax = 13.5f;
@@ -636,6 +636,14 @@ public class LevelAndUIManager : MonoBehaviour
                 if (tier == 1) return "Output bernilai 1 ketika A dan B SAMA (00 atau 11), kebalikan tepat dari XOR.";
                 if (tier == 2) return "Kombinasikan 2 kartu gerbang: XOR diikuti gerbang pembalik NOT.";
                 return "Sambungkan Input A dan B ke XOR -> sambungkan keluaran XOR ke NOT -> Output.";
+            case 5:
+                if (tier == 1) return "Gerbang NOR adalah kebalikan dari OR: Output bernilai 1 HANYA ketika kedua sensor A=0 dan B=0 (00).";
+                if (tier == 2) return "Siapkan 2 kartu gerbang: kartu OR dan kartu pembalik NOT.";
+                return "Hubungkan Input A dan Input B ke gerbang OR, lalu arahkan keluaran OR ke NOT menuju Output: Y = NOT(A OR B).";
+            case 6:
+                if (tier == 1) return "Menurut Hukum De Morgan, rumus A OR (NOT B) ekuivalen dengan (NOT A) NAND B. Output hanya 0 pada baris A=0, B=1.";
+                if (tier == 2) return "Gunakan kartu NOT bersama kartu OR, ATAU gunakan kartu NOT bersama kartu NAND (kuota 2 gerbang).";
+                return "Jalur 1: Input B -> NOT, lalu gabungkan dengan Input A di OR. Jalur 2 (De Morgan): Input A -> NOT, lalu gabungkan dengan Input B di NAND.";
             default:
                 if (tier == 1) return "Amati kolom Target pada tabel kebenaran untuk baris 00, 01, 10, dan 11.";
                 if (tier == 2) return "Pilih kartu gerbang logika yang sesuai dengan batasan kuota di HUD atas.";
@@ -1363,6 +1371,8 @@ public class LevelAndUIManager : MonoBehaviour
         bool targetIsAndNotB = hasFourRows && !expectedTable[0] && !expectedTable[1] && expectedTable[2] && !expectedTable[3];
         bool targetIsNand = hasFourRows && expectedTable[0] && expectedTable[1] && expectedTable[2] && !expectedTable[3];
         bool targetIsXnor = hasFourRows && expectedTable[0] && !expectedTable[1] && !expectedTable[2] && expectedTable[3];
+        bool targetIsNor = hasFourRows && expectedTable[0] && !expectedTable[1] && !expectedTable[2] && !expectedTable[3];
+        bool targetIsDeMorgan = hasFourRows && expectedTable[0] && !expectedTable[1] && expectedTable[2] && expectedTable[3];
 
         bool hasNot = actualFormula.Contains("NOT");
         bool hasNand = actualFormula.Contains("NAND");
@@ -1416,6 +1426,51 @@ public class LevelAndUIManager : MonoBehaviour
         if (targetIsXnor && hasXor && !hasNot)
         {
             return "Gerbang XOR bernilai 0 saat 00/11 (kebalikan tepat XNOR). Tambahkan kartu pembalik NOT di sisi kanan XOR.";
+        }
+
+        if (targetIsNor)
+        {
+            if (hasOr && !hasNot)
+            {
+                return "Gerbang OR menghasilkan kebalikan tepat target NOR. Tambahkan kartu pembalik NOT di keluaran gerbang OR: Y = NOT(A OR B).";
+            }
+
+            if (hasNand)
+            {
+                return $"Gerbang NAND pada {actualFormula} baru mati (0) saat A=1 dan B=1, sedangkan NOR hanya menyala (1) saat A=0 dan B=0. Gunakan OR diikuti NOT.";
+            }
+
+            return $"Rangkaian {actualFormula} belum membentuk NOR (hanya 1 saat A=0, B=0). Hubungkan Input A dan B ke OR lalu balik keluarannya dengan NOT.";
+        }
+
+        if (targetIsDeMorgan)
+        {
+            if (hasOr && actualFormula.Contains("(NOT A)"))
+            {
+                return "Posisi NOT terbalik! (NOT A) OR B menghasilkan 1 pada [A=0, B=1] dan 0 pada [A=1, B=0]. Pindahkan NOT ke jalur Input B.";
+            }
+
+            if (hasNand && actualFormula.Contains("(NOT B)"))
+            {
+                return "Pada ekuivalensi De Morgan dengan NAND, pembalik NOT harus dipasang di Input A ((NOT A) NAND B), bukan di Input B.";
+            }
+
+            if (hasOr && !hasNot)
+            {
+                return "Gerbang OR tanpa pembalik menghasilkan 0 pada [A=0, B=0]. Tambahkan kartu NOT di jalur Input B agar menjadi A OR (NOT B).";
+            }
+
+            if (hasNand && !hasNot)
+            {
+                return "Gerbang NAND saja belum mematikan baris [A=0, B=1]. Pasang kartu NOT di jalur Input A agar menjadi (NOT A) NAND B.";
+            }
+
+            if (hasOr && hasNot)
+            {
+                return "Posisi NOT membalik keseluruhan OR (menjadi NOR), padahal hanya Input B yang harus dibalik sebelum masuk ke OR.";
+            }
+
+            return $"Susunan {actualFormula} belum memenuhi target De Morgan (hanya 0 saat A=0, B=1). Gunakan A OR (NOT B) atau (NOT A) NAND B.";
         }
 
         if (!hasNot && !hasNand && !testA && !testB && !actualOutput && expectedOutput)
@@ -1548,7 +1603,7 @@ public class LevelAndUIManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Mengisi 5 skenario level berjenjang sesuai spesifikasi Kurikulum Merdeka Fase E.
+    /// Mengisi 7 skenario level berjenjang sesuai spesifikasi Kurikulum Merdeka Fase E.
     /// </summary>
     private void InitializeDefaultLevels()
     {
@@ -1612,10 +1667,47 @@ public class LevelAndUIManager : MonoBehaviour
                 hintTier1Concept = "Output bernilai 1 jika A dan B SAMA (00 atau 11), yaitu kebalikan tepat dari XOR.",
                 hintTier2Component = "Kombinasikan 2 kartu gerbang: XOR diikuti gerbang pembalik NOT di sisi kanannya.",
                 hintTier3Structure = "Sambungkan Input A dan B ke XOR -> sambungkan keluaran XOR ke NOT -> Output."
+            },
+
+            // Level 6: Gerbang NOR Kombinasional (OR -> NOT, Maks 2 Kartu) -> !(A || B): 00=1, 01=0, 10=0, 11=0
+            new LevelScenario
+            {
+                levelTitle = "Level 6: Sensor Hening Ruang Server (NOR)",
+                missionDescription = "Susun rangkaian NOR agar Output = 1 HANYA saat A = 0 dan B = 0",
+                maxGateCardsQuota = 2,
+                expectedTruthTable = new bool[] { true, false, false, false },
+                hintTier1Concept = "Gerbang NOR adalah kebalikan dari OR: Output bernilai 1 HANYA ketika kedua sensor A=0 dan B=0 (00).",
+                hintTier2Component = "Siapkan 2 kartu gerbang: kartu OR dan kartu pembalik NOT.",
+                hintTier3Structure = "Hubungkan Input A dan Input B ke gerbang OR, lalu arahkan keluaran OR ke NOT menuju Output: Y = NOT(A OR B)."
+            },
+
+            // Level 7 Boss Akhir: Hukum De Morgan (A OR NOT B == NOT A NAND B, Maks 2 Kartu) -> 00=1, 01=0, 10=1, 11=1
+            new LevelScenario
+            {
+                levelTitle = "Level 7: Kunci Biometrik De Morgan",
+                missionDescription = "Hukum De Morgan: Buat Output = 0 HANYA saat A = 0 dan B = 1",
+                maxGateCardsQuota = 2,
+                expectedTruthTable = new bool[] { true, false, true, true },
+                hintTier1Concept = "Menurut Hukum De Morgan, rumus A OR (NOT B) ekuivalen dengan (NOT A) NAND B. Output hanya 0 pada baris A=0, B=1.",
+                hintTier2Component = "Gunakan kartu NOT bersama kartu OR, ATAU gunakan kartu NOT bersama kartu NAND (kuota 2 gerbang).",
+                hintTier3Structure = "Jalur 1: Input B -> NOT, lalu gabungkan dengan Input A di OR. Jalur 2 (De Morgan): Input A -> NOT, lalu gabungkan dengan Input B di NAND."
             }
         };
 
         EnsureLevelProgressArraysInitialized();
+    }
+
+    private static int ResolveDioramaVariantForLevel(int levelIndex)
+    {
+        switch (levelIndex)
+        {
+            case 5:
+                return 0; // Level 6 (Sensor Hening NOR) menggunakan menara sirine/sensor darurat (Diorama 0)
+            case 6:
+                return 2; // Level 7 (Kunci Biometrik De Morgan) menggunakan brankas mekanis berpelindung (Diorama 2)
+            default:
+                return levelIndex;
+        }
     }
 
     /// <summary>
@@ -1695,7 +1787,7 @@ public class LevelAndUIManager : MonoBehaviour
 
         if (outputNode != null)
         {
-            outputNode.SetOutputDioramaVariant(currentLevelIndex);
+            outputNode.SetOutputDioramaVariant(ResolveDioramaVariantForLevel(currentLevelIndex));
         }
 
         AutoBindActionButtonsIfNeeded();
@@ -1851,7 +1943,7 @@ public class LevelAndUIManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Mengulang misi aktif dari awal. Jika dipanggil setelah kemenangan Level 5 atau di Mode Sandbox,
+    /// Mengulang misi aktif dari awal. Jika dipanggil setelah kemenangan Level 7 atau di Mode Sandbox,
     /// mengembalikan permainan ke Level 1 serta mereset progres dan nilai input.
     /// </summary>
     public void ResetCurrentLevel()
@@ -1904,7 +1996,7 @@ public class LevelAndUIManager : MonoBehaviour
 
     /// <summary>
     /// Coroutine penguji otomatis 4 baris Tabel Kebenaran (AB: 00, 01, 10, 11)
-    /// untuk Level 1..5 maupun pemindaian bebas di Mode Sandbox, terhubung langsung dengan Scanner Matrix UI.
+    /// untuk Level 1..7 maupun pemindaian bebas di Mode Sandbox, terhubung langsung dengan Scanner Matrix UI.
     /// </summary>
     private IEnumerator VerifyTruthTableRoutine()
     {
