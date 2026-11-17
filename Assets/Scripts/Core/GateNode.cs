@@ -19,80 +19,223 @@ public class GateNode : MonoBehaviour
 {
     private const int ArcSegmentCount = 20;
     private const int DataPacketCount = 3;
+    private const int OutputDioramaVariantCount = 5;
 
     [Header("1. Identitas & Konfigurasi Kartu")]
+    [Tooltip("Jenis kartu gerbang logika sesuai marker fisik Vuforia")]
     public NodeType nodeType = NodeType.InputSource;
+
+    [Tooltip("Nilai biner awal khusus untuk kartu bertipe InputSource (False = 0, True = 1)")]
     public bool initialInputState = false;
 
     [Header("2. Status Runtime & Koneksi Spasial")]
+    [Tooltip("Status apakah kartu sedang terdeteksi oleh kamera AR Vuforia")]
     public bool isTracked = false;
+
+    [Tooltip("Hasil evaluasi logika biner saat ini (False = 0 / Merah, True = 1 / Hijau)")]
     public bool currentOutputValue = false;
+
+    [Tooltip("Daftar kartu di sebelah kiri yang mengirimkan sinyal input ke kartu ini")]
     public List<GateNode> connectedInputs = new List<GateNode>();
+
+    [Tooltip("Kartu tujuan di sebelah kanan yang menerima pancaran laser dari kartu ini")]
     public GateNode connectedTarget = null;
 
     [Header("3. Pengaturan Visual Laser (LineRenderer)")]
+    [Tooltip("Ketebalan dasar busur energi penghubung antar-kartu (skala marker 0.8 = 8 cm)")]
     public float laserWidth = 0.015f;
+
+    [Tooltip("Warna busur energi saat sinyal bernilai 1 (True / HIGH)")]
     public Color highSignalColor = Color.green;
+
+    [Tooltip("Warna busur energi saat sinyal bernilai 0 (False / LOW)")]
     public Color lowSignalColor = Color.red;
 
-    [Header("4. Interaksi Rotasi Fisik & Anti-Flicker")]
+    [Header("4. Interaksi Rotasi Fisik & Anti-Flicker (GEMINI.md)")]
+    [Tooltip("Aktifkan deteksi putaran kartu fisik ~90 derajat untuk mengubah InputSource 0/1")]
     public bool enablePhysicalRotationInput = true;
+
+    [Tooltip("Batas sudut putaran kartu (derajat) untuk dianggap bernilai logika 1 (True)")]
     public float rotationAngleThreshold = 45f;
+
+    [Tooltip("Waktu tunda (detik) sebelum memutus status isTracked saat kartu sempat tertutup tangan")]
     public float trackingLossDebounceTime = 0.4f;
 
     [Header("5. Umpan Balik Visual 3D/AR di Atas Kartu")]
+    [Tooltip("MeshRenderer objek 3D indikator pada kartu (otomatis dibuat untuk OutputActuator jika kosong)")]
     public Renderer statusIndicatorRenderer;
+
+    [Tooltip("Label TextMeshPro 3D world-space di atas kartu (otomatis dibuat saat Awake jika kosong)")]
     public TMP_Text statusLabel;
+
+    [Tooltip("Tinggi posisi lokal 3D TextMeshPro di atas permukaan kartu (sumbu Y lokal)")]
     public float labelHeightOffset = 0.045f;
+
+    [Tooltip("Ukuran font 3D TextMeshPro di atas kartu agar terbaca jelas tanpa menutupi marker")]
     public float labelFontSize = 0.55f;
 
-    [Header("6. Visual 3D Bezier Arc, Paket Data & Soket Terminal")]
+    [Tooltip("Ukuran skala bola lampu indikator 3D OutputActuator saat bernilai 0 (MATI)")]
+    public float actuatorIdleScale = 0.045f;
+
+    [Tooltip("Ukuran skala bola lampu indikator 3D OutputActuator saat bernilai 1 (AKTIF)")]
+    public float actuatorActiveScale = 0.065f;
+
+    [Header("6. Visual 3D Bezier Arc, Paket Data & Soket Terminal (Hari 11)")]
+    [Tooltip("Ketinggian titik pangkal P0 dan titik ujung P2 sedikit di atas permukaan kartu")]
     public float socketSurfaceOffset = 0.02f;
+
+    [Tooltip("Faktor tinggi titik kontrol P1 terhadap jarak antar-kartu")]
     public float arcHeightDistanceFactor = 0.45f;
+
+    [Tooltip("Tinggi minimal titik kontrol P1 kurva Quadratic Bezier")]
     public float minArcHeight = 0.30f;
+
+    [Tooltip("Tinggi maksimal titik kontrol P1 kurva Quadratic Bezier agar tetap rapi di kamera HP")]
     public float maxArcHeight = 1.15f;
+
+    [Tooltip("Diameter bola paket data saat sinyal bernilai 1 (HIGH)")]
     public float packetHighScale = 0.055f;
+
+    [Tooltip("Diameter bola paket data saat sinyal bernilai 0 (LOW / siaga)")]
     public float packetLowScale = 0.034f;
+
+    [Tooltip("Kecepatan aliran paket data (siklus/detik) saat sinyal bernilai 1 (HIGH)")]
     public float packetHighSpeed = 1.35f;
+
+    [Tooltip("Kecepatan aliran paket data (siklus/detik) saat sinyal bernilai 0 (LOW / siaga)")]
     public float packetLowSpeed = 0.35f;
+
+    [Tooltip("Diameter cakram soket terminal 3D pada pangkal P0 dan ujung P2")]
     public float socketRingDiameter = 0.105f;
+
+    [Tooltip("Ketebalan vertikal cakram soket terminal 3D (Cylinder pipih)")]
     public float socketRingThickness = 0.006f;
+
+    [Header("7. Visual Totem Reaktor Hologram 3D (Hari 12)")]
+    [Tooltip("Ketinggian minimum Label_Status3D agar melayang rapi di atas totem 3D tanpa bertabrakan")]
+    public float totemLabelMinHeight = 0.24f;
+
+    [Tooltip("Kecepatan putar totem (derajat/detik) saat sinyal bernilai 1 (HIGH)")]
+    public float totemHighSpinSpeed = 145f;
+
+    [Tooltip("Kecepatan putar totem (derajat/detik) saat sinyal bernilai 0 (LOW / siaga)")]
+    public float totemLowSpinSpeed = 28f;
+
+    [Tooltip("Amplitudo gerak melayang vertikal (bobbing) totem saat sinyal bernilai 1 (HIGH)")]
+    public float totemHighBobAmplitude = 0.011f;
+
+    [Header("8. Visual Diorama Aktuator 3D Kontekstual (Hari 13)")]
+    [Tooltip("Ketinggian minimum Label_Status3D pada kartu OutputActuator agar melayang bersih di atas diorama 3D")]
+    public float outputLabelMinHeight = 0.26f;
+
+    [Tooltip("Kecepatan putar rotor sirine darurat (derajat/detik) pada Level 1 saat OUTPUT = 1")]
+    public float sirenRotorSpeed = 360f;
+
+    [Tooltip("Sudut buka daun pintu brankas (derajat) pada Level 3 saat OUTPUT = 1")]
+    public float vaultOpenAngle = 75f;
 
     [HideInInspector]
     public LineRenderer lineRenderer;
+
+    private GameObject outputDioramaRootObj;
+    private GameObject[] outputDioramaVariantObjs;
+    private int activeDioramaVariantIndex = 0;
+
+    private Transform sirenRotorPivot;
+    private Transform sirenPulseRingTransform;
+    private Vector3 sirenPulseRingBaseScale;
+
+    private Transform stairHaloLowerTransform;
+    private Transform stairHaloUpperTransform;
+
+    private Transform vaultDoorPivotTransform;
+    private Transform vaultWheelTransform;
+    private Transform vaultDiamondTransform;
+    private Vector3 vaultDiamondBaseScale;
+    private float currentVaultDoorAngle = 0f;
+
+    private Transform reactorRingPivotA;
+    private Transform reactorRingPivotB;
+    private Transform reactorCoreTransform;
+    private Vector3 reactorCoreBaseScale;
+
+    private Transform twinCrystalLeftTransform;
+    private Transform twinCrystalRightTransform;
+    private Transform twinBridgeHaloTransform;
+    private Vector3 twinCrystalBaseScale;
+    private Vector3 twinBridgeBaseScale;
+    private float twinSyncSpinPhase = 0f;
 
     private GameObject[] dataPacketObjs;
     private GameObject sourceSocketObj;
     private GameObject targetSocketObj;
 
+    private GameObject totemRootObj;
+    private Transform totemFloatGroup;
+    private Transform totemPrimarySpinTransform;
+    private Transform totemSecondarySpinTransform;
+    private Transform totemHarmonicMoveTransform;
+    private Vector3 totemFloatBasePos;
+    private Vector3 totemHarmonicBasePos;
+    private Vector3 totemHarmonicBaseScale;
+
     private Material lineMaterial;
     private Material dataPacketMaterial;
     private Material socketMaterial;
+    private Material totemCoreMaterial;
+    private Material totemAccentMaterial;
+    private Material dioramaBodyMaterial;
+    private Material dioramaAccentMaterial;
+    private Material dioramaEmissiveMaterial;
 
     private Coroutine debounceCoroutine;
     private bool lastDetectedRotationBit = false;
     private bool rotationInitialized = false;
     private bool isSimulationOverride = false;
     private float packetFlowPhase = 0f;
+    private float totemSpinPhase = 0f;
+    private float totemBobPhase = 0f;
+
+    private static Mesh sharedTorusMesh;
+    private static Mesh sharedDiamondSpireMesh;
 
     private static readonly float[] PacketPhaseOffsets = { 0f, 0.33f, 0.66f };
+
     private static readonly Color BrightGreenTextColor = new Color(0.2f, 1f, 0.3f, 1f);
     private static readonly Color BrightRedOrangeTextColor = new Color(1f, 0.35f, 0.15f, 1f);
     private static readonly Color HighPacketColor = new Color(0.15f, 1f, 0.85f, 1f);
     private static readonly Color LowPacketColor = new Color(0.75f, 0.24f, 0.08f, 1f);
     private static readonly Color HighSocketColor = new Color(0.15f, 1f, 0.65f, 1f);
     private static readonly Color LowSocketColor = new Color(0.65f, 0.18f, 0.1f, 1f);
+    private static readonly Color HighTotemCoreColor = new Color(0.10f, 1.00f, 0.82f, 1f);
+    private static readonly Color HighTotemAccentColor = new Color(1.00f, 0.85f, 0.22f, 1f);
+    private static readonly Color LowTotemCoreColor = new Color(0.74f, 0.22f, 0.10f, 1f);
+    private static readonly Color LowTotemAccentColor = new Color(0.24f, 0.38f, 0.54f, 1f);
+    private static readonly Color HighDioramaBodyColor = new Color(0.32f, 0.56f, 0.72f, 1f);
+    private static readonly Color HighDioramaAccentColor = new Color(1.00f, 0.82f, 0.20f, 1f);
+    private static readonly Color HighDioramaEmissiveColor = new Color(0.15f, 1.00f, 0.78f, 1f);
+    private static readonly Color HighStairLanternYellowColor = new Color(1.00f, 0.94f, 0.26f, 1f);
+    private static readonly Color HighStairHaloCyanColor = new Color(0.22f, 0.96f, 1.00f, 1f);
+    private static readonly Color LowDioramaBodyColor = new Color(0.22f, 0.27f, 0.35f, 1f);
+    private static readonly Color LowDioramaAccentColor = new Color(0.25f, 0.35f, 0.48f, 1f);
+    private static readonly Color LowDioramaEmissiveColor = new Color(0.62f, 0.16f, 0.10f, 1f);
 
     private void Awake()
     {
         InitializeLineRenderer();
         Initialize3DVisualFeedback();
         InitializeArcAndTerminalVisuals();
+        InitializeTotemVisual();
+        InitializeOutputDioramaVisual();
     }
 
     private void Start()
     {
-        if (nodeType == NodeType.InputSource) currentOutputValue = initialInputState;
+        if (nodeType == NodeType.InputSource)
+        {
+            currentOutputValue = initialInputState;
+        }
+
         EvaluateGateLogic();
         UpdateVisuals();
     }
@@ -104,21 +247,44 @@ public class GateNode : MonoBehaviour
             CheckPhysicalRotationInput();
         }
 
-        if (isTracked) UpdateLabelBillboard();
+        if (isTracked)
+        {
+            UpdateLabelBillboard();
+            AnimateTotemVisual();
+            AnimateOutputDioramaVisual();
+        }
+        else
+        {
+            SetTotemActive(false);
+            SetOutputDioramaActive(false);
+        }
+
         RefreshConnectionVisuals(advanceFlowPhase: true);
     }
 
     private void OnDestroy()
     {
-        if (lineMaterial != null) Destroy(lineMaterial);
-        if (dataPacketMaterial != null) Destroy(dataPacketMaterial);
-        if (socketMaterial != null) Destroy(socketMaterial);
+        DestroyProceduralMaterial(ref lineMaterial);
+        DestroyProceduralMaterial(ref dataPacketMaterial);
+        DestroyProceduralMaterial(ref socketMaterial);
+        DestroyProceduralMaterial(ref totemCoreMaterial);
+        DestroyProceduralMaterial(ref totemAccentMaterial);
+        DestroyProceduralMaterial(ref dioramaBodyMaterial);
+        DestroyProceduralMaterial(ref dioramaAccentMaterial);
+        DestroyProceduralMaterial(ref dioramaEmissiveMaterial);
     }
 
+    /// <summary>
+    /// Menginisialisasi komponen LineRenderer untuk busur Quadratic Bezier 20 segmen
+    /// dengan material Sprites/Default agar kompatibel penuh dengan Android OpenGLES3.
+    /// </summary>
     private void InitializeLineRenderer()
     {
         lineRenderer = GetComponent<LineRenderer>();
-        if (lineRenderer == null) lineRenderer = gameObject.AddComponent<LineRenderer>();
+        if (lineRenderer == null)
+        {
+            lineRenderer = gameObject.AddComponent<LineRenderer>();
+        }
 
         lineMaterial = CreateSafeOpenGLMaterial();
         if (lineMaterial != null)
@@ -140,34 +306,1067 @@ public class GateNode : MonoBehaviour
         lineRenderer.enabled = false;
     }
 
+    /// <summary>
+    /// Membuat material unlit dengan shader Sprites/Default (atau klon material aman)
+    /// agar tidak pernah ter-strip maupun berwarna magenta pada build IL2CPP Android OpenGLES3.
+    /// </summary>
     private Material CreateSafeOpenGLMaterial()
     {
         Shader safeShader = Shader.Find("Sprites/Default");
-        if (safeShader != null) return new Material(safeShader);
-        if (lineRenderer != null && lineRenderer.sharedMaterial != null) return new Material(lineRenderer.sharedMaterial);
+        if (safeShader != null)
+        {
+            return new Material(safeShader);
+        }
+
+        if (lineRenderer != null && lineRenderer.sharedMaterial != null)
+        {
+            return new Material(lineRenderer.sharedMaterial);
+        }
+
         Shader uiFallbackShader = Shader.Find("UI/Default");
-        return uiFallbackShader != null ? new Material(uiFallbackShader) : null;
+        if (uiFallbackShader != null)
+        {
+            return new Material(uiFallbackShader);
+        }
+
+        return null;
     }
 
+    private static void DestroyProceduralMaterial(ref Material mat)
+    {
+        if (mat != null)
+        {
+            Destroy(mat);
+            mat = null;
+        }
+    }
+
+    /// <summary>
+    /// Membuat 3D TextMeshPro world-space di atas setiap kartu secara otomatis saat Awake().
+    /// Ketinggian teks dinaikkan agar selalu berada bersih di atas totem atau diorama 3D.
+    /// </summary>
     private void Initialize3DVisualFeedback()
     {
+        float requiredLabelHeight = (nodeType == NodeType.OutputActuator) ? outputLabelMinHeight : totemLabelMinHeight;
+        float targetYPos = Mathf.Max(labelHeightOffset, requiredLabelHeight);
+
         if (statusLabel == null)
         {
             GameObject labelObj = new GameObject("Label_Status3D");
             labelObj.transform.SetParent(transform, false);
-            labelObj.transform.localPosition = new Vector3(0f, labelHeightOffset, 0f);
+            labelObj.transform.localPosition = new Vector3(0f, targetYPos, 0f);
+            labelObj.transform.localRotation = Quaternion.identity;
+            labelObj.transform.localScale = Vector3.one;
+
             TextMeshPro tmp3D = labelObj.AddComponent<TextMeshPro>();
             tmp3D.fontSize = labelFontSize;
             tmp3D.alignment = TextAlignmentOptions.Center;
             tmp3D.textWrappingMode = TextWrappingModes.NoWrap;
             tmp3D.fontStyle = FontStyles.Bold;
+
+            RectTransform rectTransform = tmp3D.rectTransform;
+            if (rectTransform != null)
+            {
+                rectTransform.sizeDelta = new Vector2(2.5f, 0.6f);
+            }
+
             statusLabel = tmp3D;
+        }
+        else
+        {
+            Vector3 labelPos = statusLabel.transform.localPosition;
+            if (labelPos.y < requiredLabelHeight)
+            {
+                labelPos.y = requiredLabelHeight;
+                statusLabel.transform.localPosition = labelPos;
+            }
         }
     }
 
+    /// <summary>
+    /// Mengatur varian diorama 3D kontekstual pada kartu OutputActuator berdasarkan indeks level aktif.
+    /// Menggunakan modulo aman agar kompatibel dengan ekspansi Level 4, Level 5, dan Sandbox.
+    /// </summary>
+    public void SetOutputDioramaVariant(int variantIndex)
+    {
+        if (nodeType != NodeType.OutputActuator)
+        {
+            return;
+        }
+
+        int safeIndex = ((variantIndex % OutputDioramaVariantCount) + OutputDioramaVariantCount) % OutputDioramaVariantCount;
+        activeDioramaVariantIndex = safeIndex;
+        currentVaultDoorAngle = 0f;
+        if (vaultDoorPivotTransform != null)
+        {
+            vaultDoorPivotTransform.localRotation = Quaternion.identity;
+        }
+
+        ApplyActiveDioramaVariantVisibility();
+
+        if (isTracked)
+        {
+            UpdateOutputDioramaColors();
+        }
+    }
+
+    /// <summary>
+    /// Membangun kontainer OutputDiorama3D dengan 3 sub-model mekanis 3D kontekstual (tanpa Collider)
+    /// khusus untuk kartu bertipe OutputActuator.
+    /// </summary>
+    private void InitializeOutputDioramaVisual()
+    {
+        if (nodeType != NodeType.OutputActuator)
+        {
+            return;
+        }
+
+        dioramaBodyMaterial = CreateSafeOpenGLMaterial();
+        dioramaAccentMaterial = CreateSafeOpenGLMaterial();
+        dioramaEmissiveMaterial = CreateSafeOpenGLMaterial();
+
+        outputDioramaRootObj = new GameObject("OutputDiorama3D");
+        outputDioramaRootObj.transform.SetParent(transform, false);
+        outputDioramaRootObj.transform.localPosition = Vector3.zero;
+        outputDioramaRootObj.transform.localRotation = Quaternion.identity;
+        outputDioramaRootObj.transform.localScale = Vector3.one;
+
+        outputDioramaVariantObjs = new GameObject[OutputDioramaVariantCount];
+        outputDioramaVariantObjs[0] = BuildSirenDiorama(outputDioramaRootObj.transform);
+        outputDioramaVariantObjs[1] = BuildStaircaseLanternDiorama(outputDioramaRootObj.transform);
+        outputDioramaVariantObjs[2] = BuildVaultDiorama(outputDioramaRootObj.transform);
+        outputDioramaVariantObjs[3] = BuildReactorContainmentDiorama(outputDioramaRootObj.transform);
+        outputDioramaVariantObjs[4] = BuildTwinSyncObeliskDiorama(outputDioramaRootObj.transform);
+
+        ApplyActiveDioramaVariantVisibility();
+        UpdateOutputDioramaColors();
+        outputDioramaRootObj.SetActive(false);
+    }
+
+    private GameObject BuildSirenDiorama(Transform root)
+    {
+        GameObject sirenRoot = CreateEmptyChild("Diorama_0_EmergencySiren", root, Vector3.zero).gameObject;
+        Transform parent = sirenRoot.transform;
+
+        // Alas heksagonal/silinder bertingkat + cincin dasar
+        CreatePrimitivePart("Siren_BaseLower", PrimitiveType.Cylinder, parent,
+            new Vector3(0f, 0.036f, 0f), Vector3.zero, new Vector3(0.176f, 0.006f, 0.176f), dioramaBodyMaterial);
+        CreatePrimitivePart("Siren_BaseUpper", PrimitiveType.Cylinder, parent,
+            new Vector3(0f, 0.046f, 0f), Vector3.zero, new Vector3(0.136f, 0.005f, 0.136f), dioramaAccentMaterial);
+        CreateProceduralMeshPart("Siren_BaseHaloRing", GetSharedTorusMesh(), parent,
+            new Vector3(0f, 0.050f, 0f), Vector3.zero, Vector3.one * 0.086f, dioramaEmissiveMaterial);
+
+        // Tiang penyangga utama
+        CreatePrimitivePart("Siren_Pedestal", PrimitiveType.Cylinder, parent,
+            new Vector3(0f, 0.088f, 0f), Vector3.zero, new Vector3(0.044f, 0.040f, 0.044f), dioramaBodyMaterial);
+
+        // Bingkai sangkar pelindung sirine (4 batang vertikal, 2 cincin pengikat, & topi atas)
+        CreatePrimitivePart("Siren_CagePostF", PrimitiveType.Cube, parent,
+            new Vector3(0f, 0.140f, 0.056f), Vector3.zero, new Vector3(0.011f, 0.068f, 0.011f), dioramaAccentMaterial);
+        CreatePrimitivePart("Siren_CagePostB", PrimitiveType.Cube, parent,
+            new Vector3(0f, 0.140f, -0.056f), Vector3.zero, new Vector3(0.011f, 0.068f, 0.011f), dioramaAccentMaterial);
+        CreatePrimitivePart("Siren_CagePostL", PrimitiveType.Cube, parent,
+            new Vector3(-0.056f, 0.140f, 0f), Vector3.zero, new Vector3(0.011f, 0.068f, 0.011f), dioramaAccentMaterial);
+        CreatePrimitivePart("Siren_CagePostR", PrimitiveType.Cube, parent,
+            new Vector3(0.056f, 0.140f, 0f), Vector3.zero, new Vector3(0.011f, 0.068f, 0.011f), dioramaAccentMaterial);
+
+        CreateProceduralMeshPart("Siren_CageLowerRing", GetSharedTorusMesh(), parent,
+            new Vector3(0f, 0.106f, 0f), Vector3.zero, Vector3.one * 0.060f, dioramaAccentMaterial);
+        CreateProceduralMeshPart("Siren_CageUpperRing", GetSharedTorusMesh(), parent,
+            new Vector3(0f, 0.174f, 0f), Vector3.zero, Vector3.one * 0.058f, dioramaAccentMaterial);
+        CreatePrimitivePart("Siren_TopCap", PrimitiveType.Cylinder, parent,
+            new Vector3(0f, 0.180f, 0f), Vector3.zero, new Vector3(0.090f, 0.005f, 0.090f), dioramaBodyMaterial);
+
+        // Bilah rotor reflektor ganda + cincin suar berdenyut
+        sirenRotorPivot = CreateEmptyChild("Siren_RotorPivot", parent, new Vector3(0f, 0.140f, 0f));
+        CreatePrimitivePart("Siren_BeaconCore", PrimitiveType.Sphere, sirenRotorPivot,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.044f, dioramaEmissiveMaterial);
+        CreatePrimitivePart("Siren_RotorBar", PrimitiveType.Cube, sirenRotorPivot,
+            Vector3.zero, Vector3.zero, new Vector3(0.132f, 0.022f, 0.016f), dioramaEmissiveMaterial);
+        CreatePrimitivePart("Siren_ReflectorHeadA", PrimitiveType.Cube, sirenRotorPivot,
+            new Vector3(0.058f, 0f, 0.012f), new Vector3(0f, 25f, 0f), new Vector3(0.024f, 0.032f, 0.024f), dioramaEmissiveMaterial);
+        CreatePrimitivePart("Siren_ReflectorHeadB", PrimitiveType.Cube, sirenRotorPivot,
+            new Vector3(-0.058f, 0f, -0.012f), new Vector3(0f, 25f, 0f), new Vector3(0.024f, 0.032f, 0.024f), dioramaEmissiveMaterial);
+
+        GameObject pulseRingObj = CreateProceduralMeshPart("Siren_PulseRing", GetSharedTorusMesh(), parent,
+            new Vector3(0f, 0.140f, 0f), Vector3.zero, Vector3.one * 0.082f, dioramaEmissiveMaterial);
+        sirenPulseRingTransform = pulseRingObj.transform;
+        sirenPulseRingBaseScale = sirenPulseRingTransform.localScale;
+
+        return sirenRoot;
+    }
+
+    private GameObject BuildStaircaseLanternDiorama(Transform root)
+    {
+        GameObject stairRoot = CreateEmptyChild("Diorama_1_TwinStaircaseLantern", root, Vector3.zero).gameObject;
+        Transform parent = stairRoot.transform;
+
+        // Alas dasar + miniatur 3 anak tangga bertingkat
+        CreatePrimitivePart("Stair_BasePlate", PrimitiveType.Cube, parent,
+            new Vector3(0f, 0.036f, 0f), Vector3.zero, new Vector3(0.200f, 0.008f, 0.115f), dioramaBodyMaterial);
+        CreatePrimitivePart("Stair_Step1", PrimitiveType.Cube, parent,
+            new Vector3(-0.058f, 0.050f, 0f), Vector3.zero, new Vector3(0.064f, 0.020f, 0.088f), dioramaAccentMaterial);
+        CreatePrimitivePart("Stair_Step2", PrimitiveType.Cube, parent,
+            new Vector3(0f, 0.066f, 0f), Vector3.zero, new Vector3(0.064f, 0.036f, 0.088f), dioramaBodyMaterial);
+        CreatePrimitivePart("Stair_Step3", PrimitiveType.Cube, parent,
+            new Vector3(0.058f, 0.082f, 0f), Vector3.zero, new Vector3(0.064f, 0.052f, 0.088f), dioramaAccentMaterial);
+
+        // Tiang lentera ujung bawah (kiri)
+        CreatePrimitivePart("Lantern_LowerPost", PrimitiveType.Cylinder, parent,
+            new Vector3(-0.072f, 0.104f, 0f), Vector3.zero, new Vector3(0.014f, 0.044f, 0.014f), dioramaBodyMaterial);
+        CreatePrimitivePart("Lantern_LowerHead", PrimitiveType.Sphere, parent,
+            new Vector3(-0.072f, 0.156f, 0f), Vector3.zero, Vector3.one * 0.036f, dioramaEmissiveMaterial);
+        CreatePrimitivePart("Lantern_LowerCap", PrimitiveType.Cylinder, parent,
+            new Vector3(-0.072f, 0.177f, 0f), Vector3.zero, new Vector3(0.046f, 0.004f, 0.046f), dioramaBodyMaterial);
+        stairHaloLowerTransform = CreateLanternHaloAssembly("Lantern_LowerHalo", parent, new Vector3(-0.072f, 0.156f, 0f), dioramaAccentMaterial);
+
+        // Tiang lentera ujung atas (kanan)
+        CreatePrimitivePart("Lantern_UpperPost", PrimitiveType.Cylinder, parent,
+            new Vector3(0.072f, 0.144f, 0f), Vector3.zero, new Vector3(0.014f, 0.036f, 0.014f), dioramaBodyMaterial);
+        CreatePrimitivePart("Lantern_UpperHead", PrimitiveType.Sphere, parent,
+            new Vector3(0.072f, 0.188f, 0f), Vector3.zero, Vector3.one * 0.036f, dioramaEmissiveMaterial);
+        CreatePrimitivePart("Lantern_UpperCap", PrimitiveType.Cylinder, parent,
+            new Vector3(0.072f, 0.209f, 0f), Vector3.zero, new Vector3(0.046f, 0.004f, 0.046f), dioramaBodyMaterial);
+        stairHaloUpperTransform = CreateLanternHaloAssembly("Lantern_UpperHalo", parent, new Vector3(0.072f, 0.188f, 0f), dioramaAccentMaterial);
+
+        return stairRoot;
+    }
+
+    private Transform CreateLanternHaloAssembly(string name, Transform parent, Vector3 localPos, Material haloMat)
+    {
+        Transform haloPivot = CreateEmptyChild(name, parent, localPos);
+        CreateProceduralMeshPart($"{name}_Ring", GetSharedTorusMesh(), haloPivot,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.042f, haloMat);
+        CreatePrimitivePart($"{name}_NodeA", PrimitiveType.Sphere, haloPivot,
+            new Vector3(0.042f, 0f, 0f), Vector3.zero, Vector3.one * 0.012f, haloMat);
+        CreatePrimitivePart($"{name}_NodeB", PrimitiveType.Sphere, haloPivot,
+            new Vector3(-0.042f, 0f, 0f), Vector3.zero, Vector3.one * 0.012f, haloMat);
+        return haloPivot;
+    }
+
+    private GameObject BuildVaultDiorama(Transform root)
+    {
+        GameObject vaultRoot = CreateEmptyChild("Diorama_2_MechanicalVaultDoor", root, Vector3.zero).gameObject;
+        Transform parent = vaultRoot.transform;
+
+        // Bingkai bodi brankas 3D (menghadap kamera ke arah -Z)
+        CreatePrimitivePart("Vault_Base", PrimitiveType.Cube, parent,
+            new Vector3(0f, 0.040f, 0f), Vector3.zero, new Vector3(0.190f, 0.010f, 0.155f), dioramaBodyMaterial);
+        CreatePrimitivePart("Vault_BackWall", PrimitiveType.Cube, parent,
+            new Vector3(0f, 0.112f, 0.056f), Vector3.zero, new Vector3(0.175f, 0.135f, 0.022f), dioramaBodyMaterial);
+        CreatePrimitivePart("Vault_LeftWall", PrimitiveType.Cube, parent,
+            new Vector3(-0.076f, 0.112f, 0f), Vector3.zero, new Vector3(0.022f, 0.135f, 0.125f), dioramaBodyMaterial);
+        CreatePrimitivePart("Vault_RightWall", PrimitiveType.Cube, parent,
+            new Vector3(0.076f, 0.112f, 0f), Vector3.zero, new Vector3(0.022f, 0.135f, 0.125f), dioramaBodyMaterial);
+        CreatePrimitivePart("Vault_TopRoof", PrimitiveType.Cube, parent,
+            new Vector3(0f, 0.180f, 0f), Vector3.zero, new Vector3(0.175f, 0.020f, 0.125f), dioramaBodyMaterial);
+
+        // Pedestal & kristal berlian di dalam ruang brankas
+        CreatePrimitivePart("Vault_InnerPedestal", PrimitiveType.Cylinder, parent,
+            new Vector3(0f, 0.050f, 0.002f), Vector3.zero, new Vector3(0.064f, 0.006f, 0.064f), dioramaAccentMaterial);
+        GameObject diamondObj = CreateProceduralMeshPart("Vault_CoreDiamond", GetSharedDiamondSpireMesh(), parent,
+            new Vector3(0f, 0.110f, 0.002f), Vector3.zero, new Vector3(0.042f, 0.046f, 0.042f), dioramaEmissiveMaterial);
+        vaultDiamondTransform = diamondObj.transform;
+        vaultDiamondBaseScale = vaultDiamondTransform.localScale;
+
+        // Poros engsel sisi kiri depan + daun pintu brankas + roda kombinasi 4-palang
+        vaultDoorPivotTransform = CreateEmptyChild("VaultDoorPivot", parent, new Vector3(-0.065f, 0.112f, -0.058f));
+        CreatePrimitivePart("Vault_HingePin", PrimitiveType.Cylinder, vaultDoorPivotTransform,
+            Vector3.zero, Vector3.zero, new Vector3(0.016f, 0.064f, 0.016f), dioramaAccentMaterial);
+        CreatePrimitivePart("Vault_DoorLeaf", PrimitiveType.Cube, vaultDoorPivotTransform,
+            new Vector3(0.065f, 0f, 0f), Vector3.zero, new Vector3(0.130f, 0.124f, 0.016f), dioramaAccentMaterial);
+
+        vaultWheelTransform = CreateEmptyChild("VaultWheel", vaultDoorPivotTransform, new Vector3(0.065f, 0f, -0.014f));
+        CreatePrimitivePart("VaultWheel_Hub", PrimitiveType.Cylinder, vaultWheelTransform,
+            Vector3.zero, new Vector3(90f, 0f, 0f), new Vector3(0.022f, 0.009f, 0.022f), dioramaBodyMaterial);
+        CreateProceduralMeshPart("VaultWheel_Rim", GetSharedTorusMesh(), vaultWheelTransform,
+            Vector3.zero, new Vector3(90f, 0f, 0f), Vector3.one * 0.036f, dioramaEmissiveMaterial);
+        CreatePrimitivePart("VaultWheel_SpokeH", PrimitiveType.Cube, vaultWheelTransform,
+            Vector3.zero, Vector3.zero, new Vector3(0.068f, 0.009f, 0.009f), dioramaEmissiveMaterial);
+        CreatePrimitivePart("VaultWheel_SpokeV", PrimitiveType.Cube, vaultWheelTransform,
+            Vector3.zero, Vector3.zero, new Vector3(0.009f, 0.068f, 0.009f), dioramaEmissiveMaterial);
+
+        currentVaultDoorAngle = 0f;
+        return vaultRoot;
+    }
+
+    private GameObject BuildReactorContainmentDiorama(Transform root)
+    {
+        GameObject reactorRoot = CreateEmptyChild("Diorama_3_ReactorContainment", root, Vector3.zero).gameObject;
+        Transform parent = reactorRoot.transform;
+
+        // Alas reaktor & cincin dasar
+        CreatePrimitivePart("Reactor_BasePad", PrimitiveType.Cylinder, parent,
+            new Vector3(0f, 0.036f, 0f), Vector3.zero, new Vector3(0.172f, 0.005f, 0.172f), dioramaBodyMaterial);
+        CreateProceduralMeshPart("Reactor_BaseRing", GetSharedTorusMesh(), parent,
+            new Vector3(0f, 0.042f, 0f), Vector3.zero, Vector3.one * 0.082f, dioramaAccentMaterial);
+
+        // Kolom rangka pelindung 4 sudut & cincin pengikat atas
+        CreatePrimitivePart("Reactor_ColFL", PrimitiveType.Cube, parent,
+            new Vector3(-0.056f, 0.118f, -0.056f), Vector3.zero, new Vector3(0.011f, 0.148f, 0.011f), dioramaBodyMaterial);
+        CreatePrimitivePart("Reactor_ColFR", PrimitiveType.Cube, parent,
+            new Vector3(0.056f, 0.118f, -0.056f), Vector3.zero, new Vector3(0.011f, 0.148f, 0.011f), dioramaBodyMaterial);
+        CreatePrimitivePart("Reactor_ColBL", PrimitiveType.Cube, parent,
+            new Vector3(-0.056f, 0.118f, 0.056f), Vector3.zero, new Vector3(0.011f, 0.148f, 0.011f), dioramaBodyMaterial);
+        CreatePrimitivePart("Reactor_ColBR", PrimitiveType.Cube, parent,
+            new Vector3(0.056f, 0.118f, 0.056f), Vector3.zero, new Vector3(0.011f, 0.148f, 0.011f), dioramaBodyMaterial);
+        CreateProceduralMeshPart("Reactor_TopGuardRing", GetSharedTorusMesh(), parent,
+            new Vector3(0f, 0.192f, 0f), Vector3.zero, Vector3.one * 0.078f, dioramaBodyMaterial);
+
+        // 2 cincin pengungkung vertikal bersilang & bola inti reaktor di tengah
+        reactorRingPivotA = CreateEmptyChild("Reactor_RingPivotA", parent, new Vector3(0f, 0.118f, 0f));
+        CreateProceduralMeshPart("Reactor_ContainmentRingA", GetSharedTorusMesh(), reactorRingPivotA,
+            Vector3.zero, new Vector3(82f, 0f, 0f), Vector3.one * 0.070f, dioramaAccentMaterial);
+
+        reactorRingPivotB = CreateEmptyChild("Reactor_RingPivotB", parent, new Vector3(0f, 0.118f, 0f));
+        CreateProceduralMeshPart("Reactor_ContainmentRingB", GetSharedTorusMesh(), reactorRingPivotB,
+            Vector3.zero, new Vector3(-82f, 90f, 0f), Vector3.one * 0.058f, dioramaEmissiveMaterial);
+
+        GameObject coreObj = CreatePrimitivePart("Reactor_CenterCore", PrimitiveType.Sphere, parent,
+            new Vector3(0f, 0.118f, 0f), Vector3.zero, Vector3.one * 0.056f, dioramaEmissiveMaterial);
+        reactorCoreTransform = coreObj.transform;
+        reactorCoreBaseScale = reactorCoreTransform.localScale;
+
+        return reactorRoot;
+    }
+
+    private GameObject BuildTwinSyncObeliskDiorama(Transform root)
+    {
+        GameObject obeliskRoot = CreateEmptyChild("Diorama_4_TwinSyncObelisk", root, Vector3.zero).gameObject;
+        Transform parent = obeliskRoot.transform;
+
+        // Alas podium & dua dudukan kiri-kanan
+        CreatePrimitivePart("Obelisk_PodiumBase", PrimitiveType.Cube, parent,
+            new Vector3(0f, 0.036f, 0f), Vector3.zero, new Vector3(0.205f, 0.008f, 0.105f), dioramaBodyMaterial);
+        CreatePrimitivePart("Obelisk_PedestalL", PrimitiveType.Cylinder, parent,
+            new Vector3(-0.064f, 0.045f, 0f), Vector3.zero, new Vector3(0.068f, 0.005f, 0.068f), dioramaAccentMaterial);
+        CreatePrimitivePart("Obelisk_PedestalR", PrimitiveType.Cylinder, parent,
+            new Vector3(0.064f, 0.045f, 0f), Vector3.zero, new Vector3(0.068f, 0.005f, 0.068f), dioramaAccentMaterial);
+
+        // 2 menara kristal berlian kembar di sisi kiri & kanan
+        GameObject crystalL = CreateProceduralMeshPart("Obelisk_TwinCrystalL", GetSharedDiamondSpireMesh(), parent,
+            new Vector3(-0.064f, 0.115f, 0f), Vector3.zero, new Vector3(0.044f, 0.066f, 0.044f), dioramaEmissiveMaterial);
+        GameObject crystalR = CreateProceduralMeshPart("Obelisk_TwinCrystalR", GetSharedDiamondSpireMesh(), parent,
+            new Vector3(0.064f, 0.115f, 0f), Vector3.zero, new Vector3(0.044f, 0.066f, 0.044f), dioramaEmissiveMaterial);
+        twinCrystalLeftTransform = crystalL.transform;
+        twinCrystalRightTransform = crystalR.transform;
+        twinCrystalBaseScale = twinCrystalLeftTransform.localScale;
+
+        // Palang jembatan & cincin halo sinkronisasi di tengah
+        CreatePrimitivePart("Obelisk_SyncBridgeBar", PrimitiveType.Cube, parent,
+            new Vector3(0f, 0.115f, 0f), Vector3.zero, new Vector3(0.118f, 0.010f, 0.010f), dioramaAccentMaterial);
+
+        twinBridgeHaloTransform = CreateEmptyChild("Obelisk_SyncHaloPivot", parent, new Vector3(0f, 0.115f, 0f));
+        CreateProceduralMeshPart("Obelisk_SyncHaloRing", GetSharedTorusMesh(), twinBridgeHaloTransform,
+            Vector3.zero, new Vector3(90f, 0f, 0f), Vector3.one * 0.044f, dioramaEmissiveMaterial);
+        CreatePrimitivePart("Obelisk_SyncNodeA", PrimitiveType.Sphere, twinBridgeHaloTransform,
+            new Vector3(0.044f, 0f, 0f), Vector3.zero, Vector3.one * 0.014f, dioramaAccentMaterial);
+        CreatePrimitivePart("Obelisk_SyncNodeB", PrimitiveType.Sphere, twinBridgeHaloTransform,
+            new Vector3(-0.044f, 0f, 0f), Vector3.zero, Vector3.one * 0.014f, dioramaAccentMaterial);
+        CreatePrimitivePart("Obelisk_SyncCenterHub", PrimitiveType.Sphere, twinBridgeHaloTransform,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.024f, dioramaAccentMaterial);
+        twinBridgeBaseScale = twinBridgeHaloTransform.localScale;
+
+        return obeliskRoot;
+    }
+
+    private void ApplyActiveDioramaVariantVisibility()
+    {
+        if (outputDioramaVariantObjs == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < outputDioramaVariantObjs.Length; i++)
+        {
+            if (outputDioramaVariantObjs[i] != null)
+            {
+                bool shouldShow = (i == activeDioramaVariantIndex);
+                if (outputDioramaVariantObjs[i].activeSelf != shouldShow)
+                {
+                    outputDioramaVariantObjs[i].SetActive(shouldShow);
+                }
+            }
+        }
+    }
+
+    private void SetOutputDioramaActive(bool active)
+    {
+        if (outputDioramaRootObj != null && outputDioramaRootObj.activeSelf != active)
+        {
+            outputDioramaRootObj.SetActive(active);
+        }
+    }
+
+    private void UpdateOutputDioramaColors()
+    {
+        if (outputDioramaRootObj == null || nodeType != NodeType.OutputActuator)
+        {
+            return;
+        }
+
+        if (!currentOutputValue)
+        {
+            if (dioramaBodyMaterial != null) dioramaBodyMaterial.color = LowDioramaBodyColor;
+            if (dioramaAccentMaterial != null) dioramaAccentMaterial.color = LowDioramaAccentColor;
+            if (dioramaEmissiveMaterial != null) dioramaEmissiveMaterial.color = LowDioramaEmissiveColor;
+            return;
+        }
+
+        if (dioramaBodyMaterial != null)
+        {
+            dioramaBodyMaterial.color = HighDioramaBodyColor;
+        }
+
+        if (activeDioramaVariantIndex == 1)
+        {
+            // Level 2: Kepala lentera kuning terang & cincin halo sian terang
+            if (dioramaEmissiveMaterial != null) dioramaEmissiveMaterial.color = HighStairLanternYellowColor;
+            if (dioramaAccentMaterial != null) dioramaAccentMaterial.color = HighStairHaloCyanColor;
+        }
+        else
+        {
+            if (dioramaAccentMaterial != null) dioramaAccentMaterial.color = HighDioramaAccentColor;
+            if (dioramaEmissiveMaterial != null) dioramaEmissiveMaterial.color = HighDioramaEmissiveColor;
+        }
+    }
+
+    private void AnimateOutputDioramaVisual()
+    {
+        if (outputDioramaRootObj == null || nodeType != NodeType.OutputActuator)
+        {
+            return;
+        }
+
+        SetOutputDioramaActive(true);
+
+        switch (activeDioramaVariantIndex)
+        {
+            case 0:
+                // Diorama 0 (Sirine Darurat): rotor berputar 360°/detik dan cincin suar berdenyut saat HIGH
+                if (sirenRotorPivot != null && currentOutputValue)
+                {
+                    sirenRotorPivot.Rotate(Vector3.up, sirenRotorSpeed * Time.deltaTime, Space.Self);
+                }
+                if (sirenPulseRingTransform != null)
+                {
+                    float ringPulse = currentOutputValue ? (1f + 0.22f * Mathf.Sin(Time.time * 9f)) : 1f;
+                    sirenPulseRingTransform.localScale = sirenPulseRingBaseScale * ringPulse;
+                }
+                break;
+
+            case 1:
+                // Diorama 1 (Sakelar Tangga): cincin halo di atas lentera bawah & atas berputar halus saat HIGH
+                if (currentOutputValue)
+                {
+                    if (stairHaloLowerTransform != null)
+                    {
+                        stairHaloLowerTransform.Rotate(Vector3.up, 95f * Time.deltaTime, Space.Self);
+                    }
+                    if (stairHaloUpperTransform != null)
+                    {
+                        stairHaloUpperTransform.Rotate(Vector3.up, -95f * Time.deltaTime, Space.Self);
+                    }
+                }
+                break;
+
+            case 2:
+                // Diorama 2 (Brankas Mekanis): roda berputar, pintu berayun ke 75° / menutup ke 0°, berlian berputar
+                float targetDoorAngle = currentOutputValue ? vaultOpenAngle : 0f;
+                currentVaultDoorAngle = Mathf.MoveTowards(currentVaultDoorAngle, targetDoorAngle, 150f * Time.deltaTime);
+
+                if (vaultDoorPivotTransform != null)
+                {
+                    vaultDoorPivotTransform.localRotation = Quaternion.Euler(0f, currentVaultDoorAngle, 0f);
+                }
+
+                if (vaultWheelTransform != null && currentOutputValue)
+                {
+                    vaultWheelTransform.Rotate(Vector3.forward, 260f * Time.deltaTime, Space.Self);
+                }
+
+                if (vaultDiamondTransform != null)
+                {
+                    if (currentOutputValue)
+                    {
+                        vaultDiamondTransform.Rotate(Vector3.up, 180f * Time.deltaTime, Space.Self);
+                        float diamondPulse = 1f + 0.14f * Mathf.Sin(Time.time * 6f);
+                        vaultDiamondTransform.localScale = vaultDiamondBaseScale * diamondPulse;
+                    }
+                    else
+                    {
+                        vaultDiamondTransform.localScale = vaultDiamondBaseScale;
+                    }
+                }
+                break;
+
+            case 3:
+                // Diorama 3 (Reaktor NAND): cepat memancarkan energi saat HIGH=1, melambat aman/stabil saat LOW=0
+                float reactorRingSpeed = currentOutputValue ? 210f : 22f;
+                if (reactorRingPivotA != null)
+                {
+                    reactorRingPivotA.Rotate(new Vector3(0.2f, 1f, 0.1f), reactorRingSpeed * Time.deltaTime, Space.Self);
+                }
+                if (reactorRingPivotB != null)
+                {
+                    reactorRingPivotB.Rotate(new Vector3(-0.2f, -1f, 0.1f), reactorRingSpeed * 1.15f * Time.deltaTime, Space.Self);
+                }
+                if (reactorCoreTransform != null)
+                {
+                    float corePulse = currentOutputValue ? (1f + 0.16f * Mathf.Sin(Time.time * 7f)) : 1f;
+                    reactorCoreTransform.localScale = reactorCoreBaseScale * corePulse;
+                }
+                break;
+
+            case 4:
+                // Diorama 4 (Obelisk Kembar Level 5 & Sandbox): kristal kembar & cincin sinkronisasi berputar selaras saat HIGH
+                float syncSpeed = currentOutputValue ? 190f : 20f;
+                twinSyncSpinPhase = Mathf.Repeat(twinSyncSpinPhase + syncSpeed * Time.deltaTime, 360f);
+
+                Quaternion syncRot = Quaternion.Euler(0f, twinSyncSpinPhase, 0f);
+                float syncPulse = currentOutputValue ? (1f + 0.14f * Mathf.Sin(Time.time * 6.5f)) : 1f;
+
+                if (twinCrystalLeftTransform != null)
+                {
+                    twinCrystalLeftTransform.localRotation = syncRot;
+                    twinCrystalLeftTransform.localScale = twinCrystalBaseScale * syncPulse;
+                }
+                if (twinCrystalRightTransform != null)
+                {
+                    twinCrystalRightTransform.localRotation = syncRot;
+                    twinCrystalRightTransform.localScale = twinCrystalBaseScale * syncPulse;
+                }
+                if (twinBridgeHaloTransform != null)
+                {
+                    twinBridgeHaloTransform.localRotation = syncRot;
+                    twinBridgeHaloTransform.localScale = twinBridgeBaseScale * syncPulse;
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Membangun totem reaktor hologram 3D prosedural (tanpa Collider) sesuai identitas kartu
+    /// untuk InputSource dan LogicGate. OutputActuator dibiarkan untuk diorama Hari ke-13.
+    /// </summary>
+    private void InitializeTotemVisual()
+    {
+        if (nodeType == NodeType.OutputActuator)
+        {
+            return;
+        }
+
+        totemCoreMaterial = CreateSafeOpenGLMaterial();
+        totemAccentMaterial = CreateSafeOpenGLMaterial();
+
+        totemRootObj = new GameObject("ReactorTotem3D");
+        totemRootObj.transform.SetParent(transform, false);
+        totemRootObj.transform.localPosition = Vector3.zero;
+        totemRootObj.transform.localRotation = Quaternion.identity;
+        totemRootObj.transform.localScale = Vector3.one;
+
+        switch (nodeType)
+        {
+            case NodeType.InputSource:
+                BuildInputSourceTotem(totemRootObj.transform);
+                break;
+            case NodeType.AND:
+                BuildAndTotem(totemRootObj.transform);
+                break;
+            case NodeType.OR:
+                BuildOrTotem(totemRootObj.transform);
+                break;
+            case NodeType.XOR:
+                BuildXorTotem(totemRootObj.transform);
+                break;
+            case NodeType.NAND:
+                BuildNandTotem(totemRootObj.transform);
+                break;
+            case NodeType.NOT:
+                BuildNotTotem(totemRootObj.transform);
+                break;
+        }
+
+        if (totemFloatGroup != null)
+        {
+            totemFloatBasePos = totemFloatGroup.localPosition;
+        }
+
+        if (totemHarmonicMoveTransform != null)
+        {
+            totemHarmonicBasePos = totemHarmonicMoveTransform.localPosition;
+            totemHarmonicBaseScale = totemHarmonicMoveTransform.localScale;
+        }
+
+        UpdateTotemColors();
+        totemRootObj.SetActive(false);
+    }
+
+    private void BuildInputSourceTotem(Transform root)
+    {
+        // Cincin & bantalan alas tipis
+        CreatePrimitivePart("Input_BasePad", PrimitiveType.Cylinder, root,
+            new Vector3(0f, 0.040f, 0f), Vector3.zero, new Vector3(0.105f, 0.004f, 0.105f), totemAccentMaterial);
+        CreateProceduralMeshPart("Input_BaseRing", GetSharedTorusMesh(), root,
+            new Vector3(0f, 0.043f, 0f), Vector3.zero, Vector3.one * 0.062f, totemAccentMaterial);
+
+        // Kluster mengapung: inti kubus berlian miring 45° + 2 satelit orbit horizontal
+        totemFloatGroup = CreateEmptyChild("Input_FloatCluster", root, new Vector3(0f, 0.105f, 0f));
+        CreatePrimitivePart("Input_DiamondCore", PrimitiveType.Cube, totemFloatGroup,
+            Vector3.zero, new Vector3(45f, 0f, 45f), Vector3.one * 0.050f, totemCoreMaterial);
+
+        totemPrimarySpinTransform = CreateEmptyChild("Input_OrbitPivot", totemFloatGroup, Vector3.zero);
+        CreateProceduralMeshPart("Input_OrbitTrack", GetSharedTorusMesh(), totemPrimarySpinTransform,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.072f, totemAccentMaterial);
+        CreatePrimitivePart("Input_SatelliteA", PrimitiveType.Sphere, totemPrimarySpinTransform,
+            new Vector3(0.072f, 0f, 0f), Vector3.zero, Vector3.one * 0.024f, totemAccentMaterial);
+        CreatePrimitivePart("Input_SatelliteB", PrimitiveType.Sphere, totemPrimarySpinTransform,
+            new Vector3(-0.072f, 0f, 0f), Vector3.zero, Vector3.one * 0.024f, totemAccentMaterial);
+    }
+
+    private void BuildAndTotem(Transform root)
+    {
+        // Alas penghubung dua pilar
+        CreatePrimitivePart("AND_BasePlate", PrimitiveType.Cube, root,
+            new Vector3(0f, 0.042f, 0f), Vector3.zero, new Vector3(0.145f, 0.008f, 0.056f), totemAccentMaterial);
+
+        // Menara kembar konvergensi (2 pilar kiri-kanan + palang energi + bola inti tengah)
+        totemPrimarySpinTransform = CreateEmptyChild("AND_TowerPivot", root, Vector3.zero);
+        CreatePrimitivePart("AND_LeftPillar", PrimitiveType.Cube, totemPrimarySpinTransform,
+            new Vector3(-0.056f, 0.100f, 0f), Vector3.zero, new Vector3(0.026f, 0.112f, 0.026f), totemAccentMaterial);
+        CreatePrimitivePart("AND_RightPillar", PrimitiveType.Cube, totemPrimarySpinTransform,
+            new Vector3(0.056f, 0.100f, 0f), Vector3.zero, new Vector3(0.026f, 0.112f, 0.026f), totemAccentMaterial);
+
+        totemFloatGroup = CreateEmptyChild("AND_CoreCluster", totemPrimarySpinTransform, new Vector3(0f, 0.102f, 0f));
+        CreatePrimitivePart("AND_EnergyBridge", PrimitiveType.Cube, totemFloatGroup,
+            Vector3.zero, Vector3.zero, new Vector3(0.114f, 0.013f, 0.013f), totemAccentMaterial);
+
+        GameObject coreSphere = CreatePrimitivePart("AND_CenterCore", PrimitiveType.Sphere, totemFloatGroup,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.054f, totemCoreMaterial);
+        totemHarmonicMoveTransform = coreSphere.transform;
+    }
+
+    private void BuildOrTotem(Transform root)
+    {
+        CreatePrimitivePart("OR_BasePad", PrimitiveType.Cylinder, root,
+            new Vector3(0f, 0.042f, 0f), Vector3.zero, new Vector3(0.084f, 0.004f, 0.084f), totemAccentMaterial);
+
+        // Wide Halo Collector: bola pusat + 2 cincin sabuk miring bersilang + 2 bilah sayap penangkap sinyal
+        totemFloatGroup = CreateEmptyChild("OR_CollectorCluster", root, new Vector3(0f, 0.105f, 0f));
+        GameObject coreSphere = CreatePrimitivePart("OR_CenterCore", PrimitiveType.Sphere, totemFloatGroup,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.052f, totemCoreMaterial);
+        totemHarmonicMoveTransform = coreSphere.transform;
+
+        CreatePrimitivePart("OR_LeftWing", PrimitiveType.Cube, totemFloatGroup,
+            new Vector3(-0.068f, 0.004f, 0f), new Vector3(0f, 0f, 26f), new Vector3(0.032f, 0.008f, 0.054f), totemAccentMaterial);
+        CreatePrimitivePart("OR_RightWing", PrimitiveType.Cube, totemFloatGroup,
+            new Vector3(0.068f, 0.004f, 0f), new Vector3(0f, 0f, -26f), new Vector3(0.032f, 0.008f, 0.054f), totemAccentMaterial);
+
+        totemPrimarySpinTransform = CreateEmptyChild("OR_HaloSpinA", totemFloatGroup, Vector3.zero);
+        CreateProceduralMeshPart("OR_HaloBeltA", GetSharedTorusMesh(), totemPrimarySpinTransform,
+            Vector3.zero, new Vector3(38f, 0f, 24f), Vector3.one * 0.068f, totemAccentMaterial);
+
+        totemSecondarySpinTransform = CreateEmptyChild("OR_HaloSpinB", totemFloatGroup, Vector3.zero);
+        CreateProceduralMeshPart("OR_HaloBeltB", GetSharedTorusMesh(), totemSecondarySpinTransform,
+            Vector3.zero, new Vector3(-38f, 90f, -24f), Vector3.one * 0.068f, totemCoreMaterial);
+    }
+
+    private void BuildXorTotem(Transform root)
+    {
+        CreateProceduralMeshPart("XOR_BaseRing", GetSharedTorusMesh(), root,
+            new Vector3(0f, 0.042f, 0f), Vector3.zero, Vector3.one * 0.050f, totemAccentMaterial);
+
+        // Counter-Rotating Dual Gyro mengelilingi kristal inti tengah
+        totemFloatGroup = CreateEmptyChild("XOR_GyroCluster", root, new Vector3(0f, 0.108f, 0f));
+        GameObject crystalCore = CreateProceduralMeshPart("XOR_CrystalCore", GetSharedDiamondSpireMesh(), totemFloatGroup,
+            Vector3.zero, Vector3.zero, new Vector3(0.040f, 0.045f, 0.040f), totemCoreMaterial);
+        totemHarmonicMoveTransform = crystalCore.transform;
+
+        totemPrimarySpinTransform = CreateEmptyChild("XOR_GyroOuterPivot", totemFloatGroup, Vector3.zero);
+        CreateProceduralMeshPart("XOR_GyroOuterRing", GetSharedTorusMesh(), totemPrimarySpinTransform,
+            Vector3.zero, new Vector3(62f, 0f, 0f), Vector3.one * 0.072f, totemAccentMaterial);
+
+        totemSecondarySpinTransform = CreateEmptyChild("XOR_GyroInnerPivot", totemFloatGroup, Vector3.zero);
+        CreateProceduralMeshPart("XOR_GyroInnerRing", GetSharedTorusMesh(), totemSecondarySpinTransform,
+            Vector3.zero, new Vector3(-62f, 90f, 0f), Vector3.one * 0.054f, totemCoreMaterial);
+    }
+
+    private void BuildNandTotem(Transform root)
+    {
+        // Struktur 2 pilar seperti AND
+        CreatePrimitivePart("NAND_BasePlate", PrimitiveType.Cube, root,
+            new Vector3(0f, 0.042f, 0f), Vector3.zero, new Vector3(0.138f, 0.008f, 0.054f), totemAccentMaterial);
+
+        totemPrimarySpinTransform = CreateEmptyChild("NAND_PillarPivot", root, Vector3.zero);
+        CreatePrimitivePart("NAND_LeftPillar", PrimitiveType.Cube, totemPrimarySpinTransform,
+            new Vector3(-0.053f, 0.090f, 0f), Vector3.zero, new Vector3(0.023f, 0.092f, 0.023f), totemAccentMaterial);
+        CreatePrimitivePart("NAND_RightPillar", PrimitiveType.Cube, totemPrimarySpinTransform,
+            new Vector3(0.053f, 0.090f, 0f), Vector3.zero, new Vector3(0.023f, 0.092f, 0.023f), totemAccentMaterial);
+        CreatePrimitivePart("NAND_EnergyBridge", PrimitiveType.Cube, totemPrimarySpinTransform,
+            new Vector3(0f, 0.090f, 0f), Vector3.zero, new Vector3(0.108f, 0.011f, 0.011f), totemAccentMaterial);
+        CreatePrimitivePart("NAND_CenterCore", PrimitiveType.Sphere, totemPrimarySpinTransform,
+            new Vector3(0f, 0.090f, 0f), Vector3.zero, Vector3.one * 0.046f, totemCoreMaterial);
+
+        // Inverter cap (cincin + kubah pembalik) yang melayang berdenyut di puncaknya
+        totemFloatGroup = CreateEmptyChild("NAND_InverterCapFloat", root, new Vector3(0f, 0.154f, 0f));
+        totemHarmonicMoveTransform = CreateEmptyChild("NAND_InverterCapPulse", totemFloatGroup, Vector3.zero);
+        CreateProceduralMeshPart("NAND_InverterRing", GetSharedTorusMesh(), totemHarmonicMoveTransform,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.066f, totemAccentMaterial);
+        CreatePrimitivePart("NAND_InverterDome", PrimitiveType.Sphere, totemHarmonicMoveTransform,
+            new Vector3(0f, 0.006f, 0f), Vector3.zero, new Vector3(0.052f, 0.024f, 0.052f), totemCoreMaterial);
+    }
+
+    private void BuildNotTotem(Transform root)
+    {
+        CreatePrimitivePart("NOT_BasePad", PrimitiveType.Cylinder, root,
+            new Vector3(0f, 0.041f, 0f), Vector3.zero, new Vector3(0.066f, 0.003f, 0.066f), totemAccentMaterial);
+        CreateProceduralMeshPart("NOT_BaseRing", GetSharedTorusMesh(), root,
+            new Vector3(0f, 0.043f, 0f), Vector3.zero, Vector3.one * 0.054f, totemAccentMaterial);
+
+        // Phase-Inverter Pyramid/Diamond + cincin pembalik fase naik-turun secara harmonik
+        totemFloatGroup = CreateEmptyChild("NOT_SpireCluster", root, new Vector3(0f, 0.106f, 0f));
+        GameObject spireObj = CreateProceduralMeshPart("NOT_DiamondSpire", GetSharedDiamondSpireMesh(), totemFloatGroup,
+            Vector3.zero, Vector3.zero, new Vector3(0.058f, 0.058f, 0.058f), totemCoreMaterial);
+        totemPrimarySpinTransform = spireObj.transform;
+
+        GameObject phaseRing = CreateProceduralMeshPart("NOT_PhaseRing", GetSharedTorusMesh(), totemFloatGroup,
+            Vector3.zero, new Vector3(8f, 0f, 0f), Vector3.one * 0.066f, totemAccentMaterial);
+        totemHarmonicMoveTransform = phaseRing.transform;
+    }
+
+    private static Transform CreateEmptyChild(string childName, Transform parent, Vector3 localPos)
+    {
+        GameObject obj = new GameObject(childName);
+        obj.transform.SetParent(parent, false);
+        obj.transform.localPosition = localPos;
+        obj.transform.localRotation = Quaternion.identity;
+        obj.transform.localScale = Vector3.one;
+        return obj.transform;
+    }
+
+    private static GameObject CreatePrimitivePart(string partName, PrimitiveType type, Transform parent,
+        Vector3 localPos, Vector3 localEuler, Vector3 localScale, Material mat)
+    {
+        GameObject obj = GameObject.CreatePrimitive(type);
+        obj.name = partName;
+        obj.transform.SetParent(parent, false);
+        obj.transform.localPosition = localPos;
+        obj.transform.localEulerAngles = localEuler;
+        obj.transform.localScale = localScale;
+        RemoveCollider(obj);
+
+        Renderer rend = obj.GetComponent<Renderer>();
+        if (rend != null && mat != null)
+        {
+            rend.sharedMaterial = mat;
+        }
+
+        return obj;
+    }
+
+    private static GameObject CreateProceduralMeshPart(string partName, Mesh mesh, Transform parent,
+        Vector3 localPos, Vector3 localEuler, Vector3 localScale, Material mat)
+    {
+        GameObject obj = new GameObject(partName);
+        obj.transform.SetParent(parent, false);
+        obj.transform.localPosition = localPos;
+        obj.transform.localEulerAngles = localEuler;
+        obj.transform.localScale = localScale;
+
+        MeshFilter meshFilter = obj.AddComponent<MeshFilter>();
+        meshFilter.sharedMesh = mesh;
+
+        MeshRenderer meshRenderer = obj.AddComponent<MeshRenderer>();
+        if (mat != null)
+        {
+            meshRenderer.sharedMaterial = mat;
+        }
+
+        return obj;
+    }
+
+    private static Mesh GetSharedTorusMesh()
+    {
+        if (sharedTorusMesh != null)
+        {
+            return sharedTorusMesh;
+        }
+
+        const float MajorRadius = 1f;
+        const float MinorRadius = 0.115f;
+        const int RadialSegments = 24;
+        const int TubularSegments = 8;
+
+        int ringVertexCount = RadialSegments + 1;
+        int tubeVertexCount = TubularSegments + 1;
+        int totalVertices = ringVertexCount * tubeVertexCount;
+
+        Vector3[] vertices = new Vector3[totalVertices];
+        Vector3[] normals = new Vector3[totalVertices];
+        Color[] colors = new Color[totalVertices];
+        int[] triangles = new int[RadialSegments * TubularSegments * 6];
+
+        int vertIdx = 0;
+        for (int r = 0; r <= RadialSegments; r++)
+        {
+            float u = (r / (float)RadialSegments) * Mathf.PI * 2f;
+            float cosU = Mathf.Cos(u);
+            float sinU = Mathf.Sin(u);
+            Vector3 center = new Vector3(cosU * MajorRadius, 0f, sinU * MajorRadius);
+
+            for (int t = 0; t <= TubularSegments; t++)
+            {
+                float v = (t / (float)TubularSegments) * Mathf.PI * 2f;
+                float cosV = Mathf.Cos(v);
+                float sinV = Mathf.Sin(v);
+
+                Vector3 vertex = new Vector3(
+                    (MajorRadius + MinorRadius * cosV) * cosU,
+                    MinorRadius * sinV,
+                    (MajorRadius + MinorRadius * cosV) * sinU
+                );
+
+                Vector3 normal = (vertex - center).normalized;
+                vertices[vertIdx] = vertex;
+                normals[vertIdx] = normal;
+
+                // Shading halus agar siluet 3D tetap tegas pada shader unlit OpenGLES3
+                float shade = Mathf.Lerp(0.76f, 1f, 0.5f + 0.5f * normal.y);
+                colors[vertIdx] = new Color(shade, shade, shade, 1f);
+                vertIdx++;
+            }
+        }
+
+        int triIdx = 0;
+        for (int r = 0; r < RadialSegments; r++)
+        {
+            for (int t = 0; t < TubularSegments; t++)
+            {
+                int a = r * tubeVertexCount + t;
+                int b = (r + 1) * tubeVertexCount + t;
+                int c = (r + 1) * tubeVertexCount + (t + 1);
+                int d = r * tubeVertexCount + (t + 1);
+
+                triangles[triIdx++] = a;
+                triangles[triIdx++] = b;
+                triangles[triIdx++] = d;
+
+                triangles[triIdx++] = b;
+                triangles[triIdx++] = c;
+                triangles[triIdx++] = d;
+            }
+        }
+
+        sharedTorusMesh = new Mesh { name = "GateWeaver_SharedTorus" };
+        sharedTorusMesh.vertices = vertices;
+        sharedTorusMesh.normals = normals;
+        sharedTorusMesh.colors = colors;
+        sharedTorusMesh.triangles = triangles;
+        sharedTorusMesh.RecalculateBounds();
+        return sharedTorusMesh;
+    }
+
+    private static Mesh GetSharedDiamondSpireMesh()
+    {
+        if (sharedDiamondSpireMesh != null)
+        {
+            return sharedDiamondSpireMesh;
+        }
+
+        Vector3 top = new Vector3(0f, 1f, 0f);
+        Vector3 bottom = new Vector3(0f, -1f, 0f);
+        Vector3[] ring =
+        {
+            new Vector3(0.55f, 0f, 0f),
+            new Vector3(0f, 0f, 0.55f),
+            new Vector3(-0.55f, 0f, 0f),
+            new Vector3(0f, 0f, -0.55f)
+        };
+
+        // 8 segitiga (4 sisi atas + 4 sisi bawah) dengan vertex terpisah agar faceted flat shading tegas
+        Vector3[] vertices = new Vector3[24];
+        Vector3[] normals = new Vector3[24];
+        Color[] colors = new Color[24];
+        int[] triangles = new int[24];
+
+        float[] upperShades = { 1.00f, 0.88f, 0.96f, 0.82f };
+        float[] lowerShades = { 0.78f, 0.68f, 0.75f, 0.64f };
+
+        int v = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            int next = (i + 1) % 4;
+
+            // Sisi atas (urutan CCW dilihat dari luar)
+            Vector3 pA = top;
+            Vector3 pB = ring[next];
+            Vector3 pC = ring[i];
+            Vector3 upperNormal = Vector3.Cross(pB - pA, pC - pA).normalized;
+            Color upperCol = new Color(upperShades[i], upperShades[i], upperShades[i], 1f);
+
+            vertices[v] = pA; normals[v] = upperNormal; colors[v] = upperCol; triangles[v] = v; v++;
+            vertices[v] = pB; normals[v] = upperNormal; colors[v] = upperCol; triangles[v] = v; v++;
+            vertices[v] = pC; normals[v] = upperNormal; colors[v] = upperCol; triangles[v] = v; v++;
+
+            // Sisi bawah (urutan CCW dilihat dari luar)
+            Vector3 lA = bottom;
+            Vector3 lB = ring[i];
+            Vector3 lC = ring[next];
+            Vector3 lowerNormal = Vector3.Cross(lB - lA, lC - lA).normalized;
+            Color lowerCol = new Color(lowerShades[i], lowerShades[i], lowerShades[i], 1f);
+
+            vertices[v] = lA; normals[v] = lowerNormal; colors[v] = lowerCol; triangles[v] = v; v++;
+            vertices[v] = lB; normals[v] = lowerNormal; colors[v] = lowerCol; triangles[v] = v; v++;
+            vertices[v] = lC; normals[v] = lowerNormal; colors[v] = lowerCol; triangles[v] = v; v++;
+        }
+
+        sharedDiamondSpireMesh = new Mesh { name = "GateWeaver_SharedDiamondSpire" };
+        sharedDiamondSpireMesh.vertices = vertices;
+        sharedDiamondSpireMesh.normals = normals;
+        sharedDiamondSpireMesh.colors = colors;
+        sharedDiamondSpireMesh.triangles = triangles;
+        sharedDiamondSpireMesh.RecalculateBounds();
+        return sharedDiamondSpireMesh;
+    }
+
+    private void SetTotemActive(bool active)
+    {
+        if (totemRootObj != null && totemRootObj.activeSelf != active)
+        {
+            totemRootObj.SetActive(active);
+        }
+    }
+
+    private void UpdateTotemColors()
+    {
+        if (totemRootObj == null)
+        {
+            return;
+        }
+
+        if (totemCoreMaterial != null)
+        {
+            totemCoreMaterial.color = currentOutputValue ? HighTotemCoreColor : LowTotemCoreColor;
+        }
+
+        if (totemAccentMaterial != null)
+        {
+            totemAccentMaterial.color = currentOutputValue ? HighTotemAccentColor : LowTotemAccentColor;
+        }
+    }
+
+    private void AnimateTotemVisual()
+    {
+        if (totemRootObj == null || nodeType == NodeType.OutputActuator)
+        {
+            return;
+        }
+
+        SetTotemActive(true);
+
+        float spinSpeed = currentOutputValue ? totemHighSpinSpeed : totemLowSpinSpeed;
+        float bobSpeed = currentOutputValue ? 3.4f : 1.15f;
+        float bobAmplitude = currentOutputValue ? totemHighBobAmplitude : (totemHighBobAmplitude * 0.32f);
+
+        totemSpinPhase += spinSpeed * Time.deltaTime;
+        totemBobPhase += bobSpeed * Time.deltaTime;
+
+        if (totemFloatGroup != null)
+        {
+            float bobOffset = Mathf.Sin(totemBobPhase) * bobAmplitude;
+            totemFloatGroup.localPosition = totemFloatBasePos + new Vector3(0f, bobOffset, 0f);
+        }
+
+        switch (nodeType)
+        {
+            case NodeType.InputSource:
+                if (totemPrimarySpinTransform != null)
+                {
+                    totemPrimarySpinTransform.Rotate(Vector3.up, spinSpeed * 1.15f * Time.deltaTime, Space.Self);
+                }
+                break;
+
+            case NodeType.AND:
+                if (totemPrimarySpinTransform != null)
+                {
+                    totemPrimarySpinTransform.Rotate(Vector3.up, spinSpeed * 0.65f * Time.deltaTime, Space.Self);
+                }
+                if (totemHarmonicMoveTransform != null)
+                {
+                    float pulse = currentOutputValue ? (1f + 0.15f * Mathf.Sin(totemBobPhase * 1.6f)) : 1f;
+                    totemHarmonicMoveTransform.localScale = totemHarmonicBaseScale * pulse;
+                }
+                break;
+
+            case NodeType.OR:
+                if (totemPrimarySpinTransform != null)
+                {
+                    totemPrimarySpinTransform.Rotate(Vector3.up, spinSpeed * 0.95f * Time.deltaTime, Space.Self);
+                }
+                if (totemSecondarySpinTransform != null)
+                {
+                    totemSecondarySpinTransform.Rotate(Vector3.up, -spinSpeed * 0.85f * Time.deltaTime, Space.Self);
+                }
+                if (totemHarmonicMoveTransform != null)
+                {
+                    float pulse = currentOutputValue ? (1f + 0.12f * Mathf.Sin(totemBobPhase * 1.5f)) : 1f;
+                    totemHarmonicMoveTransform.localScale = totemHarmonicBaseScale * pulse;
+                }
+                break;
+
+            case NodeType.XOR:
+                if (totemPrimarySpinTransform != null)
+                {
+                    totemPrimarySpinTransform.Rotate(new Vector3(0.25f, 1f, 0.25f), spinSpeed * Time.deltaTime, Space.Self);
+                }
+                if (totemSecondarySpinTransform != null)
+                {
+                    totemSecondarySpinTransform.Rotate(new Vector3(-0.25f, -1f, 0.25f), spinSpeed * 1.3f * Time.deltaTime, Space.Self);
+                }
+                if (totemHarmonicMoveTransform != null)
+                {
+                    totemHarmonicMoveTransform.localRotation = Quaternion.Euler(0f, totemSpinPhase * 0.8f, 0f);
+                }
+                break;
+
+            case NodeType.NAND:
+                if (totemPrimarySpinTransform != null)
+                {
+                    totemPrimarySpinTransform.Rotate(Vector3.up, spinSpeed * 0.55f * Time.deltaTime, Space.Self);
+                }
+                if (totemHarmonicMoveTransform != null)
+                {
+                    float capPulse = currentOutputValue ? (1f + 0.16f * Mathf.Sin(totemBobPhase * 1.9f)) : 1f;
+                    totemHarmonicMoveTransform.localScale = totemHarmonicBaseScale * capPulse;
+                }
+                break;
+
+            case NodeType.NOT:
+                if (totemPrimarySpinTransform != null)
+                {
+                    totemPrimarySpinTransform.Rotate(Vector3.up, spinSpeed * Time.deltaTime, Space.Self);
+                }
+                if (totemHarmonicMoveTransform != null)
+                {
+                    float harmonicAmp = currentOutputValue ? 0.032f : 0.012f;
+                    float yWave = Mathf.Sin(totemBobPhase * 1.45f) * harmonicAmp;
+                    totemHarmonicMoveTransform.localPosition = totemHarmonicBasePos + new Vector3(0f, yWave, 0f);
+                    totemHarmonicMoveTransform.Rotate(Vector3.up, -spinSpeed * 0.7f * Time.deltaTime, Space.Self);
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Membuat 3 bola paket data 3D dan 2 cincin/node terminal soket 3D secara prosedural
+    /// tanpa komponen Collider agar tidak membebani sistem fisika di perangkat Android.
+    /// </summary>
     private void InitializeArcAndTerminalVisuals()
     {
-        if (nodeType == NodeType.OutputActuator) return;
+        if (nodeType == NodeType.OutputActuator)
+        {
+            return;
+        }
 
         dataPacketMaterial = CreateSafeOpenGLMaterial();
         socketMaterial = CreateSafeOpenGLMaterial();
@@ -179,10 +1378,14 @@ public class GateNode : MonoBehaviour
             packet.name = $"DataPacket_{i}";
             packet.transform.SetParent(transform, false);
             packet.transform.localScale = Vector3.one * packetLowScale;
-            Collider col = packet.GetComponent<Collider>();
-            if (col != null) Destroy(col);
-            Renderer rend = packet.GetComponent<Renderer>();
-            if (rend != null && dataPacketMaterial != null) rend.sharedMaterial = dataPacketMaterial;
+            RemoveCollider(packet);
+
+            Renderer packetRenderer = packet.GetComponent<Renderer>();
+            if (packetRenderer != null && dataPacketMaterial != null)
+            {
+                packetRenderer.sharedMaterial = dataPacketMaterial;
+            }
+
             packet.SetActive(false);
             dataPacketObjs[i] = packet;
         }
@@ -197,44 +1400,80 @@ public class GateNode : MonoBehaviour
         ringObj.name = objectName;
         ringObj.transform.SetParent(transform, false);
         ringObj.transform.localScale = new Vector3(socketRingDiameter, socketRingThickness, socketRingDiameter);
-        Collider col = ringObj.GetComponent<Collider>();
-        if (col != null) Destroy(col);
-        Renderer rend = ringObj.GetComponent<Renderer>();
-        if (rend != null && socketMaterial != null) rend.sharedMaterial = socketMaterial;
+        RemoveCollider(ringObj);
+
+        Renderer ringRenderer = ringObj.GetComponent<Renderer>();
+        if (ringRenderer != null && socketMaterial != null)
+        {
+            ringRenderer.sharedMaterial = socketMaterial;
+        }
+
         ringObj.SetActive(false);
         return ringObj;
     }
 
+    private static void RemoveCollider(GameObject obj)
+    {
+        Collider col = obj.GetComponent<Collider>();
+        if (col != null)
+        {
+            Destroy(col);
+        }
+    }
+
+    /// <summary>
+    /// Menghitung titik pangkal P0, titik kontrol puncak P1 sepanjang normal rata-rata kartu,
+    /// dan titik ujung P2 untuk kurva Quadratic Bezier 3D.
+    /// </summary>
     private bool TryGetBezierControlPoints(out Vector3 p0, out Vector3 p1, out Vector3 p2, out Vector3 sourceNormal, out Vector3 targetNormal)
     {
-        bool canDraw = isTracked && nodeType != NodeType.OutputActuator && connectedTarget != null && connectedTarget.isTracked;
+        bool canDraw = isTracked
+                       && nodeType != NodeType.OutputActuator
+                       && connectedTarget != null
+                       && connectedTarget.isTracked;
+
         if (!canDraw)
         {
-            p0 = p1 = p2 = Vector3.zero;
-            sourceNormal = targetNormal = Vector3.up;
+            p0 = Vector3.zero;
+            p1 = Vector3.zero;
+            p2 = Vector3.zero;
+            sourceNormal = Vector3.up;
+            targetNormal = Vector3.up;
             return false;
         }
 
         sourceNormal = transform.up.sqrMagnitude > 0.0001f ? transform.up.normalized : Vector3.up;
         targetNormal = connectedTarget.transform.up.sqrMagnitude > 0.0001f ? connectedTarget.transform.up.normalized : Vector3.up;
 
+        // Offset tipis sesuai indeks input di kartu tujuan agar dua soket pendarat tidak z-fighting
         int targetSlotIndex = connectedTarget.connectedInputs != null ? connectedTarget.connectedInputs.IndexOf(this) : -1;
         float targetOffset = socketSurfaceOffset + (targetSlotIndex > 0 ? targetSlotIndex * 0.003f : 0f);
 
         p0 = transform.position + sourceNormal * socketSurfaceOffset;
         p2 = connectedTarget.transform.position + targetNormal * targetOffset;
-        Vector3 avgNormal = (sourceNormal + targetNormal).sqrMagnitude > 0.0001f ? (sourceNormal + targetNormal).normalized : sourceNormal;
-        float arcHeight = Mathf.Clamp(Vector3.Distance(p0, p2) * arcHeightDistanceFactor, minArcHeight, maxArcHeight);
+
+        Vector3 combinedNormal = sourceNormal + targetNormal;
+        Vector3 avgNormal = combinedNormal.sqrMagnitude > 0.0001f ? combinedNormal.normalized : sourceNormal;
+
+        float distance = Vector3.Distance(p0, p2);
+        float arcHeight = Mathf.Clamp(distance * arcHeightDistanceFactor, minArcHeight, maxArcHeight);
         p1 = ((p0 + p2) * 0.5f) + (avgNormal * arcHeight);
+
         return true;
     }
 
     private static Vector3 EvaluateQuadraticBezier(Vector3 p0, Vector3 p1, Vector3 p2, float t)
     {
         float oneMinusT = 1f - t;
-        return (oneMinusT * oneMinusT * p0) + (2f * oneMinusT * t * p1) + (t * t * p2);
+        return (oneMinusT * oneMinusT * p0)
+               + (2f * oneMinusT * t * p1)
+               + (t * t * p2);
     }
 
+    /// <summary>
+    /// Menggambar kurva Quadratic Bezier 20 segmen pada LineRenderer, menyinkronkan posisi 3 bola paket data,
+    /// dan memosisikan kedua cincin soket terminal di P0 & P2.
+    /// </summary>
     private void RefreshConnectionVisuals(bool advanceFlowPhase)
     {
         if (!TryGetBezierControlPoints(out Vector3 p0, out Vector3 p1, out Vector3 p2, out Vector3 sourceNormal, out Vector3 targetNormal))
@@ -245,6 +1484,7 @@ public class GateNode : MonoBehaviour
 
         Color activeLaserColor = currentOutputValue ? highSignalColor : lowSignalColor;
 
+        // 1. Update kurva Quadratic Bezier 20 titik pada LineRenderer
         if (lineRenderer != null)
         {
             lineRenderer.enabled = true;
@@ -260,6 +1500,7 @@ public class GateNode : MonoBehaviour
             }
         }
 
+        // 2. Update aliran 3 bola paket data sepanjang kurva P0 -> P1 -> P2
         if (advanceFlowPhase)
         {
             float flowSpeed = currentOutputValue ? packetHighSpeed : packetLowSpeed;
@@ -267,28 +1508,54 @@ public class GateNode : MonoBehaviour
         }
 
         float packetScale = currentOutputValue ? packetHighScale : packetLowScale;
-        if (dataPacketMaterial != null) dataPacketMaterial.color = currentOutputValue ? HighPacketColor : LowPacketColor;
+        Color packetColor = currentOutputValue ? HighPacketColor : LowPacketColor;
+
+        if (dataPacketMaterial != null)
+        {
+            dataPacketMaterial.color = packetColor;
+        }
 
         if (dataPacketObjs != null)
         {
             for (int i = 0; i < dataPacketObjs.Length; i++)
             {
                 GameObject packet = dataPacketObjs[i];
-                if (packet == null) continue;
-                if (!packet.activeSelf) packet.SetActive(true);
+                if (packet == null)
+                {
+                    continue;
+                }
+
+                if (!packet.activeSelf)
+                {
+                    packet.SetActive(true);
+                }
+
                 float phase = Mathf.Repeat(packetFlowPhase + PacketPhaseOffsets[i], 1f);
                 packet.transform.position = EvaluateQuadraticBezier(p0, p1, p2, phase);
                 packet.transform.localScale = Vector3.one * packetScale;
             }
         }
 
+        // 3. Update cincin/node terminal soket 3D di titik P0 dan P2 dengan efek pulsing saat HIGH (1)
         float pulseMultiplier = currentOutputValue ? (1f + 0.18f * Mathf.Sin(Time.time * 6f)) : 1f;
-        Vector3 socketScale = new Vector3(socketRingDiameter * pulseMultiplier, socketRingThickness, socketRingDiameter * pulseMultiplier);
-        if (socketMaterial != null) socketMaterial.color = currentOutputValue ? HighSocketColor : LowSocketColor;
+        Vector3 socketScale = new Vector3(
+            socketRingDiameter * pulseMultiplier,
+            socketRingThickness,
+            socketRingDiameter * pulseMultiplier
+        );
+
+        if (socketMaterial != null)
+        {
+            socketMaterial.color = currentOutputValue ? HighSocketColor : LowSocketColor;
+        }
 
         if (sourceSocketObj != null)
         {
-            if (!sourceSocketObj.activeSelf) sourceSocketObj.SetActive(true);
+            if (!sourceSocketObj.activeSelf)
+            {
+                sourceSocketObj.SetActive(true);
+            }
+
             sourceSocketObj.transform.position = p0;
             sourceSocketObj.transform.up = sourceNormal;
             sourceSocketObj.transform.localScale = socketScale;
@@ -296,7 +1563,11 @@ public class GateNode : MonoBehaviour
 
         if (targetSocketObj != null)
         {
-            if (!targetSocketObj.activeSelf) targetSocketObj.SetActive(true);
+            if (!targetSocketObj.activeSelf)
+            {
+                targetSocketObj.SetActive(true);
+            }
+
             targetSocketObj.transform.position = p2;
             targetSocketObj.transform.up = targetNormal;
             targetSocketObj.transform.localScale = socketScale;
@@ -305,30 +1576,68 @@ public class GateNode : MonoBehaviour
 
     private void SetConnectionVisualsActive(bool active)
     {
-        if (lineRenderer != null && lineRenderer.enabled != active) lineRenderer.enabled = active;
+        if (lineRenderer != null && lineRenderer.enabled != active)
+        {
+            lineRenderer.enabled = active;
+        }
+
         if (dataPacketObjs != null)
         {
             for (int i = 0; i < dataPacketObjs.Length; i++)
             {
-                if (dataPacketObjs[i] != null && dataPacketObjs[i].activeSelf != active) dataPacketObjs[i].SetActive(active);
+                if (dataPacketObjs[i] != null && dataPacketObjs[i].activeSelf != active)
+                {
+                    dataPacketObjs[i].SetActive(active);
+                }
             }
         }
-        if (sourceSocketObj != null && sourceSocketObj.activeSelf != active) sourceSocketObj.SetActive(active);
-        if (targetSocketObj != null && targetSocketObj.activeSelf != active) targetSocketObj.SetActive(active);
+
+        if (sourceSocketObj != null && sourceSocketObj.activeSelf != active)
+        {
+            sourceSocketObj.SetActive(active);
+        }
+
+        if (targetSocketObj != null && targetSocketObj.activeSelf != active)
+        {
+            targetSocketObj.SetActive(active);
+        }
     }
 
+    /// <summary>
+    /// Mengatur orientasi 3D TextMeshPro agar selalu menghadap Camera.main (billboard effect)
+    /// dan tidak terbalik saat kamera AR bergerak.
+    /// </summary>
     private void UpdateLabelBillboard()
     {
-        if (statusLabel == null || Camera.main == null) return;
-        Vector3 dir = statusLabel.transform.position - Camera.main.transform.position;
-        if (dir.sqrMagnitude > 0.0001f) statusLabel.transform.rotation = Quaternion.LookRotation(dir, Camera.main.transform.up);
+        if (statusLabel == null || Camera.main == null)
+        {
+            return;
+        }
+
+        Transform camTransform = Camera.main.transform;
+        Vector3 dirFromCamera = statusLabel.transform.position - camTransform.position;
+        if (dirFromCamera.sqrMagnitude > 0.0001f)
+        {
+            statusLabel.transform.rotation = Quaternion.LookRotation(dirFromCamera, camTransform.up);
+        }
     }
 
+    /// <summary>
+    /// Mendeteksi perubahan orientasi sudut kartu InputSource terhadap kamera (~90 derajat = 1, ~0 derajat = 0).
+    /// Hanya mengubah state saat melewati ambang sudut agar tidak menimpa tombol UI ToggleInputState().
+    /// </summary>
     private void CheckPhysicalRotationInput()
     {
-        if (Camera.main == null) return;
+        if (Camera.main == null)
+        {
+            return;
+        }
+
+        // Proyeksikan arah atas kartu (transform.forward pada bidang ImageTarget) ke ruang lokal kamera
         Vector3 localCardForward = Camera.main.transform.InverseTransformDirection(transform.forward);
         float angleFromVertical = Mathf.Abs(Mathf.Atan2(localCardForward.x, localCardForward.y) * Mathf.Rad2Deg);
+
+        // Jika kartu diputar miring mendekati 90 derajat (45° s/d 135°), terdeteksi sebagai logika 1
         bool isRotatedToOne = (angleFromVertical >= rotationAngleThreshold && angleFromVertical <= (180f - rotationAngleThreshold));
 
         if (!rotationInitialized)
@@ -347,11 +1656,21 @@ public class GateNode : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Dipanggil oleh event Vuforia DefaultObserverEventHandler:
+    /// - OnTargetFound() -> SetTrackingState(true)
+    /// - OnTargetLost()  -> SetTrackingState(false)
+    /// </summary>
     public void SetTrackingState(bool tracked)
     {
         if (tracked)
         {
-            if (debounceCoroutine != null) { StopCoroutine(debounceCoroutine); debounceCoroutine = null; }
+            if (debounceCoroutine != null)
+            {
+                StopCoroutine(debounceCoroutine);
+                debounceCoroutine = null;
+            }
+
             isTracked = true;
             EvaluateGateLogic();
             UpdateVisuals();
@@ -360,7 +1679,10 @@ public class GateNode : MonoBehaviour
         {
             if (Application.isPlaying && gameObject.activeInHierarchy && trackingLossDebounceTime > 0f)
             {
-                if (debounceCoroutine != null) StopCoroutine(debounceCoroutine);
+                if (debounceCoroutine != null)
+                {
+                    StopCoroutine(debounceCoroutine);
+                }
                 debounceCoroutine = StartCoroutine(TrackingLossDebounceRoutine());
             }
             else
@@ -383,51 +1705,86 @@ public class GateNode : MonoBehaviour
         rotationInitialized = false;
         connectedInputs.Clear();
         connectedTarget = null;
+
         SetConnectionVisualsActive(false);
+        SetTotemActive(false);
+        SetOutputDioramaActive(false);
         UpdateVisuals();
     }
 
+    /// <summary>
+    /// Menangguhkan atau mengaktifkan kembali pembacaan rotasi fisik kartu InputSource
+    /// selama proses Coroutine verifikasi Tabel Kebenaran berlangsung.
+    /// </summary>
     public void SetSimulationOverride(bool active)
     {
         isSimulationOverride = active;
         rotationInitialized = false;
     }
 
-    public void SetInputState(bool state)
-    {
-        if (nodeType != NodeType.InputSource) return;
-        initialInputState = state;
-        currentOutputValue = state;
-        rotationInitialized = false;
-        EvaluateGateLogic();
-        UpdateVisuals();
-    }
-
+    /// <summary>
+    /// Membalik nilai biner (0 <-> 1) khusus untuk kartu bertipe InputSource.
+    /// Dapat dipanggil dari tombol UI Toggle Input A / Input B maupun pengujian di Inspector.
+    /// </summary>
     public void ToggleInputState()
     {
-        if (nodeType != NodeType.InputSource) return;
+        if (nodeType != NodeType.InputSource)
+        {
+            return;
+        }
+
         initialInputState = !initialInputState;
         currentOutputValue = initialInputState;
         rotationInitialized = false;
+
         EvaluateGateLogic();
         UpdateVisuals();
     }
 
+    /// <summary>
+    /// Mengatur nilai InputSource secara eksplisit (digunakan saat simulasi/verifikasi tabel kebenaran).
+    /// </summary>
+    public void SetInputState(bool state)
+    {
+        if (nodeType != NodeType.InputSource)
+        {
+            return;
+        }
+
+        initialInputState = state;
+        currentOutputValue = state;
+        rotationInitialized = false;
+
+        EvaluateGateLogic();
+        UpdateVisuals();
+    }
+
+    /// <summary>
+    /// Mengembalikan kuota maksimal jumlah input untuk masing-masing tipe gerbang logika.
+    /// </summary>
     public int GetMaxInputCount()
     {
         switch (nodeType)
         {
-            case NodeType.InputSource: return 0;
+            case NodeType.InputSource:
+                return 0;
             case NodeType.NOT:
-            case NodeType.OutputActuator: return 1;
+            case NodeType.OutputActuator:
+                return 1;
             case NodeType.AND:
             case NodeType.OR:
             case NodeType.XOR:
-            case NodeType.NAND: return 2;
-            default: return 0;
+            case NodeType.NAND:
+                return 2;
+            default:
+                return 0;
         }
     }
 
+    /// <summary>
+    /// Mengevaluasi nilai output biner (currentOutputValue) berdasarkan tipe gerbang
+    /// dan daftar input yang terhubung pada connectedInputs.
+    /// </summary>
     public void EvaluateGateLogic()
     {
         switch (nodeType)
@@ -435,46 +1792,111 @@ public class GateNode : MonoBehaviour
             case NodeType.InputSource:
                 currentOutputValue = initialInputState;
                 break;
+
             case NodeType.NOT:
-                currentOutputValue = connectedInputs.Count >= 1 && connectedInputs[0] != null && !connectedInputs[0].currentOutputValue;
+                if (connectedInputs.Count >= 1 && connectedInputs[0] != null)
+                {
+                    currentOutputValue = !connectedInputs[0].currentOutputValue;
+                }
+                else
+                {
+                    currentOutputValue = false;
+                }
                 break;
+
             case NodeType.OutputActuator:
-                currentOutputValue = connectedInputs.Count >= 1 && connectedInputs[0] != null && connectedInputs[0].currentOutputValue;
+                if (connectedInputs.Count >= 1 && connectedInputs[0] != null)
+                {
+                    currentOutputValue = connectedInputs[0].currentOutputValue;
+                }
+                else
+                {
+                    currentOutputValue = false;
+                }
                 break;
+
             case NodeType.AND:
-                currentOutputValue = connectedInputs.Count >= 2 && connectedInputs[0] != null && connectedInputs[1] != null
-                    && connectedInputs[0].currentOutputValue && connectedInputs[1].currentOutputValue;
+                if (connectedInputs.Count >= 2 && connectedInputs[0] != null && connectedInputs[1] != null)
+                {
+                    currentOutputValue = connectedInputs[0].currentOutputValue && connectedInputs[1].currentOutputValue;
+                }
+                else
+                {
+                    currentOutputValue = false;
+                }
                 break;
+
             case NodeType.OR:
-                currentOutputValue = connectedInputs.Count >= 2 && connectedInputs[0] != null && connectedInputs[1] != null
-                    && (connectedInputs[0].currentOutputValue || connectedInputs[1].currentOutputValue);
+                if (connectedInputs.Count >= 2 && connectedInputs[0] != null && connectedInputs[1] != null)
+                {
+                    currentOutputValue = connectedInputs[0].currentOutputValue || connectedInputs[1].currentOutputValue;
+                }
+                else
+                {
+                    currentOutputValue = false;
+                }
                 break;
+
             case NodeType.XOR:
-                currentOutputValue = connectedInputs.Count >= 2 && connectedInputs[0] != null && connectedInputs[1] != null
-                    && (connectedInputs[0].currentOutputValue ^ connectedInputs[1].currentOutputValue);
+                if (connectedInputs.Count >= 2 && connectedInputs[0] != null && connectedInputs[1] != null)
+                {
+                    currentOutputValue = connectedInputs[0].currentOutputValue ^ connectedInputs[1].currentOutputValue;
+                }
+                else
+                {
+                    currentOutputValue = false;
+                }
                 break;
+
             case NodeType.NAND:
-                currentOutputValue = connectedInputs.Count >= 2 && connectedInputs[0] != null && connectedInputs[1] != null
-                    && !(connectedInputs[0].currentOutputValue && connectedInputs[1].currentOutputValue);
+                if (connectedInputs.Count >= 2 && connectedInputs[0] != null && connectedInputs[1] != null)
+                {
+                    currentOutputValue = !(connectedInputs[0].currentOutputValue && connectedInputs[1].currentOutputValue);
+                }
+                else
+                {
+                    currentOutputValue = false;
+                }
                 break;
         }
 
         UpdateVisuals();
     }
 
+    /// <summary>
+    /// Memperbarui visual busur Bezier (LineRenderer), bola paket data, node soket terminal,
+    /// indikator objek 3D OutputActuator, dan label 3D TextMeshPro secara real-time.
+    /// </summary>
     public void UpdateVisuals()
     {
         Color activeLaserColor = currentOutputValue ? highSignalColor : lowSignalColor;
+
+        // 1. Perbarui busur energi Quadratic Bezier, bola paket data, & cincin soket terminal
         RefreshConnectionVisuals(advanceFlowPhase: false);
 
+        // 2. Perbarui totem reaktor hologram 3D (InputSource/LogicGate) & diorama kontekstual OutputActuator
+        SetTotemActive(isTracked);
+        SetOutputDioramaActive(isTracked);
+        if (isTracked)
+        {
+            UpdateTotemColors();
+            UpdateOutputDioramaColors();
+        }
+
+        // 3. Perbarui indikator tambahan opsional di Inspector (jika terpasang manual)
         if (statusIndicatorRenderer != null && statusIndicatorRenderer.material != null)
         {
             statusIndicatorRenderer.material.color = activeLaserColor;
         }
 
+        // 4. Perbarui visibilitas, teks, warna, dan orientasi 3D TextMeshPro di atas kartu
         if (statusLabel != null)
         {
-            if (statusLabel.gameObject.activeSelf != isTracked) statusLabel.gameObject.SetActive(isTracked);
+            if (statusLabel.gameObject.activeSelf != isTracked)
+            {
+                statusLabel.gameObject.SetActive(isTracked);
+            }
+
             if (isTracked)
             {
                 if (nodeType == NodeType.InputSource)

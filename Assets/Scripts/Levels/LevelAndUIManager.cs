@@ -208,6 +208,11 @@ public class LevelAndUIManager : MonoBehaviour
         currentLevelIndex = Mathf.Clamp(index, 0, levels.Count - 1);
         LevelScenario currentLevel = levels[currentLevelIndex];
 
+        if (outputNode != null)
+        {
+            outputNode.SetOutputDioramaVariant(currentLevelIndex);
+        }
+
         if (txtNextLevelButtonLabel != null) txtNextLevelButtonLabel.text = "Level Berikutnya";
         if (nextLevelButtonObj != null) nextLevelButtonObj.SetActive(false);
         if (txtResetLevelButtonLabel != null) txtResetLevelButtonLabel.text = "Reset Level";
