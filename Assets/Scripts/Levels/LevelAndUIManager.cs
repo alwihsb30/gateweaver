@@ -103,6 +103,10 @@ public class LevelAndUIManager : MonoBehaviour
     private const int WaveformSampleCount = 16;
     private const float WaveformSampleIntervalSeconds = 0.25f;
 
+    private const string PrefKeyLevelClearedPrefix = "GW_v3_LevelCleared_";
+    private const string PrefKeyLevelStarsPrefix = "GW_v3_LevelStars_";
+    private const string PrefKeyLastUnlockedLevel = "GW_v3_LastUnlockedLevel";
+    private const string PrefKeyAudioMuted = "GW_v3_AudioMuted";
 
     private bool isVerifying = false;
     private bool isSandboxMode = false;
@@ -122,6 +126,19 @@ public class LevelAndUIManager : MonoBehaviour
     private TMP_Text txtHintButtonLabel;
     private Image hintButtonBackground;
     private Button hintButton;
+    private Button reportOpenButton;
+
+    // Komponen Modal Rapor Kompetensi Informatika (Hari 16 / v3.0)
+    private GameObject competencyReportPanelObj;
+    private TMP_Text txtReportSummaryStats;
+    private TMP_Text txtReportPredicate;
+    private TMP_Text[] reportRowTitleTexts;
+    private TMP_Text[] reportRowStarsTexts;
+    private TMP_Text[] reportRowStatusTexts;
+    private Image[] reportRowBackgrounds;
+    private Button reportCloseButton;
+    private Button reportSandboxButton;
+    private Button reportResetButton;
 
     // Komponen Osiloskop Sinyal Digital Prosedural (3 Kanal x 16 Sampel = 48 bar, Zero GC)
     private TMP_Text txtWaveformLabelA;
@@ -215,6 +232,7 @@ public class LevelAndUIManager : MonoBehaviour
             circuitManager = FindAnyObjectByType<CircuitManager>();
         }
 
+        LoadPersistentProgress();
         AutoBindCoreNodesIfNeeded();
         AutoBindToggleButtonsTextIfNeeded();
         AutoBindActionButtonsIfNeeded();
@@ -250,6 +268,30 @@ public class LevelAndUIManager : MonoBehaviour
         {
             hintButton.onClick.RemoveListener(OnHintButtonClicked);
             hintButton = null;
+        }
+
+        if (reportOpenButton != null)
+        {
+            reportOpenButton.onClick.RemoveListener(ToggleCompetencyReport);
+            reportOpenButton = null;
+        }
+
+        if (reportCloseButton != null)
+        {
+            reportCloseButton.onClick.RemoveListener(CloseCompetencyReport);
+            reportCloseButton = null;
+        }
+
+        if (reportSandboxButton != null)
+        {
+            reportSandboxButton.onClick.RemoveListener(OnReportSandboxClicked);
+            reportSandboxButton = null;
+        }
+
+        if (reportResetButton != null)
+        {
+            reportResetButton.onClick.RemoveListener(OnReportResetProgressClicked);
+            reportResetButton = null;
         }
 
         DestroyProceduralAudioClips();
@@ -477,11 +519,15 @@ public class LevelAndUIManager : MonoBehaviour
         txtStarMastery.fontSizeMin = 10f;
         txtStarMastery.fontSizeMax = 13.5f;
 
-        // Tombol Petunjuk Pedagogis 3 Tingkat (Tier 1..3)
+        // Tombol Petunjuk Pedagogis 3 Tingkat (Tier 1..3) & Tombol Rapor CP
         CreateScaffoldingHintButton(panelRect, safeFont);
+        CreateCompetencyReportButton(panelRect, safeFont);
 
         // Osiloskop Sinyal Digital Real-Time [A(t) | B(t) | Y(t)]
         CreateWaveformMonitorUI(panelRect, safeFont);
+
+        // Modal Rapor Kompetensi Informatika Fase E (default tersembunyi)
+        InitializeCompetencyReportUI(targetCanvas.transform, safeFont);
 
         RefreshTruthTableTargets();
         ResetTruthTableScanResults();
@@ -759,7 +805,7 @@ public class LevelAndUIManager : MonoBehaviour
         rect.anchorMax = new Vector2(0f, 1f);
         rect.pivot = new Vector2(0f, 1f);
         rect.anchoredPosition = new Vector2(14f, -380f);
-        rect.sizeDelta = new Vector2(432f, 34f);
+        rect.sizeDelta = new Vector2(292f, 34f);
 
         hintButtonBackground = btnObj.GetComponent<Image>();
         hintButtonBackground.raycastTarget = true;
@@ -768,7 +814,7 @@ public class LevelAndUIManager : MonoBehaviour
         hintButton.targetGraphic = hintButtonBackground;
         hintButton.onClick.AddListener(OnHintButtonClicked);
 
-        txtHintButtonLabel = CreateMatrixText("Txt_ScaffoldingHint", rect, Vector2.zero, new Vector2(432f, 34f),
+        txtHintButtonLabel = CreateMatrixText("Txt_ScaffoldingHint", rect, Vector2.zero, new Vector2(292f, 34f),
             "Petunjuk (0/3)", 13f, TextAlignmentOptions.Center, Color.white, fontAsset);
         txtHintButtonLabel.enableAutoSizing = true;
         txtHintButtonLabel.fontSizeMin = 10f;
@@ -779,6 +825,395 @@ public class LevelAndUIManager : MonoBehaviour
         labelRect.pivot = new Vector2(0.5f, 0.5f);
         labelRect.offsetMin = new Vector2(6f, 0f);
         labelRect.offsetMax = new Vector2(-6f, 0f);
+    }
+
+    private void CreateCompetencyReportButton(RectTransform parent, TMP_FontAsset fontAsset)
+    {
+        GameObject btnObj = new GameObject("Btn_OpenCompetencyReport", typeof(RectTransform), typeof(Image), typeof(Button));
+        btnObj.transform.SetParent(parent, false);
+
+        RectTransform rect = btnObj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(314f, -380f);
+        rect.sizeDelta = new Vector2(132f, 34f);
+
+        Image btnBg = btnObj.GetComponent<Image>();
+        btnBg.color = new Color(0.10f, 0.34f, 0.42f, 0.96f);
+        btnBg.raycastTarget = true;
+
+        reportOpenButton = btnObj.GetComponent<Button>();
+        reportOpenButton.targetGraphic = btnBg;
+        reportOpenButton.onClick.AddListener(ToggleCompetencyReport);
+
+        TMP_Text btnLabel = CreateMatrixText("Txt_OpenCompetencyReport", rect, Vector2.zero, new Vector2(132f, 34f),
+            "Rapor CP", 13f, TextAlignmentOptions.Center, new Color(0.75f, 0.98f, 1f, 1f), fontAsset);
+        RectTransform labelRect = btnLabel.rectTransform;
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.pivot = new Vector2(0.5f, 0.5f);
+        labelRect.offsetMin = Vector2.zero;
+        labelRect.offsetMax = Vector2.zero;
+    }
+
+    private void InitializeCompetencyReportUI(Transform canvasTransform, TMP_FontAsset fontAsset)
+    {
+        if (competencyReportPanelObj != null || canvasTransform == null)
+        {
+            return;
+        }
+
+        competencyReportPanelObj = new GameObject("Panel_CompetencyReport", typeof(RectTransform), typeof(Image));
+        competencyReportPanelObj.transform.SetParent(canvasTransform, false);
+        competencyReportPanelObj.transform.SetAsLastSibling();
+
+        RectTransform modalRect = competencyReportPanelObj.GetComponent<RectTransform>();
+        modalRect.anchorMin = new Vector2(0.5f, 0.5f);
+        modalRect.anchorMax = new Vector2(0.5f, 0.5f);
+        modalRect.pivot = new Vector2(0.5f, 0.5f);
+        modalRect.anchoredPosition = Vector2.zero;
+        modalRect.sizeDelta = new Vector2(760f, 520f);
+
+        Image modalBg = competencyReportPanelObj.GetComponent<Image>();
+        modalBg.color = new Color(0.04f, 0.08f, 0.14f, 0.96f);
+        modalBg.raycastTarget = true;
+
+        // Bingkai sian 4 sisi
+        CreateReportBorderStrip("Border_Top", modalRect, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), Vector2.zero, new Vector2(0f, 3f));
+        CreateReportBorderStrip("Border_Bottom", modalRect, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f), Vector2.zero, new Vector2(0f, 3f));
+        CreateReportBorderStrip("Border_Left", modalRect, new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(0f, 0.5f), Vector2.zero, new Vector2(3f, 0f));
+        CreateReportBorderStrip("Border_Right", modalRect, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(1f, 0.5f), Vector2.zero, new Vector2(3f, 0f));
+
+        TMP_Text headerTitle = CreateMatrixText("Txt_ReportHeader", modalRect, new Vector2(20f, -14f), new Vector2(720f, 30f),
+            "RAPOR KOMPETENSI INFORMATIKA FASE E - SISTEM KOMPUTER", 18f, TextAlignmentOptions.Center, MatrixAccentCyanColor, fontAsset);
+        headerTitle.enableAutoSizing = true;
+        headerTitle.fontSizeMin = 13f;
+        headerTitle.fontSizeMax = 18f;
+
+        RectTransform topDivRect = CreateModalContainer("Divider_ReportTop", modalRect, 20f, -48f, 720f, 2f, new Color(0.22f, 0.65f, 0.85f, 0.55f));
+        topDivRect.GetComponent<Image>().raycastTarget = false;
+
+        RectTransform summaryRect = CreateModalContainer("Panel_ReportSummary", modalRect, 20f, -56f, 720f, 54f, MatrixHeaderBgColor);
+        summaryRect.GetComponent<Image>().raycastTarget = false;
+
+        txtReportSummaryStats = CreateMatrixText("Txt_ReportSummaryStats", summaryRect, new Vector2(12f, -4f), new Vector2(696f, 22f),
+            "Total Bintang: 0 / 21  |  Misi Tuntas: 0 / 7", 15f, TextAlignmentOptions.Center, Color.white, fontAsset);
+
+        txtReportPredicate = CreateMatrixText("Txt_ReportPredicate", summaryRect, new Vector2(12f, -28f), new Vector2(696f, 22f),
+            "PREDIKAT: KADET LOGIKA DIGITAL (PEMULA)", 14f, TextAlignmentOptions.Center, MatrixBrightCyanColor, fontAsset);
+        txtReportPredicate.enableAutoSizing = true;
+        txtReportPredicate.fontSizeMin = 11f;
+        txtReportPredicate.fontSizeMax = 14.5f;
+
+        int rowCount = Mathf.Min(7, (levels != null && levels.Count > 0) ? levels.Count : 7);
+        reportRowBackgrounds = new Image[rowCount];
+        reportRowTitleTexts = new TMP_Text[rowCount];
+        reportRowStarsTexts = new TMP_Text[rowCount];
+        reportRowStatusTexts = new TMP_Text[rowCount];
+
+        for (int i = 0; i < rowCount; i++)
+        {
+            float rowY = -120f - (i * 43f);
+            RectTransform rowRect = CreateModalContainer($"Row_ReportLevel_{i}", modalRect, 20f, rowY, 720f, 38f, RowIdleBgColor);
+            Image rowBg = rowRect.GetComponent<Image>();
+            rowBg.raycastTarget = false;
+            reportRowBackgrounds[i] = rowBg;
+
+            reportRowTitleTexts[i] = CreateMatrixText($"Txt_ReportTitle_{i}", rowRect, new Vector2(14f, -2f), new Vector2(430f, 34f),
+                $"Level {i + 1}", 14f, TextAlignmentOptions.Left, Color.white, fontAsset);
+            reportRowTitleTexts[i].enableAutoSizing = true;
+            reportRowTitleTexts[i].fontSizeMin = 11f;
+            reportRowTitleTexts[i].fontSizeMax = 14.5f;
+
+            reportRowStarsTexts[i] = CreateMatrixText($"Txt_ReportStars_{i}", rowRect, new Vector2(454f, -2f), new Vector2(120f, 34f),
+                "[...]", 15f, TextAlignmentOptions.Center, Color.white, fontAsset);
+
+            reportRowStatusTexts[i] = CreateMatrixText($"Txt_ReportStatus_{i}", rowRect, new Vector2(584f, -2f), new Vector2(122f, 34f),
+                "BELUM", 14f, TextAlignmentOptions.Center, new Color(0.95f, 0.68f, 0.35f, 1f), fontAsset);
+        }
+
+        RectTransform botDivRect = CreateModalContainer("Divider_ReportBottom", modalRect, 20f, -430f, 720f, 2f, new Color(0.22f, 0.65f, 0.85f, 0.55f));
+        botDivRect.GetComponent<Image>().raycastTarget = false;
+
+        reportCloseButton = CreateReportModalButton("Btn_ReportClose", modalRect, 20f, -444f, 228f, 50f,
+            "Tutup Rapor", new Color(0.14f, 0.30f, 0.44f, 1f), Color.white, fontAsset, CloseCompetencyReport);
+
+        reportSandboxButton = CreateReportModalButton("Btn_ReportSandbox", modalRect, 266f, -444f, 228f, 50f,
+            "Mode Sandbox", new Color(0.10f, 0.38f, 0.36f, 1f), new Color(0.78f, 1.00f, 0.94f, 1f), fontAsset, OnReportSandboxClicked);
+
+        reportResetButton = CreateReportModalButton("Btn_ReportReset", modalRect, 512f, -444f, 228f, 50f,
+            "Reset Progres (0/21)", new Color(0.42f, 0.14f, 0.14f, 1f), new Color(1.00f, 0.84f, 0.82f, 1f), fontAsset, OnReportResetProgressClicked);
+
+        competencyReportPanelObj.SetActive(false);
+        RefreshCompetencyReportUI();
+    }
+
+    private static void CreateReportBorderStrip(
+        string name,
+        RectTransform parent,
+        Vector2 anchorMin,
+        Vector2 anchorMax,
+        Vector2 pivot,
+        Vector2 anchoredPos,
+        Vector2 sizeDelta)
+    {
+        GameObject strip = new GameObject(name, typeof(RectTransform), typeof(Image));
+        strip.transform.SetParent(parent, false);
+
+        RectTransform rect = strip.GetComponent<RectTransform>();
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.pivot = pivot;
+        rect.anchoredPosition = anchoredPos;
+        rect.sizeDelta = sizeDelta;
+
+        Image img = strip.GetComponent<Image>();
+        img.color = MatrixAccentCyanColor;
+        img.raycastTarget = false;
+    }
+
+    private static RectTransform CreateModalContainer(string name, RectTransform parent, float leftX, float topY, float width, float height, Color bgColor)
+    {
+        GameObject obj = new GameObject(name, typeof(RectTransform), typeof(Image));
+        obj.transform.SetParent(parent, false);
+
+        RectTransform rect = obj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(leftX, topY);
+        rect.sizeDelta = new Vector2(width, height);
+
+        Image img = obj.GetComponent<Image>();
+        img.color = bgColor;
+        return rect;
+    }
+
+    private static Button CreateReportModalButton(
+        string name,
+        RectTransform parent,
+        float leftX,
+        float topY,
+        float width,
+        float height,
+        string label,
+        Color bgColor,
+        Color textColor,
+        TMP_FontAsset fontAsset,
+        UnityEngine.Events.UnityAction onClickAction)
+    {
+        RectTransform btnRect = CreateModalContainer(name, parent, leftX, topY, width, height, bgColor);
+        Image img = btnRect.GetComponent<Image>();
+        img.raycastTarget = true;
+
+        Button btn = btnRect.gameObject.AddComponent<Button>();
+        btn.targetGraphic = img;
+        if (onClickAction != null)
+        {
+            btn.onClick.AddListener(onClickAction);
+        }
+
+        TMP_Text btnLabel = CreateMatrixText($"{name}_Label", btnRect, Vector2.zero, new Vector2(width, height),
+            label, 14.5f, TextAlignmentOptions.Center, textColor, fontAsset);
+        btnLabel.enableAutoSizing = true;
+        btnLabel.fontSizeMin = 11f;
+        btnLabel.fontSizeMax = 15f;
+        RectTransform labelRect = btnLabel.rectTransform;
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.pivot = new Vector2(0.5f, 0.5f);
+        labelRect.offsetMin = new Vector2(6f, 0f);
+        labelRect.offsetMax = new Vector2(-6f, 0f);
+
+        return btn;
+    }
+
+    /// <summary>
+    /// Membuka atau menutup modal Rapor Kompetensi Informatika Fase E dari tombol "Rapor CP".
+    /// </summary>
+    public void ToggleCompetencyReport()
+    {
+        PlaySfx(clipToggleInput);
+
+        if (competencyReportPanelObj == null)
+        {
+            return;
+        }
+
+        if (competencyReportPanelObj.activeSelf)
+        {
+            CloseCompetencyReport();
+        }
+        else
+        {
+            OpenCompetencyReport();
+        }
+    }
+
+    public void OpenCompetencyReport()
+    {
+        if (competencyReportPanelObj == null)
+        {
+            return;
+        }
+
+        RefreshCompetencyReportUI();
+        competencyReportPanelObj.transform.SetAsLastSibling();
+        competencyReportPanelObj.SetActive(true);
+    }
+
+    public void CloseCompetencyReport()
+    {
+        if (competencyReportPanelObj != null && competencyReportPanelObj.activeSelf)
+        {
+            competencyReportPanelObj.SetActive(false);
+        }
+    }
+
+    private void OnReportSandboxClicked()
+    {
+        PlaySfx(clipToggleInput);
+        CloseCompetencyReport();
+        EnterSandboxMode();
+    }
+
+    private void OnReportResetProgressClicked()
+    {
+        PlaySfx(clipToggleInput);
+        ClearPersistentProgress();
+        RefreshCompetencyReportUI();
+    }
+
+    private void RefreshCompetencyReportUI()
+    {
+        EnsureLevelProgressArraysInitialized();
+        int totalStars = GetTotalStars();
+        int maxStars = GetMaxTotalStars();
+        int levelCount = levels != null ? levels.Count : 0;
+
+        int clearedCount = 0;
+        if (levelCompletedFlags != null)
+        {
+            for (int i = 0; i < levelCompletedFlags.Length; i++)
+            {
+                if (levelCompletedFlags[i])
+                {
+                    clearedCount++;
+                }
+            }
+        }
+
+        if (txtReportSummaryStats != null)
+        {
+            txtReportSummaryStats.text = $"Total Bintang: {totalStars} / {maxStars}  |  Misi Tuntas: {clearedCount} / {levelCount}";
+        }
+
+        if (txtReportPredicate != null)
+        {
+            txtReportPredicate.text = GetCompetencyPredicateText(totalStars, out Color predicateColor);
+            txtReportPredicate.color = predicateColor;
+        }
+
+        if (reportRowTitleTexts == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < reportRowTitleTexts.Length; i++)
+        {
+            bool hasLevel = levels != null && i < levels.Count;
+            bool isCleared = levelCompletedFlags != null && i < levelCompletedFlags.Length && levelCompletedFlags[i];
+            int stars = (levelBestStars != null && i < levelBestStars.Length) ? levelBestStars[i] : 0;
+
+            if (reportRowTitleTexts[i] != null)
+            {
+                string levelTitle = hasLevel ? levels[i].levelTitle : $"Level {i + 1}";
+                reportRowTitleTexts[i].text = FormatReportRowTitle(i, levelTitle);
+            }
+
+            if (reportRowStarsTexts[i] != null)
+            {
+                reportRowStarsTexts[i].text = FormatStarsAscii(stars);
+                reportRowStarsTexts[i].color = stars switch
+                {
+                    3 => new Color(1.00f, 0.86f, 0.25f, 1f),
+                    2 => MatrixBrightCyanColor,
+                    1 => new Color(1.00f, 0.65f, 0.28f, 1f),
+                    _ => new Color(0.65f, 0.72f, 0.80f, 1f)
+                };
+            }
+
+            if (reportRowStatusTexts[i] != null)
+            {
+                reportRowStatusTexts[i].text = isCleared ? "TUNTAS" : "BELUM";
+                reportRowStatusTexts[i].color = isCleared
+                    ? MatrixBrightGreenColor
+                    : new Color(0.95f, 0.68f, 0.35f, 1f);
+            }
+
+            if (reportRowBackgrounds != null && reportRowBackgrounds[i] != null)
+            {
+                reportRowBackgrounds[i].color = isCleared ? RowPassBgColor : RowIdleBgColor;
+            }
+        }
+    }
+
+    private static string GetCompetencyPredicateText(int totalStars, out Color predicateColor)
+    {
+        if (totalStars >= 19)
+        {
+            predicateColor = new Color(1.00f, 0.86f, 0.25f, 1f);
+            return "PREDIKAT: ARSITEK LOGIKA UTAMA (SANGAT MAHIR)";
+        }
+
+        if (totalStars >= 14)
+        {
+            predicateColor = MatrixBrightGreenColor;
+            return "PREDIKAT: TEKNISI RANGKAIAN KOMBINASIONAL (MAHIR)";
+        }
+
+        if (totalStars >= 7)
+        {
+            predicateColor = new Color(1.00f, 0.76f, 0.28f, 1f);
+            return "PREDIKAT: PERAKIT GERBANG DASAR (CUKUP)";
+        }
+
+        predicateColor = new Color(0.75f, 0.86f, 0.96f, 1f);
+        return "PREDIKAT: KADET LOGIKA DIGITAL (PEMULA)";
+    }
+
+    private static string GetCompetencyTopicTag(int levelIndex)
+    {
+        switch (levelIndex)
+        {
+            case 0: return "[OR]";
+            case 1: return "[XOR]";
+            case 2: return "[A AND NOT B]";
+            case 3: return "[NAND]";
+            case 4: return "[XNOR]";
+            case 5: return "[NOR]";
+            case 6: return "[De Morgan]";
+            default: return $"[L{levelIndex + 1}]";
+        }
+    }
+
+    private static string FormatReportRowTitle(int levelIndex, string rawTitle)
+    {
+        string topicTag = GetCompetencyTopicTag(levelIndex);
+        if (string.IsNullOrEmpty(rawTitle))
+        {
+            return $"Level {levelIndex + 1} {topicTag}";
+        }
+
+        int colonIdx = rawTitle.IndexOf(':');
+        if (colonIdx > 0 && colonIdx + 1 < rawTitle.Length)
+        {
+            string missionName = rawTitle.Substring(colonIdx + 1).Trim();
+            return $"Level {levelIndex + 1} {topicTag}: {missionName}";
+        }
+
+        return $"Level {levelIndex + 1} {topicTag}: {rawTitle}";
     }
 
     /// <summary>
@@ -1461,6 +1896,7 @@ public class LevelAndUIManager : MonoBehaviour
     {
         isAudioMuted = !isAudioMuted;
         UpdateAudioToggleButtonUI();
+        SavePersistentProgress();
 
         if (!isAudioMuted)
         {
@@ -1614,6 +2050,99 @@ public class LevelAndUIManager : MonoBehaviour
         {
             levelBestStars = new int[count];
         }
+    }
+
+    /// <summary>
+    /// Memuat progres bintang, status selesai 7 level, level terakhir terbuka, dan preferensi audio dari PlayerPrefs.
+    /// </summary>
+    private void LoadPersistentProgress()
+    {
+        EnsureLevelProgressArraysInitialized();
+
+        isAudioMuted = PlayerPrefs.GetInt(PrefKeyAudioMuted, isAudioMuted ? 1 : 0) == 1;
+
+        int levelCount = levels != null ? levels.Count : 0;
+        for (int i = 0; i < levelCount; i++)
+        {
+            levelCompletedFlags[i] = PlayerPrefs.GetInt($"{PrefKeyLevelClearedPrefix}{i}", 0) == 1;
+            levelBestStars[i] = Mathf.Clamp(PlayerPrefs.GetInt($"{PrefKeyLevelStarsPrefix}{i}", 0), 0, 3);
+        }
+
+        if (levelCount > 0 && PlayerPrefs.HasKey(PrefKeyLastUnlockedLevel))
+        {
+            int savedUnlocked = PlayerPrefs.GetInt(PrefKeyLastUnlockedLevel, 0);
+            currentLevelIndex = Mathf.Clamp(savedUnlocked, 0, levelCount - 1);
+        }
+    }
+
+    /// <summary>
+    /// Menyimpan seluruh progres level, bintang terbaik, dan status mute audio ke PlayerPrefs perangkat.
+    /// </summary>
+    private void SavePersistentProgress()
+    {
+        EnsureLevelProgressArraysInitialized();
+
+        PlayerPrefs.SetInt(PrefKeyAudioMuted, isAudioMuted ? 1 : 0);
+
+        int levelCount = levels != null ? levels.Count : 0;
+        int highestUnlocked = 0;
+        for (int i = 0; i < levelCount; i++)
+        {
+            bool cleared = levelCompletedFlags != null && i < levelCompletedFlags.Length && levelCompletedFlags[i];
+            int stars = (levelBestStars != null && i < levelBestStars.Length) ? Mathf.Clamp(levelBestStars[i], 0, 3) : 0;
+
+            PlayerPrefs.SetInt($"{PrefKeyLevelClearedPrefix}{i}", cleared ? 1 : 0);
+            PlayerPrefs.SetInt($"{PrefKeyLevelStarsPrefix}{i}", stars);
+
+            if (cleared)
+            {
+                highestUnlocked = Mathf.Min(levelCount - 1, i + 1);
+            }
+        }
+
+        if (levelCount > 0)
+        {
+            int lastUnlocked = Mathf.Clamp(Mathf.Max(highestUnlocked, currentLevelIndex), 0, levelCount - 1);
+            PlayerPrefs.SetInt(PrefKeyLastUnlockedLevel, lastUnlocked);
+        }
+
+        PlayerPrefs.Save();
+    }
+
+    /// <summary>
+    /// Menghapus seluruh penyimpanan progres level & bintang (0/21) di PlayerPrefs dan mengembalikan permainan ke Level 1.
+    /// </summary>
+    public void ClearPersistentProgress()
+    {
+        EnsureLevelProgressArraysInitialized();
+        Array.Clear(levelCompletedFlags, 0, levelCompletedFlags.Length);
+        Array.Clear(levelBestStars, 0, levelBestStars.Length);
+        attemptsOnCurrentLevel = 0;
+        hintTierUsed = 0;
+
+        int levelCount = levels != null ? levels.Count : 0;
+        for (int i = 0; i < levelCount; i++)
+        {
+            PlayerPrefs.DeleteKey($"{PrefKeyLevelClearedPrefix}{i}");
+            PlayerPrefs.DeleteKey($"{PrefKeyLevelStarsPrefix}{i}");
+        }
+        PlayerPrefs.DeleteKey(PrefKeyLastUnlockedLevel);
+        PlayerPrefs.Save();
+
+        if (inputANode != null)
+        {
+            inputANode.SetSimulationOverride(false);
+            inputANode.SetInputState(false);
+        }
+
+        if (inputBNode != null)
+        {
+            inputBNode.SetSimulationOverride(false);
+            inputBNode.SetInputState(false);
+        }
+
+        LoadLevel(0);
+        RefreshCompetencyReportUI();
     }
 
     private static int CalculateEarnedStars(int attempts, bool withinQuota, bool applyTier3HintCap)
@@ -2256,25 +2785,7 @@ public class LevelAndUIManager : MonoBehaviour
 
     private void RestartFromFirstLevel()
     {
-        EnsureLevelProgressArraysInitialized();
-        Array.Clear(levelCompletedFlags, 0, levelCompletedFlags.Length);
-        Array.Clear(levelBestStars, 0, levelBestStars.Length);
-        attemptsOnCurrentLevel = 0;
-        hintTierUsed = 0;
-
-        if (inputANode != null)
-        {
-            inputANode.SetSimulationOverride(false);
-            inputANode.SetInputState(false);
-        }
-
-        if (inputBNode != null)
-        {
-            inputBNode.SetSimulationOverride(false);
-            inputBNode.SetInputState(false);
-        }
-
-        LoadLevel(0);
+        ClearPersistentProgress();
     }
 
     /// <summary>
@@ -2543,7 +3054,9 @@ public class LevelAndUIManager : MonoBehaviour
         {
             levelBestStars[currentLevelIndex] = earnedStars;
         }
+        SavePersistentProgress();
         UpdateStarMasteryUI();
+        RefreshCompetencyReportUI();
 
         bool isLastLevel = (levels != null && levels.Count > 0 && currentLevelIndex == levels.Count - 1);
         bool isGameCleared = AreAllLevelsCompleted() || isLastLevel;
@@ -2604,6 +3117,11 @@ public class LevelAndUIManager : MonoBehaviour
         yield return new WaitForSeconds(0.10f);
         PlaySfx(clipVictoryFanfare);
         TriggerHapticPulse();
+
+        if (isLastLevel && !wasAlreadyCleared)
+        {
+            OpenCompetencyReport();
+        }
 
         isVerifying = false;
     }
