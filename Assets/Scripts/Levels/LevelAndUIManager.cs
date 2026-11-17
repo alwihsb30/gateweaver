@@ -20,6 +20,18 @@ public class LevelScenario
 
     [Tooltip("Target Tabel Kebenaran 4 baris berurutan untuk kombinasi input AB: [0]=00, [1]=01, [2]=10, [3]=11")]
     public bool[] expectedTruthTable = new bool[4];
+
+    [TextArea(1, 3)]
+    [Tooltip("Petunjuk Tier 1 (Konsep): penjelasan logika kapan Output harus bernilai 1 atau 0")]
+    public string hintTier1Concept;
+
+    [TextArea(1, 3)]
+    [Tooltip("Petunjuk Tier 2 (Komponen): jenis kartu gerbang logika yang disiapkan di meja")]
+    public string hintTier2Component;
+
+    [TextArea(1, 3)]
+    [Tooltip("Petunjuk Tier 3 (Struktur Rakitan): urutan penyambungan Input -> Gerbang -> Output")]
+    public string hintTier3Structure;
 }
 
 public class LevelAndUIManager : MonoBehaviour
@@ -89,12 +101,14 @@ public class LevelAndUIManager : MonoBehaviour
     private const float AudioEnvelopeSeconds = 0.005f;
     private const float HapticCooldownSeconds = 0.85f;
 
+
     private bool isVerifying = false;
     private bool isSandboxMode = false;
     private bool awaitingPostVictoryChoice = false;
     private bool[] levelCompletedFlags;
     private int[] levelBestStars;
     private int attemptsOnCurrentLevel = 0;
+    private int hintTierUsed = 0;
 
     // Komponen Matrix UI Prosedural
     private TMP_Text txtBooleanFormula;
@@ -103,6 +117,10 @@ public class LevelAndUIManager : MonoBehaviour
     private TMP_Text txtAudioToggleLabel;
     private Image audioToggleBackground;
     private Button audioToggleButton;
+    private TMP_Text txtHintButtonLabel;
+    private Image hintButtonBackground;
+    private Button hintButton;
+
     private readonly Image[] matrixRowBackgrounds = new Image[TruthTableRowCount];
     private readonly TMP_Text[] matrixRowTargetTexts = new TMP_Text[TruthTableRowCount];
     private readonly TMP_Text[] matrixRowMeasuredTexts = new TMP_Text[TruthTableRowCount];
@@ -193,6 +211,12 @@ public class LevelAndUIManager : MonoBehaviour
         {
             audioToggleButton.onClick.RemoveListener(ToggleAudioMute);
             audioToggleButton = null;
+        }
+
+        if (hintButton != null)
+        {
+            hintButton.onClick.RemoveListener(OnHintButtonClicked);
+            hintButton = null;
         }
 
         DestroyProceduralAudioClips();
@@ -299,6 +323,13 @@ public class LevelAndUIManager : MonoBehaviour
         {
             txtResetLevelButtonLabel = resetLevelButtonObj.GetComponentInChildren<TMP_Text>(true);
         }
+
+        if (txtFeedback != null && !txtFeedback.enableAutoSizing)
+        {
+            txtFeedback.enableAutoSizing = true;
+            txtFeedback.fontSizeMin = 17f;
+            txtFeedback.fontSizeMax = 28f;
+        }
     }
 
     /// <summary>
@@ -340,7 +371,7 @@ public class LevelAndUIManager : MonoBehaviour
         panelRect.anchorMax = new Vector2(0f, 1f);
         panelRect.pivot = new Vector2(0f, 1f);
         panelRect.anchoredPosition = new Vector2(22f, -176f);
-        panelRect.sizeDelta = new Vector2(460f, 384f);
+        panelRect.sizeDelta = new Vector2(460f, 426f);
 
         Image panelImage = truthTableScannerPanelObj.GetComponent<Image>();
         if (panelImage != null)
@@ -413,10 +444,203 @@ public class LevelAndUIManager : MonoBehaviour
         txtStarMastery.fontSizeMin = 10f;
         txtStarMastery.fontSizeMax = 13.5f;
 
+        // Tombol Petunjuk Pedagogis 3 Tingkat (Tier 1..3)
+        CreateScaffoldingHintButton(panelRect, safeFont);
+
         RefreshTruthTableTargets();
         ResetTruthTableScanResults();
         UpdateAudioToggleButtonUI();
         UpdateStarMasteryUI();
+        UpdateHintButtonUI();
+    }
+
+    private void CreateScaffoldingHintButton(RectTransform parent, TMP_FontAsset fontAsset)
+    {
+        GameObject btnObj = new GameObject("Btn_ScaffoldingHint", typeof(RectTransform), typeof(Image), typeof(Button));
+        btnObj.transform.SetParent(parent, false);
+
+        RectTransform rect = btnObj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(14f, -380f);
+        rect.sizeDelta = new Vector2(432f, 34f);
+
+        hintButtonBackground = btnObj.GetComponent<Image>();
+        hintButtonBackground.raycastTarget = true;
+
+        hintButton = btnObj.GetComponent<Button>();
+        hintButton.targetGraphic = hintButtonBackground;
+        hintButton.onClick.AddListener(OnHintButtonClicked);
+
+        txtHintButtonLabel = CreateMatrixText("Txt_ScaffoldingHint", rect, Vector2.zero, new Vector2(432f, 34f),
+            "Petunjuk (0/3)", 13f, TextAlignmentOptions.Center, Color.white, fontAsset);
+        txtHintButtonLabel.enableAutoSizing = true;
+        txtHintButtonLabel.fontSizeMin = 10f;
+        txtHintButtonLabel.fontSizeMax = 13.5f;
+        RectTransform labelRect = txtHintButtonLabel.rectTransform;
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.pivot = new Vector2(0.5f, 0.5f);
+        labelRect.offsetMin = new Vector2(6f, 0f);
+        labelRect.offsetMax = new Vector2(-6f, 0f);
+    }
+
+    /// <summary>
+    /// Menampilkan petunjuk pedagogis bertahap (Tier 1 Konsep -> Tier 2 Komponen -> Tier 3 Struktur Rakitan).
+    /// Membuka Tier 3 sebelum level terselesaikan pertama kali membatasi perolehan maksimal menjadi 2 bintang.
+    /// </summary>
+    public void OnHintButtonClicked()
+    {
+        if (isVerifying)
+        {
+            return;
+        }
+
+        PlaySfx(clipToggleInput);
+
+        if (isSandboxMode)
+        {
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = "Mode Sandbox bebas berkreasi! Susun kombinasi gerbang apa pun lalu tekan Uji Rangkaian.";
+                txtFeedback.color = new Color(0.35f, 0.95f, 1f, 1f);
+            }
+            return;
+        }
+
+        if (levels == null || levels.Count == 0)
+        {
+            InitializeDefaultLevels();
+        }
+
+        if (hintTierUsed < 3)
+        {
+            hintTierUsed++;
+        }
+
+        UpdateHintButtonUI();
+
+        int safeIndex = Mathf.Clamp(currentLevelIndex, 0, levels.Count - 1);
+        LevelScenario currentLevel = levels[safeIndex];
+        string hintBody = GetHintTextForTier(currentLevel, safeIndex, hintTierUsed);
+
+        if (txtFeedback != null)
+        {
+            bool hasPrefix = hintBody.StartsWith("[Petunjuk", StringComparison.Ordinal);
+            switch (hintTierUsed)
+            {
+                case 1:
+                    txtFeedback.text = hasPrefix ? hintBody : $"[Petunjuk 1/3 - Konsep] {hintBody}";
+                    txtFeedback.color = new Color(0.35f, 0.95f, 1.00f, 1f);
+                    break;
+                case 2:
+                    txtFeedback.text = hasPrefix ? hintBody : $"[Petunjuk 2/3 - Komponen] {hintBody}";
+                    txtFeedback.color = new Color(1.00f, 0.88f, 0.28f, 1f);
+                    break;
+                default:
+                    string tier3Text = hasPrefix ? hintBody : $"[Petunjuk 3/3 - Struktur] {hintBody}";
+                    txtFeedback.text = $"{tier3Text} (Penalti Tier 3: maks [**])";
+                    txtFeedback.color = new Color(1.00f, 0.76f, 0.22f, 1f);
+                    break;
+            }
+        }
+    }
+
+    private void UpdateHintButtonUI()
+    {
+        if (txtHintButtonLabel == null)
+        {
+            return;
+        }
+
+        if (isSandboxMode)
+        {
+            txtHintButtonLabel.text = "Petunjuk: Mode Sandbox Bebas";
+            txtHintButtonLabel.color = new Color(0.68f, 0.90f, 0.96f, 1f);
+            if (hintButtonBackground != null)
+            {
+                hintButtonBackground.color = new Color(0.10f, 0.24f, 0.34f, 0.90f);
+            }
+            return;
+        }
+
+        int clampedTier = Mathf.Clamp(hintTierUsed, 0, 3);
+        txtHintButtonLabel.text = clampedTier >= 3
+            ? "Petunjuk (3/3) - Maks [**]"
+            : $"Petunjuk ({clampedTier}/3)";
+
+        switch (clampedTier)
+        {
+            case 0:
+                txtHintButtonLabel.color = new Color(0.86f, 0.97f, 1.00f, 1f);
+                if (hintButtonBackground != null) hintButtonBackground.color = new Color(0.12f, 0.30f, 0.45f, 0.94f);
+                break;
+            case 1:
+                txtHintButtonLabel.color = new Color(0.42f, 0.98f, 1.00f, 1f);
+                if (hintButtonBackground != null) hintButtonBackground.color = new Color(0.12f, 0.38f, 0.48f, 0.94f);
+                break;
+            case 2:
+                txtHintButtonLabel.color = new Color(1.00f, 0.90f, 0.32f, 1f);
+                if (hintButtonBackground != null) hintButtonBackground.color = new Color(0.32f, 0.30f, 0.12f, 0.94f);
+                break;
+            default:
+                txtHintButtonLabel.color = new Color(1.00f, 0.78f, 0.30f, 1f);
+                if (hintButtonBackground != null) hintButtonBackground.color = new Color(0.42f, 0.24f, 0.10f, 0.94f);
+                break;
+        }
+    }
+
+    private static string GetHintTextForTier(LevelScenario level, int levelIndex, int tier)
+    {
+        if (level != null)
+        {
+            switch (tier)
+            {
+                case 1:
+                    if (!string.IsNullOrEmpty(level.hintTier1Concept)) return level.hintTier1Concept;
+                    break;
+                case 2:
+                    if (!string.IsNullOrEmpty(level.hintTier2Component)) return level.hintTier2Component;
+                    break;
+                case 3:
+                    if (!string.IsNullOrEmpty(level.hintTier3Structure)) return level.hintTier3Structure;
+                    break;
+            }
+        }
+
+        return GetFallbackHintForLevel(levelIndex, tier);
+    }
+
+    private static string GetFallbackHintForLevel(int levelIndex, int tier)
+    {
+        switch (levelIndex)
+        {
+            case 0:
+                if (tier == 1) return "Output bernilai 1 jika minimal salah satu dari A atau B bernilai 1 (hanya 0 saat 00).";
+                if (tier == 2) return "Siapkan 1 kartu gerbang OR di antara kartu Input dan Output.";
+                return "Susun Input A dan B di kiri -> sambungkan keduanya ke OR -> arahkan OR ke Output.";
+            case 1:
+                if (tier == 1) return "Output bernilai 1 hanya ketika A dan B BERBEDA (01 atau 10).";
+                if (tier == 2) return "Siapkan 1 kartu gerbang XOR (Exclusive OR).";
+                return "Susun Input A dan B di kiri -> sambungkan keduanya ke XOR -> arahkan XOR ke Output.";
+            case 2:
+                if (tier == 1) return "Output hanya boleh 1 saat A=1 dan B=0, sehingga sinyal B harus dibalik dahulu.";
+                if (tier == 2) return "Siapkan 2 kartu gerbang: NOT untuk membalik B, dan AND untuk menggabungkannya dengan A.";
+                return "Sambungkan Input B -> NOT, lalu arahkan Input A dan keluaran NOT ke AND -> Output.";
+            case 3:
+                if (tier == 1) return "Kebalikan dari AND: Output tetap 1 untuk 00, 01, 10, dan baru menjadi 0 saat 11.";
+                if (tier == 2) return "Siapkan 1 kartu gerbang NAND agar memenuhi batas kuota 1 komponen.";
+                return "Susun Input A dan B di kiri -> sambungkan keduanya ke NAND -> arahkan NAND ke Output.";
+            case 4:
+                if (tier == 1) return "Output bernilai 1 ketika A dan B SAMA (00 atau 11), kebalikan tepat dari XOR.";
+                if (tier == 2) return "Kombinasikan 2 kartu gerbang: XOR diikuti gerbang pembalik NOT.";
+                return "Sambungkan Input A dan B ke XOR -> sambungkan keluaran XOR ke NOT -> Output.";
+            default:
+                if (tier == 1) return "Amati kolom Target pada tabel kebenaran untuk baris 00, 01, 10, dan 11.";
+                if (tier == 2) return "Pilih kartu gerbang logika yang sesuai dengan batasan kuota di HUD atas.";
+                return "Susun kartu Input di kiri, gerbang logika di tengah, dan kartu Output di sisi kanan.";
+        }
     }
 
     private void CreateAudioToggleButton(RectTransform parent, TMP_FontAsset fontAsset)
@@ -1089,19 +1313,122 @@ public class LevelAndUIManager : MonoBehaviour
         }
     }
 
-    private static int CalculateEarnedStars(int attempts, bool withinQuota)
+    private static int CalculateEarnedStars(int attempts, bool withinQuota, bool applyTier3HintCap)
     {
+        int stars;
         if (withinQuota && attempts <= 2)
         {
-            return 3;
+            stars = 3;
         }
-
-        if (attempts <= 4)
+        else if (attempts <= 4)
         {
-            return 2;
+            stars = 2;
+        }
+        else
+        {
+            stars = 1;
         }
 
-        return 1;
+        if (applyTier3HintCap)
+        {
+            stars = Mathf.Min(stars, 2);
+        }
+
+        return stars;
+    }
+
+    /// <summary>
+    /// Menganalisis miskonsepsi logika siswa dengan membandingkan ekspresi Boolean aktual rangkaian
+    /// terhadap pola tabel kebenaran target dan baris pertama yang gagal.
+    /// </summary>
+    private static string BuildMisconceptionDiagnostic(
+        string actualFormula,
+        bool[] expectedTable,
+        bool testA,
+        bool testB,
+        bool actualOutput,
+        bool expectedOutput)
+    {
+        if (string.IsNullOrEmpty(actualFormula)
+            || actualFormula == "Y = (Belum Terhubung)"
+            || actualFormula.Contains("?")
+            || actualFormula.Contains("(Siklus)"))
+        {
+            return "Masih ada kaki input gerbang yang belum menerima sinyal ('?') sehingga evaluasi belum lengkap.";
+        }
+
+        bool hasFourRows = expectedTable != null && expectedTable.Length == 4;
+        bool targetIsOr = hasFourRows && !expectedTable[0] && expectedTable[1] && expectedTable[2] && expectedTable[3];
+        bool targetIsXor = hasFourRows && !expectedTable[0] && expectedTable[1] && expectedTable[2] && !expectedTable[3];
+        bool targetIsAndNotB = hasFourRows && !expectedTable[0] && !expectedTable[1] && expectedTable[2] && !expectedTable[3];
+        bool targetIsNand = hasFourRows && expectedTable[0] && expectedTable[1] && expectedTable[2] && !expectedTable[3];
+        bool targetIsXnor = hasFourRows && expectedTable[0] && !expectedTable[1] && !expectedTable[2] && expectedTable[3];
+
+        bool hasNot = actualFormula.Contains("NOT");
+        bool hasNand = actualFormula.Contains("NAND");
+        bool hasXor = actualFormula.Contains("XOR");
+        bool hasAnd = !hasNand && actualFormula.Contains("AND");
+        bool hasOr = !hasXor && actualFormula.Contains("OR");
+
+        if (targetIsOr && hasAnd && !hasNot)
+        {
+            return $"Rumus {actualFormula} memakai AND yang butuh kedua input 1, sehingga saat A={(testA ? 1 : 0)}, B={(testB ? 1 : 0)} keluar 0. Misi ini butuh gerbang OR.";
+        }
+
+        if (targetIsOr && hasXor && !hasNot)
+        {
+            return $"Gerbang XOR pada {actualFormula} memberi 0 saat A=1 dan B=1. Ganti dengan gerbang OR agar kondisi 11 tetap bernilai 1.";
+        }
+
+        if (targetIsXor && hasOr && !hasNot)
+        {
+            return $"Gerbang OR pada {actualFormula} mengeluarkan 1 saat A=1 dan B=1, padahal target butuh XOR (1 hanya jika input berbeda).";
+        }
+
+        if (targetIsXor && hasAnd && !hasNot)
+        {
+            return $"Gerbang AND pada {actualFormula} keluar 0 saat input berbeda (A={(testA ? 1 : 0)}, B={(testB ? 1 : 0)}). Ganti dengan gerbang XOR.";
+        }
+
+        if (targetIsAndNotB)
+        {
+            if (actualFormula.Contains("(NOT A)"))
+            {
+                return "Gerbang NOT terpasang di jalur A, bukan B. Pindahkan kartu NOT ke jalur Input B sebelum masuk ke AND.";
+            }
+
+            if (hasAnd && !hasNot)
+            {
+                return $"Rangkaian {actualFormula} belum membalik Input B. Tambahkan gerbang NOT di jalur B sebelum masuk ke AND.";
+            }
+
+            if (hasNand || actualFormula.Contains("NOT("))
+            {
+                return "Posisi NOT membalik seluruh hasil AND, padahal hanya Input B yang perlu dibalik sebelum masuk ke AND.";
+            }
+        }
+
+        if (targetIsNand && hasAnd && !hasNot)
+        {
+            return $"Gerbang AND menghasilkan kebalikan tepat target NAND. Gunakan kartu NAND atau tambahkan pembalik NOT di keluaran AND.";
+        }
+
+        if (targetIsXnor && hasXor && !hasNot)
+        {
+            return "Gerbang XOR bernilai 0 saat 00/11 (kebalikan tepat XNOR). Tambahkan kartu pembalik NOT di sisi kanan XOR.";
+        }
+
+        if (!hasNot && !hasNand && !testA && !testB && !actualOutput && expectedOutput)
+        {
+            return $"Saat A=0 dan B=0, {actualFormula} keluar 0 padahal target 1. Tambahkan atau periksa posisi gerbang pembalik (NOT / NAND).";
+        }
+
+        if (targetIsXnor && !hasXor)
+        {
+            return $"Susunan {actualFormula} belum menguji kesamaan bit A dan B. Kombinasikan gerbang XOR diikuti pembalik NOT.";
+        }
+
+        return $"Susunan {actualFormula} menghasilkan {(actualOutput ? 1 : 0)} saat A={(testA ? 1 : 0)}, B={(testB ? 1 : 0)}. Periksa tipe gerbang dan posisi pembalik NOT.";
     }
 
     private int GetTotalStars()
@@ -1233,7 +1560,10 @@ public class LevelAndUIManager : MonoBehaviour
                 levelTitle = "Level 1: Alarm Pintu & Jendela",
                 missionDescription = "Susun rangkaian agar Output = 1 jika A atau B bernilai 1",
                 maxGateCardsQuota = 1,
-                expectedTruthTable = new bool[] { false, true, true, true }
+                expectedTruthTable = new bool[] { false, true, true, true },
+                hintTier1Concept = "Output bernilai 1 jika minimal salah satu dari A atau B bernilai 1 (hanya 0 saat 00).",
+                hintTier2Component = "Siapkan 1 kartu gerbang OR di antara kartu Input (A, B) dan Output.",
+                hintTier3Structure = "Susun Input A dan B di kiri -> sambungkan keduanya ke OR -> arahkan OR ke Output."
             },
 
             // Level 2: Gerbang XOR (Maks 1 Kartu) -> AB: 00=0, 01=1, 10=1, 11=0
@@ -1242,7 +1572,10 @@ public class LevelAndUIManager : MonoBehaviour
                 levelTitle = "Level 2: Sakelar Tangga Dua Arah",
                 missionDescription = "Susun rangkaian agar Output = 1 jika posisi A dan B berbeda",
                 maxGateCardsQuota = 1,
-                expectedTruthTable = new bool[] { false, true, true, false }
+                expectedTruthTable = new bool[] { false, true, true, false },
+                hintTier1Concept = "Output bernilai 1 hanya ketika A dan B BERBEDA (01 atau 10), dan 0 saat keduanya sama.",
+                hintTier2Component = "Siapkan 1 kartu gerbang XOR (Exclusive OR) sebagai pembanding dua sinyal.",
+                hintTier3Structure = "Susun Input A dan B di kiri -> sambungkan keduanya ke XOR -> arahkan XOR ke Output."
             },
 
             // Level 3: Kombinasi A AND (NOT B) (Maks 2 Kartu) -> AB: 00=0, 01=0, 10=1, 11=0
@@ -1251,7 +1584,10 @@ public class LevelAndUIManager : MonoBehaviour
                 levelTitle = "Level 3: Kunci Keamanan Brankas",
                 missionDescription = "Susun rangkaian agar Output = 1 hanya saat A = 1 dan B = 0",
                 maxGateCardsQuota = 2,
-                expectedTruthTable = new bool[] { false, false, true, false }
+                expectedTruthTable = new bool[] { false, false, true, false },
+                hintTier1Concept = "Output hanya boleh 1 saat A=1 dan B=0, sehingga sinyal B perlu dibalik dahulu.",
+                hintTier2Component = "Siapkan 2 kartu gerbang: NOT untuk membalik B, dan AND untuk menggabungkannya dengan A.",
+                hintTier3Structure = "Sambungkan Input B -> NOT, lalu arahkan Input A dan keluaran NOT ke AND -> Output."
             },
 
             // Level 4: Gerbang NAND (Maks 1 Kartu) -> !(A && B): 00=1, 01=1, 10=1, 11=0
@@ -1260,16 +1596,22 @@ public class LevelAndUIManager : MonoBehaviour
                 levelTitle = "Level 4: Pemutus Darurat Reaktor",
                 missionDescription = "Susun rangkaian agar Output = 0 hanya saat A = 1 dan B = 1",
                 maxGateCardsQuota = 1,
-                expectedTruthTable = new bool[] { true, true, true, false }
+                expectedTruthTable = new bool[] { true, true, true, false },
+                hintTier1Concept = "Kebalikan dari AND: Output tetap 1 untuk 00, 01, 10 dan turun ke 0 hanya saat 11.",
+                hintTier2Component = "Gunakan 1 kartu gerbang NAND (Not-AND) agar hemat kuota 1 komponen.",
+                hintTier3Structure = "Susun Input A dan B di kiri -> sambungkan keduanya langsung ke NAND -> Output."
             },
 
-            // Level 5 Boss: Gerbang XNOR (XOR -> NOT, Maks 2 Kartu) -> (A == B): 00=1, 01=0, 10=0, 11=1
+            // Level 5: Gerbang XNOR (XOR -> NOT, Maks 2 Kartu) -> (A == B): 00=1, 01=0, 10=0, 11=1
             new LevelScenario
             {
                 levelTitle = "Level 5: Sinkronisasi Inti Kembar",
                 missionDescription = "Susun rangkaian agar Output = 1 saat A dan B bernilai SAMA",
                 maxGateCardsQuota = 2,
-                expectedTruthTable = new bool[] { true, false, false, true }
+                expectedTruthTable = new bool[] { true, false, false, true },
+                hintTier1Concept = "Output bernilai 1 jika A dan B SAMA (00 atau 11), yaitu kebalikan tepat dari XOR.",
+                hintTier2Component = "Kombinasikan 2 kartu gerbang: XOR diikuti gerbang pembalik NOT di sisi kanannya.",
+                hintTier3Structure = "Sambungkan Input A dan B ke XOR -> sambungkan keluaran XOR ke NOT -> Output."
             }
         };
 
@@ -1278,7 +1620,7 @@ public class LevelAndUIManager : MonoBehaviour
 
     /// <summary>
     /// Memperbarui teks kuota gerbang secara real-time di setiap frame:
-    /// Di Mode Sandbox bebas batas kuota, sedangkan di Level 1..5 merah bila melebihi kuota.
+    /// Di Mode Sandbox bebas batas kuota, sedangkan di Level 1..7 merah bila melebihi kuota.
     /// </summary>
     private void UpdateQuotaStatusUI()
     {
@@ -1322,6 +1664,7 @@ public class LevelAndUIManager : MonoBehaviour
         isSandboxMode = false;
         awaitingPostVictoryChoice = false;
         attemptsOnCurrentLevel = 0;
+        hintTierUsed = 0;
 
         if (inputANode != null)
         {
@@ -1399,6 +1742,7 @@ public class LevelAndUIManager : MonoBehaviour
         UpdateQuotaStatusUI();
         UpdateInputToggleButtonsUI();
         UpdateStarMasteryUI();
+        UpdateHintButtonUI();
         SyncAudioStateBaselines(true);
     }
 
@@ -1412,6 +1756,7 @@ public class LevelAndUIManager : MonoBehaviour
         isSandboxMode = true;
         awaitingPostVictoryChoice = false;
         attemptsOnCurrentLevel = 0;
+        hintTierUsed = 0;
 
         if (inputANode != null)
         {
@@ -1472,6 +1817,7 @@ public class LevelAndUIManager : MonoBehaviour
         UpdateQuotaStatusUI();
         UpdateInputToggleButtonsUI();
         UpdateStarMasteryUI();
+        UpdateHintButtonUI();
         SyncAudioStateBaselines(true);
     }
 
@@ -1525,6 +1871,7 @@ public class LevelAndUIManager : MonoBehaviour
         Array.Clear(levelCompletedFlags, 0, levelCompletedFlags.Length);
         Array.Clear(levelBestStars, 0, levelBestStars.Length);
         attemptsOnCurrentLevel = 0;
+        hintTierUsed = 0;
 
         if (inputANode != null)
         {
@@ -1642,7 +1989,7 @@ public class LevelAndUIManager : MonoBehaviour
                         {
                             if (txtFeedback != null)
                             {
-                                txtFeedback.text = $"Gagal! Gerbang {node.nodeType} membutuhkan {requiredInputs} input (baru terhubung {node.connectedInputs.Count}). Dekatkan kartu Input.";
+                                txtFeedback.text = $"Gagal! Slot pin gerbang {node.nodeType} masih kosong ('?') ({node.connectedInputs.Count}/{requiredInputs}). Dekatkan kartu sumber.";
                                 txtFeedback.color = new Color(1f, 0.5f, 0f);
                             }
 
@@ -1711,6 +2058,7 @@ public class LevelAndUIManager : MonoBehaviour
                 circuitManager.EvaluateCircuit();
             }
 
+
             if (txtFeedback != null)
             {
                 txtFeedback.text = isSandboxMode
@@ -1719,7 +2067,8 @@ public class LevelAndUIManager : MonoBehaviour
                 txtFeedback.color = Color.yellow;
             }
 
-            yield return new WaitForSeconds(0.45f);
+            yield return new WaitForSeconds(0.225f);
+            yield return new WaitForSeconds(0.225f);
 
             if (circuitManager != null)
             {
@@ -1740,11 +2089,21 @@ public class LevelAndUIManager : MonoBehaviour
                 scanningRowIndex = -1;
                 PlaySfx(clipRowFail);
                 RestoreInitialInputStates(originalInputA, originalInputB);
-                SyncAudioStateBaselines(false);
+                    SyncAudioStateBaselines(false);
 
                 if (txtFeedback != null)
                 {
-                    txtFeedback.text = $"Gagal pada uji A={(testA ? 1 : 0)}, B={(testB ? 1 : 0)} (Hasil: {(actualOutput ? 1 : 0)}, Target: {(expectedOutput ? 1 : 0)}).";
+                    string actualFormula = circuitManager != null
+                        ? circuitManager.GetCircuitBooleanExpression(outputNode)
+                        : "Y = (Belum Terhubung)";
+                    string diagnostic = BuildMisconceptionDiagnostic(
+                        actualFormula,
+                        currentLevel.expectedTruthTable,
+                        testA,
+                        testB,
+                        actualOutput,
+                        expectedOutput);
+                    txtFeedback.text = $"Gagal di Baris [A={(testA ? 1 : 0)}, B={(testB ? 1 : 0)}]: Output aktual = {(actualOutput ? 1 : 0)}, seharusnya = {(expectedOutput ? 1 : 0)}. Diagnostik: {diagnostic}";
                     txtFeedback.color = Color.red;
                 }
 
@@ -1777,13 +2136,16 @@ public class LevelAndUIManager : MonoBehaviour
         }
 
         EnsureLevelProgressArraysInitialized();
+        bool wasAlreadyCleared = (currentLevelIndex >= 0 && currentLevelIndex < levelCompletedFlags.Length)
+                                 && levelCompletedFlags[currentLevelIndex];
         if (currentLevelIndex >= 0 && currentLevelIndex < levelCompletedFlags.Length)
         {
             levelCompletedFlags[currentLevelIndex] = true;
         }
 
         bool withinQuota = circuitManager == null || circuitManager.activeGateCardsCount <= currentLevel.maxGateCardsQuota;
-        int earnedStars = CalculateEarnedStars(attemptsOnCurrentLevel, withinQuota);
+        bool applyTier3HintCap = !wasAlreadyCleared && hintTierUsed >= 3;
+        int earnedStars = CalculateEarnedStars(attemptsOnCurrentLevel, withinQuota, applyTier3HintCap);
         if (currentLevelIndex >= 0 && currentLevelIndex < levelBestStars.Length && earnedStars > levelBestStars[currentLevelIndex])
         {
             levelBestStars[currentLevelIndex] = earnedStars;
