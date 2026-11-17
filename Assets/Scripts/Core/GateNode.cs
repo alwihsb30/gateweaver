@@ -134,8 +134,34 @@ public class GateNode : MonoBehaviour
     [Tooltip("Sudut buka daun pintu brankas (derajat) pada Level 3 saat OUTPUT = 1")]
     public float vaultOpenAngle = 75f;
 
+    [Header("9. Telemetri Pin 3D & Rising-Edge Shockwave (v3.0)")]
+    [Tooltip("Durasi animasi cincin gelombang kejut 3D (detik) saat terjadi transisi naik 0 -> 1")]
+    public float shockwaveDuration = 0.45f;
+
+    [Tooltip("Skala awal cincin gelombang kejut 3D pada pusat kartu")]
+    public float shockwaveStartScale = 0.07f;
+
+    [Tooltip("Skala maksimum cincin gelombang kejut 3D mendekati tepi kartu 0.8 unit")]
+    public float shockwaveEndScale = 0.36f;
+
+    [Tooltip("Opasitas awal cincin gelombang kejut 3D sebelum meluruh ke 0")]
+    [Range(0.1f, 1f)]
+    public float shockwaveStartAlpha = 0.85f;
+
     [HideInInspector]
     public LineRenderer lineRenderer;
+
+    [HideInInspector]
+    public bool isInputAConnected;
+
+    [HideInInspector]
+    public bool isInputBConnected;
+
+    [HideInInspector]
+    public bool inputAValue;
+
+    [HideInInspector]
+    public bool inputBValue;
 
     private GameObject outputDioramaRootObj;
     private GameObject[] outputDioramaVariantObjs;
@@ -170,6 +196,11 @@ public class GateNode : MonoBehaviour
     private GameObject sourceSocketObj;
     private GameObject targetSocketObj;
 
+    private GameObject[] inputPinObjs;
+    private Material[] inputPinMaterials;
+    private GameObject shockwaveRingObj;
+    private Material shockwaveMaterial;
+
     private GameObject totemRootObj;
     private Transform totemFloatGroup;
     private Transform totemPrimarySpinTransform;
@@ -197,6 +228,11 @@ public class GateNode : MonoBehaviour
     private float totemSpinPhase = 0f;
     private float totemBobPhase = 0f;
 
+    private bool shockwaveBaselineInitialized = false;
+    private bool lastShockwaveOutputState = false;
+    private bool isShockwavePlaying = false;
+    private float shockwaveElapsed = 0f;
+
     private static int activeGateNodeCount = 0;
     private static Mesh sharedTorusMesh;
     private static Mesh sharedDiamondSpireMesh;
@@ -221,6 +257,10 @@ public class GateNode : MonoBehaviour
     private static readonly Color LowDioramaBodyColor = new Color(0.22f, 0.27f, 0.35f, 1f);
     private static readonly Color LowDioramaAccentColor = new Color(0.25f, 0.35f, 0.48f, 1f);
     private static readonly Color LowDioramaEmissiveColor = new Color(0.62f, 0.16f, 0.10f, 1f);
+    private static readonly Color PinUnconnectedColor = new Color(0.42f, 0.54f, 0.66f, 1f);
+    private static readonly Color PinLowColor = new Color(0.86f, 0.26f, 0.12f, 1f);
+    private static readonly Color PinHighColor = new Color(0.18f, 1.00f, 0.72f, 1f);
+    private static readonly Color ShockwavePulseColor = new Color(0.20f, 1.00f, 0.82f, 1f);
 
     private void Awake()
     {
@@ -231,6 +271,8 @@ public class GateNode : MonoBehaviour
         InitializeArcAndTerminalVisuals();
         InitializeTotemVisual();
         InitializeOutputDioramaVisual();
+        InitializeInputPinsVisual();
+        InitializeShockwaveVisual();
     }
 
     private void Start()
@@ -256,11 +298,14 @@ public class GateNode : MonoBehaviour
             UpdateLabelBillboard();
             AnimateTotemVisual();
             AnimateOutputDioramaVisual();
+            DetectRisingEdgeAndAnimateShockwave();
         }
         else
         {
             SetTotemActive(false);
             SetOutputDioramaActive(false);
+            SetInputPinsActive(false);
+            ResetShockwaveState();
         }
 
         RefreshConnectionVisuals(advanceFlowPhase: true);
@@ -283,6 +328,15 @@ public class GateNode : MonoBehaviour
         DestroyProceduralMaterial(ref dioramaAccentMaterial);
         DestroyProceduralMaterial(ref dioramaEmissiveMaterial);
         DestroyProceduralMaterial(ref customIndicatorMaterial);
+        DestroyProceduralMaterial(ref shockwaveMaterial);
+
+        if (inputPinMaterials != null)
+        {
+            for (int i = 0; i < inputPinMaterials.Length; i++)
+            {
+                DestroyProceduralMaterial(ref inputPinMaterials[i]);
+            }
+        }
 
         activeGateNodeCount = Mathf.Max(0, activeGateNodeCount - 1);
         if (activeGateNodeCount == 0)
@@ -1732,10 +1786,13 @@ public class GateNode : MonoBehaviour
         rotationInitialized = false;
         connectedInputs.Clear();
         connectedTarget = null;
+        UpdateInputPinTelemetry();
 
         SetConnectionVisualsActive(false);
         SetTotemActive(false);
         SetOutputDioramaActive(false);
+        SetInputPinsActive(false);
+        ResetShockwaveState();
         UpdateVisuals();
     }
 
@@ -1814,6 +1871,8 @@ public class GateNode : MonoBehaviour
     /// </summary>
     public void EvaluateGateLogic()
     {
+        UpdateInputPinTelemetry();
+
         switch (nodeType)
         {
             case NodeType.InputSource:
@@ -1892,22 +1951,25 @@ public class GateNode : MonoBehaviour
 
     /// <summary>
     /// Memperbarui visual busur Bezier (LineRenderer), bola paket data, node soket terminal,
-    /// indikator objek 3D OutputActuator, dan label 3D TextMeshPro secara real-time.
+    /// indikator pin input mikro 3D, diorama OutputActuator, dan label telemetri 3D TextMeshPro.
     /// </summary>
     public void UpdateVisuals()
     {
+        UpdateInputPinTelemetry();
         Color activeLaserColor = currentOutputValue ? highSignalColor : lowSignalColor;
 
         // 1. Perbarui busur energi Quadratic Bezier, bola paket data, & cincin soket terminal
         RefreshConnectionVisuals(advanceFlowPhase: false);
 
-        // 2. Perbarui totem reaktor hologram 3D (InputSource/LogicGate) & diorama kontekstual OutputActuator
+        // 2. Perbarui totem reaktor hologram 3D, indikator pin mikro 3D, & diorama OutputActuator
         SetTotemActive(isTracked);
         SetOutputDioramaActive(isTracked);
+        SetInputPinsActive(isTracked);
         if (isTracked)
         {
             UpdateTotemColors();
             UpdateOutputDioramaColors();
+            UpdateInputPinsVisual();
         }
 
         // 3. Perbarui indikator tambahan opsional di Inspector (jika terpasang manual)
@@ -1924,7 +1986,7 @@ public class GateNode : MonoBehaviour
             }
         }
 
-        // 4. Perbarui visibilitas, teks, warna, dan orientasi 3D TextMeshPro di atas kartu
+        // 4. Perbarui visibilitas, teks telemetri pin, warna, dan orientasi 3D TextMeshPro di atas kartu
         if (statusLabel != null)
         {
             if (statusLabel.gameObject.activeSelf != isTracked)
@@ -1934,23 +1996,265 @@ public class GateNode : MonoBehaviour
 
             if (isTracked)
             {
-                if (nodeType == NodeType.InputSource)
-                {
-                    string inputName = gameObject.name.ToUpperInvariant().Contains("B") ? "B" : "A";
-                    statusLabel.text = $"INPUT {inputName}: {(currentOutputValue ? "1" : "0")}";
-                }
-                else if (nodeType == NodeType.OutputActuator)
-                {
-                    statusLabel.text = $"OUTPUT: {(currentOutputValue ? "1 (AKTIF)" : "0 (MATI)")}";
-                }
-                else
-                {
-                    statusLabel.text = $"{nodeType} -> {(currentOutputValue ? "1" : "0")}";
-                }
-
+                statusLabel.text = BuildTelemetryStatusText();
                 statusLabel.color = currentOutputValue ? BrightGreenTextColor : BrightRedOrangeTextColor;
                 UpdateLabelBillboard();
             }
+        }
+    }
+
+    private void UpdateInputPinTelemetry()
+    {
+        isInputAConnected = connectedInputs != null
+                            && connectedInputs.Count >= 1
+                            && connectedInputs[0] != null
+                            && connectedInputs[0].isTracked;
+        inputAValue = isInputAConnected && connectedInputs[0].currentOutputValue;
+
+        isInputBConnected = connectedInputs != null
+                            && connectedInputs.Count >= 2
+                            && connectedInputs[1] != null
+                            && connectedInputs[1].isTracked;
+        inputBValue = isInputBConnected && connectedInputs[1].currentOutputValue;
+    }
+
+    private string BuildTelemetryStatusText()
+    {
+        if (nodeType == NodeType.InputSource)
+        {
+            string inputName = gameObject.name.ToUpperInvariant().Contains("B") ? "B" : "A";
+            return $"INPUT {inputName}: {(currentOutputValue ? "1 [HIGH]" : "0 [LOW]")}";
+        }
+
+        string pinA = FormatPinBit(isInputAConnected, inputAValue);
+        if (nodeType == NodeType.OutputActuator)
+        {
+            return $"OUTPUT [{pinA}] -> {(currentOutputValue ? "AKTIF" : "MATI")}";
+        }
+
+        if (nodeType == NodeType.NOT)
+        {
+            return $"NOT [{pinA}] -> {(currentOutputValue ? "1" : "0")}";
+        }
+
+        string pinB = FormatPinBit(isInputBConnected, inputBValue);
+        return $"{nodeType} [{pinA},{pinB}] -> {(currentOutputValue ? "1" : "0")}";
+    }
+
+    private static string FormatPinBit(bool isConnected, bool value)
+    {
+        return isConnected ? (value ? "1" : "0") : "?";
+    }
+
+    /// <summary>
+    /// Membangun 1 atau 2 indikator mikro pin input 3D (tanpa Collider) di sisi kiri totem pada permukaan kartu LogicGate.
+    /// </summary>
+    private void InitializeInputPinsVisual()
+    {
+        if (nodeType == NodeType.InputSource || nodeType == NodeType.OutputActuator)
+        {
+            return;
+        }
+
+        int pinCount = GetMaxInputCount();
+        if (pinCount <= 0)
+        {
+            return;
+        }
+
+        inputPinObjs = new GameObject[pinCount];
+        inputPinMaterials = new Material[pinCount];
+
+        for (int i = 0; i < pinCount; i++)
+        {
+            float zOffset = pinCount == 2 ? (i == 0 ? 0.056f : -0.056f) : 0f;
+            Material pinMat = CreateSafeOpenGLMaterial();
+            if (pinMat != null)
+            {
+                pinMat.color = PinUnconnectedColor;
+            }
+            inputPinMaterials[i] = pinMat;
+
+            GameObject pinObj = CreatePrimitivePart(
+                $"InputPinNode_{i}",
+                PrimitiveType.Sphere,
+                transform,
+                new Vector3(-0.15f, 0.024f, zOffset),
+                Vector3.zero,
+                Vector3.one * 0.024f,
+                pinMat);
+            pinObj.SetActive(false);
+            inputPinObjs[i] = pinObj;
+        }
+    }
+
+    private void SetInputPinsActive(bool active)
+    {
+        if (inputPinObjs == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < inputPinObjs.Length; i++)
+        {
+            if (inputPinObjs[i] != null && inputPinObjs[i].activeSelf != active)
+            {
+                inputPinObjs[i].SetActive(active);
+            }
+        }
+    }
+
+    private void UpdateInputPinsVisual()
+    {
+        if (inputPinObjs == null || inputPinObjs.Length == 0)
+        {
+            return;
+        }
+
+        UpdateSingleInputPin(0, isInputAConnected, inputAValue);
+        if (inputPinObjs.Length >= 2)
+        {
+            UpdateSingleInputPin(1, isInputBConnected, inputBValue);
+        }
+    }
+
+    private void UpdateSingleInputPin(int index, bool isConnected, bool value)
+    {
+        if (index < 0 || inputPinObjs == null || index >= inputPinObjs.Length)
+        {
+            return;
+        }
+
+        GameObject pinObj = inputPinObjs[index];
+        Material pinMat = (inputPinMaterials != null && index < inputPinMaterials.Length) ? inputPinMaterials[index] : null;
+
+        Color targetColor;
+        float targetScale;
+        if (!isConnected)
+        {
+            targetColor = PinUnconnectedColor;
+            targetScale = 0.024f;
+        }
+        else if (value)
+        {
+            targetColor = PinHighColor;
+            targetScale = 0.044f;
+        }
+        else
+        {
+            targetColor = PinLowColor;
+            targetScale = 0.033f;
+        }
+
+        if (pinMat != null)
+        {
+            pinMat.color = targetColor;
+        }
+
+        if (pinObj != null)
+        {
+            pinObj.transform.localScale = Vector3.one * targetScale;
+        }
+    }
+
+    /// <summary>
+    /// Membangun cincin gelombang kejut 3D prosedural menggunakan GetSharedTorusMesh() tanpa Collider.
+    /// </summary>
+    private void InitializeShockwaveVisual()
+    {
+        shockwaveMaterial = CreateSafeOpenGLMaterial();
+        if (shockwaveMaterial != null)
+        {
+            shockwaveMaterial.color = new Color(ShockwavePulseColor.r, ShockwavePulseColor.g, ShockwavePulseColor.b, 0f);
+        }
+
+        shockwaveRingObj = CreateProceduralMeshPart(
+            "ShockwaveRing3D",
+            GetSharedTorusMesh(),
+            transform,
+            new Vector3(0f, 0.018f, 0f),
+            Vector3.zero,
+            new Vector3(shockwaveStartScale, 0.035f, shockwaveStartScale),
+            shockwaveMaterial);
+        shockwaveRingObj.SetActive(false);
+    }
+
+    private void DetectRisingEdgeAndAnimateShockwave()
+    {
+        if (!shockwaveBaselineInitialized)
+        {
+            lastShockwaveOutputState = currentOutputValue;
+            shockwaveBaselineInitialized = true;
+        }
+        else
+        {
+            if (!lastShockwaveOutputState && currentOutputValue)
+            {
+                TriggerShockwavePulse();
+            }
+
+            lastShockwaveOutputState = currentOutputValue;
+        }
+
+        if (!isShockwavePlaying)
+        {
+            return;
+        }
+
+        shockwaveElapsed += Time.deltaTime;
+        float duration = Mathf.Max(0.05f, shockwaveDuration);
+        float t = Mathf.Clamp01(shockwaveElapsed / duration);
+        ApplyShockwaveFrame(t);
+
+        if (t >= 1f)
+        {
+            isShockwavePlaying = false;
+            if (shockwaveRingObj != null)
+            {
+                shockwaveRingObj.SetActive(false);
+            }
+        }
+    }
+
+    private void TriggerShockwavePulse()
+    {
+        isShockwavePlaying = true;
+        shockwaveElapsed = 0f;
+
+        if (shockwaveRingObj != null)
+        {
+            shockwaveRingObj.SetActive(true);
+            ApplyShockwaveFrame(0f);
+        }
+    }
+
+    private void ApplyShockwaveFrame(float normalizedTime)
+    {
+        float eased = 1f - ((1f - normalizedTime) * (1f - normalizedTime));
+        float scaleXZ = Mathf.Lerp(shockwaveStartScale, shockwaveEndScale, eased);
+        float alpha = Mathf.Lerp(shockwaveStartAlpha, 0f, normalizedTime);
+
+        if (shockwaveRingObj != null)
+        {
+            shockwaveRingObj.transform.localScale = new Vector3(scaleXZ, 0.035f, scaleXZ);
+        }
+
+        if (shockwaveMaterial != null)
+        {
+            shockwaveMaterial.color = new Color(ShockwavePulseColor.r, ShockwavePulseColor.g, ShockwavePulseColor.b, alpha);
+        }
+    }
+
+    private void ResetShockwaveState()
+    {
+        shockwaveBaselineInitialized = false;
+        lastShockwaveOutputState = false;
+        isShockwavePlaying = false;
+        shockwaveElapsed = 0f;
+
+        if (shockwaveRingObj != null && shockwaveRingObj.activeSelf)
+        {
+            shockwaveRingObj.SetActive(false);
         }
     }
 }
