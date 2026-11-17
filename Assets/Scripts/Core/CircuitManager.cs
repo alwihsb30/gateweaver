@@ -19,9 +19,14 @@ public class CircuitManager : MonoBehaviour
 
     private readonly List<GateNode> trackedNodes = new List<GateNode>();
     private readonly List<GateNode> expressionActivePath = new List<GateNode>();
+    private Camera cachedMainCamera;
+    private Transform currentSortCameraTransform;
+    private System.Comparison<GateNode> cachedNodeSortComparison;
 
     private void Awake()
     {
+        cachedNodeSortComparison = CompareNodesByCameraX;
+
         // Otomatis isi allNodes menggunakan API Unity 6 jika belum diisi manual di Inspector
         allNodes.RemoveAll(node => node == null);
 
@@ -87,14 +92,19 @@ public class CircuitManager : MonoBehaviour
 
         activeGateCardsCount = gateCount;
 
-        // Urutkan node aktif dari kiri ke kanan berdasarkan sumbu X lokal kamera
-        Transform camTransform = Camera.main != null ? Camera.main.transform : null;
-        trackedNodes.Sort((a, b) =>
+        // Urutkan node aktif dari kiri ke kanan berdasarkan sumbu X lokal kamera (tanpa alokasi closure per frame)
+        Transform camTransform = ResolveMainCameraTransform();
+        if (trackedNodes.Count > 1)
         {
-            float xA = GetCameraRelativeX(a.transform.position, camTransform);
-            float xB = GetCameraRelativeX(b.transform.position, camTransform);
-            return xA.CompareTo(xB);
-        });
+            if (cachedNodeSortComparison == null)
+            {
+                cachedNodeSortComparison = CompareNodesByCameraX;
+            }
+
+            currentSortCameraTransform = camTransform;
+            trackedNodes.Sort(cachedNodeSortComparison);
+            currentSortCameraTransform = null;
+        }
 
         // 3A. Hubungkan seluruh kartu InputSource ke kartu Gerbang Logika terdekat (Greedy Closest-Pair).
         // Selama masih ada kartu gerbang logika aktif di rangkaian (activeGateCardsCount > 0),
@@ -334,6 +344,26 @@ public class CircuitManager : MonoBehaviour
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Mengembalikan Transform kamera utama yang di-cache untuk menghindari pencarian tag tiap frame.
+    /// </summary>
+    private Transform ResolveMainCameraTransform()
+    {
+        if (cachedMainCamera == null || !cachedMainCamera.isActiveAndEnabled)
+        {
+            cachedMainCamera = Camera.main;
+        }
+
+        return cachedMainCamera != null ? cachedMainCamera.transform : null;
+    }
+
+    private int CompareNodesByCameraX(GateNode a, GateNode b)
+    {
+        float xA = GetCameraRelativeX(a.transform.position, currentSortCameraTransform);
+        float xB = GetCameraRelativeX(b.transform.position, currentSortCameraTransform);
+        return xA.CompareTo(xB);
     }
 
     /// <summary>

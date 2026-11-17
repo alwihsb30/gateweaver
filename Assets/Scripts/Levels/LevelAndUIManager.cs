@@ -172,6 +172,17 @@ public class LevelAndUIManager : MonoBehaviour
     private int scanningRowIndex = -1;
     private string lastTopologySignature = string.Empty;
     private bool hasLastTopologySignature = false;
+    private int lastTopologyActiveGates = -1;
+    private bool lastTopologyOutputTracked = false;
+    private int lastTopologyConnectionCount = -1;
+    private string lastRenderedFormula = string.Empty;
+    private bool hasRenderedFormulaBaseline = false;
+    private int lastRenderedOutputState = -2;
+    private int lastDisplayedInputA = -1;
+    private int lastDisplayedInputB = -1;
+    private int lastQuotaActiveCount = -1;
+    private int lastQuotaMaxCount = -1;
+    private int lastQuotaSandboxMode = -1;
 
     // Synthesizer Audio Prosedural & Pelacak Event Audio/Haptik
     private AudioSource sfxAudioSource;
@@ -294,8 +305,17 @@ public class LevelAndUIManager : MonoBehaviour
             reportResetButton = null;
         }
 
+        PlayerPrefs.Save();
         DestroyProceduralAudioClips();
         Screen.sleepTimeout = SleepTimeout.SystemSetting;
+    }
+
+    private void OnApplicationPause(bool pauseStatus)
+    {
+        if (pauseStatus)
+        {
+            PlayerPrefs.Save();
+        }
     }
 
     /// <summary>
@@ -1668,13 +1688,18 @@ public class LevelAndUIManager : MonoBehaviour
         int activeGates = circuitManager != null ? circuitManager.activeGateCardsCount : 0;
         bool outputTracked = outputNode != null && outputNode.isTracked;
         int currentConnectionCount = circuitManager != null ? circuitManager.GetActiveConnectionCount() : 0;
-        string topologySignature = $"{currentFormula}|{activeGates}|{outputTracked}|{currentConnectionCount}";
+
+        bool topologyChanged = !hasLastTopologySignature
+            || lastTopologyActiveGates != activeGates
+            || lastTopologyOutputTracked != outputTracked
+            || lastTopologyConnectionCount != currentConnectionCount
+            || !string.Equals(lastTopologySignature, currentFormula, StringComparison.Ordinal);
 
         if (!isVerifying)
         {
             bool isCircuitComplete = circuitManager != null && circuitManager.IsCircuitCompleteToOutput(outputNode);
 
-            if (hasLastTopologySignature && topologySignature != lastTopologySignature)
+            if (hasLastTopologySignature && topologyChanged)
             {
                 if (HasAnyScannedMatrixRow())
                 {
@@ -1694,24 +1719,44 @@ public class LevelAndUIManager : MonoBehaviour
 
             lastActiveConnectionCount = currentConnectionCount;
             wasCircuitComplete = isCircuitComplete;
-            lastTopologySignature = topologySignature;
+            lastTopologySignature = currentFormula;
+            lastTopologyActiveGates = activeGates;
+            lastTopologyOutputTracked = outputTracked;
+            lastTopologyConnectionCount = currentConnectionCount;
             hasLastTopologySignature = true;
         }
 
-        txtBooleanFormula.text = $"Rumus Rakitan: {currentFormula}";
+        if (!hasRenderedFormulaBaseline || !string.Equals(lastRenderedFormula, currentFormula, StringComparison.Ordinal))
+        {
+            hasRenderedFormulaBaseline = true;
+            lastRenderedFormula = currentFormula;
+            txtBooleanFormula.text = $"Rumus Rakitan: {currentFormula}";
+        }
 
         if (txtCurrentOutputReadout != null)
         {
-            if (outputNode != null && outputNode.isTracked)
+            int outputState = (outputNode != null && outputNode.isTracked)
+                ? (outputNode.currentOutputValue ? 1 : 0)
+                : -1;
+
+            if (outputState != lastRenderedOutputState)
             {
-                bool outputVal = outputNode.currentOutputValue;
-                txtCurrentOutputReadout.text = outputVal ? "Output Y = 1 [AKTIF]" : "Output Y = 0 [MATI]";
-                txtCurrentOutputReadout.color = outputVal ? MatrixBrightGreenColor : MatrixBrightRedColor;
-            }
-            else
-            {
-                txtCurrentOutputReadout.text = "Output Y = - [BELUM TERLACAK]";
-                txtCurrentOutputReadout.color = new Color(1f, 0.72f, 0.25f, 1f);
+                lastRenderedOutputState = outputState;
+                if (outputState > 0)
+                {
+                    txtCurrentOutputReadout.text = "Output Y = 1 [AKTIF]";
+                    txtCurrentOutputReadout.color = MatrixBrightGreenColor;
+                }
+                else if (outputState == 0)
+                {
+                    txtCurrentOutputReadout.text = "Output Y = 0 [MATI]";
+                    txtCurrentOutputReadout.color = MatrixBrightRedColor;
+                }
+                else
+                {
+                    txtCurrentOutputReadout.text = "Output Y = - [BELUM TERLACAK]";
+                    txtCurrentOutputReadout.color = new Color(1f, 0.72f, 0.25f, 1f);
+                }
             }
         }
 
@@ -2417,12 +2462,22 @@ public class LevelAndUIManager : MonoBehaviour
     {
         if (txtBtnToggleA != null && inputANode != null)
         {
-            txtBtnToggleA.text = $"Input A: {(inputANode.currentOutputValue ? 1 : 0)}";
+            int stateA = inputANode.currentOutputValue ? 1 : 0;
+            if (stateA != lastDisplayedInputA)
+            {
+                lastDisplayedInputA = stateA;
+                txtBtnToggleA.text = $"Input A: {stateA}";
+            }
         }
 
         if (txtBtnToggleB != null && inputBNode != null)
         {
-            txtBtnToggleB.text = $"Input B: {(inputBNode.currentOutputValue ? 1 : 0)}";
+            int stateB = inputBNode.currentOutputValue ? 1 : 0;
+            if (stateB != lastDisplayedInputB)
+            {
+                lastDisplayedInputB = stateB;
+                txtBtnToggleB.text = $"Input B: {stateB}";
+            }
         }
     }
 
@@ -2549,6 +2604,15 @@ public class LevelAndUIManager : MonoBehaviour
 
         if (isSandboxMode)
         {
+            if (lastQuotaSandboxMode == 1 && lastQuotaActiveCount == activeCount)
+            {
+                return;
+            }
+
+            lastQuotaSandboxMode = 1;
+            lastQuotaActiveCount = activeCount;
+            lastQuotaMaxCount = -1;
+
             bool supportsInfinityGlyph = txtQuotaStatus.font != null && txtQuotaStatus.font.HasCharacter('\u221E');
             string unlimitedSymbol = supportsInfinityGlyph ? "\u221E" : "Bebas";
             txtQuotaStatus.text = $"Kuota Gerbang: {activeCount} / {unlimitedSymbol}";
@@ -2564,6 +2628,15 @@ public class LevelAndUIManager : MonoBehaviour
         int safeIndex = Mathf.Clamp(currentLevelIndex, 0, levels.Count - 1);
         LevelScenario currentLevel = levels[safeIndex];
         int maxQuota = currentLevel.maxGateCardsQuota;
+
+        if (lastQuotaSandboxMode == 0 && lastQuotaActiveCount == activeCount && lastQuotaMaxCount == maxQuota)
+        {
+            return;
+        }
+
+        lastQuotaSandboxMode = 0;
+        lastQuotaActiveCount = activeCount;
+        lastQuotaMaxCount = maxQuota;
 
         txtQuotaStatus.text = $"Kuota Gerbang: {activeCount} / {maxQuota}";
         txtQuotaStatus.color = (activeCount > maxQuota) ? Color.red : Color.white;
