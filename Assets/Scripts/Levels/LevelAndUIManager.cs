@@ -100,6 +100,8 @@ public class LevelAndUIManager : MonoBehaviour
     private const int AudioSampleRate = 44100;
     private const float AudioEnvelopeSeconds = 0.005f;
     private const float HapticCooldownSeconds = 0.85f;
+    private const int WaveformSampleCount = 16;
+    private const float WaveformSampleIntervalSeconds = 0.25f;
 
 
     private bool isVerifying = false;
@@ -121,6 +123,28 @@ public class LevelAndUIManager : MonoBehaviour
     private Image hintButtonBackground;
     private Button hintButton;
 
+    // Komponen Osiloskop Sinyal Digital Prosedural (3 Kanal x 16 Sampel = 48 bar, Zero GC)
+    private TMP_Text txtWaveformLabelA;
+    private TMP_Text txtWaveformLabelB;
+    private TMP_Text txtWaveformLabelY;
+    private RectTransform[] waveBarRectsA;
+    private Image[] waveBarImagesA;
+    private RectTransform[] waveBarRectsB;
+    private Image[] waveBarImagesB;
+    private RectTransform[] waveBarRectsY;
+    private Image[] waveBarImagesY;
+    private readonly int[] sampleA = new int[WaveformSampleCount];
+    private readonly int[] sampleB = new int[WaveformSampleCount];
+    private readonly int[] sampleY = new int[WaveformSampleCount];
+    private readonly float[] waveformBarXPositions = new float[WaveformSampleCount];
+    private float waveformSampleTimer = 0f;
+    private bool waveformBaselineInitialized = false;
+    private int lastSampledWaveA = 0;
+    private int lastSampledWaveB = 0;
+    private int lastSampledWaveY = -1;
+    private int renderedWaveLabelA = -2;
+    private int renderedWaveLabelB = -2;
+    private int renderedWaveLabelY = -2;
     private readonly Image[] matrixRowBackgrounds = new Image[TruthTableRowCount];
     private readonly TMP_Text[] matrixRowTargetTexts = new TMP_Text[TruthTableRowCount];
     private readonly TMP_Text[] matrixRowMeasuredTexts = new TMP_Text[TruthTableRowCount];
@@ -160,6 +184,14 @@ public class LevelAndUIManager : MonoBehaviour
     private static readonly Color MatrixBrightGreenColor = new Color(0.25f, 1.00f, 0.35f, 1f);
     private static readonly Color MatrixBrightRedColor = new Color(1.00f, 0.30f, 0.25f, 1f);
     private static readonly Color MatrixBrightCyanColor = new Color(0.30f, 0.95f, 1.00f, 1f);
+    private static readonly Color WaveTrackBgColor = new Color(0.03f, 0.06f, 0.11f, 0.92f);
+    private static readonly Color WaveHighAColor = new Color(0.18f, 0.85f, 1.00f, 1f);
+    private static readonly Color WaveLowAColor = new Color(0.10f, 0.30f, 0.52f, 0.85f);
+    private static readonly Color WaveHighBColor = new Color(1.00f, 0.84f, 0.22f, 1f);
+    private static readonly Color WaveLowBColor = new Color(0.45f, 0.36f, 0.10f, 0.85f);
+    private static readonly Color WaveHighYColor = new Color(0.20f, 1.00f, 0.45f, 1f);
+    private static readonly Color WaveLowYColor = new Color(0.85f, 0.25f, 0.16f, 0.90f);
+    private static readonly Color WaveUntrackedYColor = new Color(0.38f, 0.44f, 0.52f, 0.65f);
 
     public bool IsSandboxMode => isSandboxMode;
 
@@ -200,6 +232,7 @@ public class LevelAndUIManager : MonoBehaviour
         UpdateQuotaStatusUI();
         UpdateInputToggleButtonsUI();
         UpdateTruthTableMatrixLive();
+        UpdateWaveformMonitorLive();
         MonitorInputStateAudio();
     }
 
@@ -371,7 +404,7 @@ public class LevelAndUIManager : MonoBehaviour
         panelRect.anchorMax = new Vector2(0f, 1f);
         panelRect.pivot = new Vector2(0f, 1f);
         panelRect.anchoredPosition = new Vector2(22f, -176f);
-        panelRect.sizeDelta = new Vector2(460f, 426f);
+        panelRect.sizeDelta = new Vector2(460f, 536f);
 
         Image panelImage = truthTableScannerPanelObj.GetComponent<Image>();
         if (panelImage != null)
@@ -447,11 +480,273 @@ public class LevelAndUIManager : MonoBehaviour
         // Tombol Petunjuk Pedagogis 3 Tingkat (Tier 1..3)
         CreateScaffoldingHintButton(panelRect, safeFont);
 
+        // Osiloskop Sinyal Digital Real-Time [A(t) | B(t) | Y(t)]
+        CreateWaveformMonitorUI(panelRect, safeFont);
+
         RefreshTruthTableTargets();
         ResetTruthTableScanResults();
+        ResetWaveformSamples();
         UpdateAudioToggleButtonUI();
         UpdateStarMasteryUI();
         UpdateHintButtonUI();
+    }
+
+    private void CreateWaveformMonitorUI(RectTransform panelRect, TMP_FontAsset fontAsset)
+    {
+        for (int i = 0; i < WaveformSampleCount; i++)
+        {
+            waveformBarXPositions[i] = 2f + (i * 21f);
+        }
+
+        GameObject dividerObj = new GameObject("Divider_Waveform", typeof(RectTransform), typeof(Image));
+        dividerObj.transform.SetParent(panelRect, false);
+        RectTransform divRect = dividerObj.GetComponent<RectTransform>();
+        divRect.anchorMin = new Vector2(0f, 1f);
+        divRect.anchorMax = new Vector2(0f, 1f);
+        divRect.pivot = new Vector2(0f, 1f);
+        divRect.anchoredPosition = new Vector2(14f, -420f);
+        divRect.sizeDelta = new Vector2(432f, 2f);
+        Image divImg = dividerObj.GetComponent<Image>();
+        divImg.color = new Color(0.22f, 0.65f, 0.85f, 0.45f);
+        divImg.raycastTarget = false;
+
+        RectTransform wavePanelRect = CreateMatrixRowContainer("Panel_WaveformMonitor", panelRect, -426f, 100f, MatrixHeaderBgColor);
+
+        CreateMatrixText("Txt_WaveformHeader", wavePanelRect, new Vector2(8f, -3f), new Vector2(416f, 18f),
+            "OSILOSKOP SINYAL DIGITAL [A(t) | B(t) | Y(t)]", 11.5f, TextAlignmentOptions.Left, MatrixAccentCyanColor, fontAsset);
+
+        CreateWaveformChannelRow("Wave_Channel_A", wavePanelRect, -24f, "A(t): 0", WaveHighAColor, fontAsset,
+            out txtWaveformLabelA, out waveBarRectsA, out waveBarImagesA);
+        CreateWaveformChannelRow("Wave_Channel_B", wavePanelRect, -49f, "B(t): 0", WaveHighBColor, fontAsset,
+            out txtWaveformLabelB, out waveBarRectsB, out waveBarImagesB);
+        CreateWaveformChannelRow("Wave_Channel_Y", wavePanelRect, -74f, "Y(t): -", MatrixBrightGreenColor, fontAsset,
+            out txtWaveformLabelY, out waveBarRectsY, out waveBarImagesY);
+    }
+
+    private void CreateWaveformChannelRow(
+        string rowName,
+        RectTransform parent,
+        float topY,
+        string initialLabel,
+        Color labelColor,
+        TMP_FontAsset fontAsset,
+        out TMP_Text labelText,
+        out RectTransform[] barRects,
+        out Image[] barImages)
+    {
+        GameObject rowObj = new GameObject(rowName, typeof(RectTransform));
+        rowObj.transform.SetParent(parent, false);
+
+        RectTransform rowRect = rowObj.GetComponent<RectTransform>();
+        rowRect.anchorMin = new Vector2(0f, 1f);
+        rowRect.anchorMax = new Vector2(0f, 1f);
+        rowRect.pivot = new Vector2(0f, 1f);
+        rowRect.anchoredPosition = new Vector2(0f, topY);
+        rowRect.sizeDelta = new Vector2(432f, 22f);
+
+        labelText = CreateMatrixText($"{rowName}_Label", rowRect, new Vector2(8f, -1f), new Vector2(76f, 20f),
+            initialLabel, 12.5f, TextAlignmentOptions.Left, labelColor, fontAsset);
+
+        GameObject trackObj = new GameObject($"{rowName}_Track", typeof(RectTransform), typeof(Image));
+        trackObj.transform.SetParent(rowRect, false);
+
+        RectTransform trackRect = trackObj.GetComponent<RectTransform>();
+        trackRect.anchorMin = new Vector2(0f, 1f);
+        trackRect.anchorMax = new Vector2(0f, 1f);
+        trackRect.pivot = new Vector2(0f, 1f);
+        trackRect.anchoredPosition = new Vector2(88f, -1f);
+        trackRect.sizeDelta = new Vector2(336f, 20f);
+
+        Image trackImg = trackObj.GetComponent<Image>();
+        trackImg.color = WaveTrackBgColor;
+        trackImg.raycastTarget = false;
+
+        barRects = new RectTransform[WaveformSampleCount];
+        barImages = new Image[WaveformSampleCount];
+
+        for (int i = 0; i < WaveformSampleCount; i++)
+        {
+            GameObject barObj = new GameObject($"Pulse_{i}", typeof(RectTransform), typeof(Image));
+            barObj.transform.SetParent(trackRect, false);
+
+            RectTransform barRect = barObj.GetComponent<RectTransform>();
+            barRect.anchorMin = Vector2.zero;
+            barRect.anchorMax = Vector2.zero;
+            barRect.pivot = Vector2.zero;
+            barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 2f);
+            barRect.sizeDelta = new Vector2(17f, 3.5f);
+
+            Image barImg = barObj.GetComponent<Image>();
+            barImg.color = WaveUntrackedYColor;
+            barImg.raycastTarget = false;
+
+            barRects[i] = barRect;
+            barImages[i] = barImg;
+        }
+    }
+
+    private void ResetWaveformSamples()
+    {
+        int initA = (inputANode != null && inputANode.currentOutputValue) ? 1 : 0;
+        int initB = (inputBNode != null && inputBNode.currentOutputValue) ? 1 : 0;
+        int initY = (outputNode != null && outputNode.isTracked) ? (outputNode.currentOutputValue ? 1 : 0) : -1;
+
+        for (int i = 0; i < WaveformSampleCount; i++)
+        {
+            sampleA[i] = initA;
+            sampleB[i] = initB;
+            sampleY[i] = initY;
+        }
+
+        waveformSampleTimer = 0f;
+        waveformBaselineInitialized = true;
+        lastSampledWaveA = initA;
+        lastSampledWaveB = initB;
+        lastSampledWaveY = initY;
+        renderedWaveLabelA = -2;
+        renderedWaveLabelB = -2;
+        renderedWaveLabelY = -2;
+
+        RefreshWaveformVisuals();
+        UpdateWaveformChannelLabels(initA, initB, initY);
+    }
+
+    private void UpdateWaveformMonitorLive()
+    {
+        if (waveBarRectsA == null || isVerifying)
+        {
+            return;
+        }
+
+        int curA = (inputANode != null && inputANode.currentOutputValue) ? 1 : 0;
+        int curB = (inputBNode != null && inputBNode.currentOutputValue) ? 1 : 0;
+        int curY = (outputNode != null && outputNode.isTracked) ? (outputNode.currentOutputValue ? 1 : 0) : -1;
+
+        waveformSampleTimer += Time.unscaledDeltaTime;
+
+        bool stateChanged = !waveformBaselineInitialized
+                            || curA != lastSampledWaveA
+                            || curB != lastSampledWaveB
+                            || curY != lastSampledWaveY;
+
+        if (stateChanged || waveformSampleTimer >= WaveformSampleIntervalSeconds)
+        {
+            RecordWaveformSample(curA, curB, curY);
+            waveformSampleTimer = 0f;
+        }
+    }
+
+    private void SampleWaveformFromCurrentNodes()
+    {
+        int curA = (inputANode != null && inputANode.currentOutputValue) ? 1 : 0;
+        int curB = (inputBNode != null && inputBNode.currentOutputValue) ? 1 : 0;
+        int curY = (outputNode != null && outputNode.isTracked) ? (outputNode.currentOutputValue ? 1 : 0) : -1;
+        waveformSampleTimer = 0f;
+        RecordWaveformSample(curA, curB, curY);
+    }
+
+    private void RecordWaveformSample(int valA, int valB, int valY)
+    {
+        for (int i = 0; i < WaveformSampleCount - 1; i++)
+        {
+            sampleA[i] = sampleA[i + 1];
+            sampleB[i] = sampleB[i + 1];
+            sampleY[i] = sampleY[i + 1];
+        }
+
+        sampleA[WaveformSampleCount - 1] = valA;
+        sampleB[WaveformSampleCount - 1] = valB;
+        sampleY[WaveformSampleCount - 1] = valY;
+
+        waveformBaselineInitialized = true;
+        lastSampledWaveA = valA;
+        lastSampledWaveB = valB;
+        lastSampledWaveY = valY;
+
+        RefreshWaveformVisuals();
+        UpdateWaveformChannelLabels(valA, valB, valY);
+    }
+
+    private void RefreshWaveformVisuals()
+    {
+        UpdateChannelBars(sampleA, waveBarRectsA, waveBarImagesA, WaveHighAColor, WaveLowAColor);
+        UpdateChannelBars(sampleB, waveBarRectsB, waveBarImagesB, WaveHighBColor, WaveLowBColor);
+        UpdateChannelBars(sampleY, waveBarRectsY, waveBarImagesY, WaveHighYColor, WaveLowYColor);
+    }
+
+    private void UpdateChannelBars(int[] samples, RectTransform[] rects, Image[] images, Color highColor, Color lowColor)
+    {
+        if (rects == null || images == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < WaveformSampleCount; i++)
+        {
+            RectTransform barRect = rects[i];
+            Image barImg = images[i];
+            if (barRect == null || barImg == null)
+            {
+                continue;
+            }
+
+            int val = samples[i];
+            if (val > 0)
+            {
+                barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 6f);
+                barRect.sizeDelta = new Vector2(17f, 12f);
+                barImg.color = highColor;
+            }
+            else if (val == 0)
+            {
+                barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 2f);
+                barRect.sizeDelta = new Vector2(17f, 3.5f);
+                barImg.color = lowColor;
+            }
+            else
+            {
+                barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 8.5f);
+                barRect.sizeDelta = new Vector2(17f, 3f);
+                barImg.color = WaveUntrackedYColor;
+            }
+        }
+    }
+
+    private void UpdateWaveformChannelLabels(int valA, int valB, int valY)
+    {
+        if (txtWaveformLabelA != null && valA != renderedWaveLabelA)
+        {
+            renderedWaveLabelA = valA;
+            txtWaveformLabelA.text = valA > 0 ? "A(t): 1" : "A(t): 0";
+            txtWaveformLabelA.color = valA > 0 ? WaveHighAColor : new Color(0.55f, 0.72f, 0.85f, 1f);
+        }
+
+        if (txtWaveformLabelB != null && valB != renderedWaveLabelB)
+        {
+            renderedWaveLabelB = valB;
+            txtWaveformLabelB.text = valB > 0 ? "B(t): 1" : "B(t): 0";
+            txtWaveformLabelB.color = valB > 0 ? WaveHighBColor : new Color(0.75f, 0.68f, 0.42f, 1f);
+        }
+
+        if (txtWaveformLabelY != null && valY != renderedWaveLabelY)
+        {
+            renderedWaveLabelY = valY;
+            if (valY > 0)
+            {
+                txtWaveformLabelY.text = "Y(t): 1";
+                txtWaveformLabelY.color = WaveHighYColor;
+            }
+            else if (valY == 0)
+            {
+                txtWaveformLabelY.text = "Y(t): 0";
+                txtWaveformLabelY.color = MatrixBrightRedColor;
+            }
+            else
+            {
+                txtWaveformLabelY.text = "Y(t): -";
+                txtWaveformLabelY.color = new Color(0.70f, 0.76f, 0.84f, 1f);
+            }
+        }
     }
 
     private void CreateScaffoldingHintButton(RectTransform parent, TMP_FontAsset fontAsset)
@@ -1831,6 +2126,7 @@ public class LevelAndUIManager : MonoBehaviour
 
         RefreshTruthTableTargets();
         ResetTruthTableScanResults();
+        ResetWaveformSamples();
         UpdateQuotaStatusUI();
         UpdateInputToggleButtonsUI();
         UpdateStarMasteryUI();
@@ -1906,6 +2202,7 @@ public class LevelAndUIManager : MonoBehaviour
 
         RefreshTruthTableTargets();
         ResetTruthTableScanResults();
+        ResetWaveformSamples();
         UpdateQuotaStatusUI();
         UpdateInputToggleButtonsUI();
         UpdateStarMasteryUI();
@@ -2150,6 +2447,7 @@ public class LevelAndUIManager : MonoBehaviour
                 circuitManager.EvaluateCircuit();
             }
 
+            SampleWaveformFromCurrentNodes();
 
             if (txtFeedback != null)
             {
@@ -2160,6 +2458,7 @@ public class LevelAndUIManager : MonoBehaviour
             }
 
             yield return new WaitForSeconds(0.225f);
+            SampleWaveformFromCurrentNodes();
             yield return new WaitForSeconds(0.225f);
 
             if (circuitManager != null)
@@ -2181,7 +2480,8 @@ public class LevelAndUIManager : MonoBehaviour
                 scanningRowIndex = -1;
                 PlaySfx(clipRowFail);
                 RestoreInitialInputStates(originalInputA, originalInputB);
-                    SyncAudioStateBaselines(false);
+                SampleWaveformFromCurrentNodes();
+                SyncAudioStateBaselines(false);
 
                 if (txtFeedback != null)
                 {
@@ -2209,6 +2509,7 @@ public class LevelAndUIManager : MonoBehaviour
         // Tahap D: Hasil Akhir Pemindaian / Verifikasi
         scanningRowIndex = -1;
         RestoreInitialInputStates(originalInputA, originalInputB);
+        SampleWaveformFromCurrentNodes();
         SyncAudioStateBaselines(false);
 
         if (isSandboxMode)
