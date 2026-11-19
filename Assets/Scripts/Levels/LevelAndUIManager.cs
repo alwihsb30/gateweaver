@@ -4197,6 +4197,10 @@ public class LevelAndUIManager : MonoBehaviour
         yield return new WaitForSeconds(0.10f);
         PlaySfx(clipVictoryFanfare);
         TriggerHapticPulse();
+        if (outputNode != null)
+        {
+            outputNode.TriggerVictoryCelebration();
+        }
 
         if (isLastLevel && !wasAlreadyCleared)
         {

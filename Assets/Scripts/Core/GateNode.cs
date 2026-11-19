@@ -277,6 +277,54 @@ public class GateNode : MonoBehaviour
     private int lastPortInBVisualState = -2;
     private int lastPortOutVisualState = -2;
 
+    // v5.0 Tahap 2: Mekanisme Reaktif 3D (Tuas Fisik, Mesin Gerbang, Diorama Reaktif, & Pool Percikan Zero-GC)
+    private const int SparkPoolSize = 12;
+    private const float LeverAngleMagnitude = 38f;
+    private const float VaultPlateClosedX = 0.056f;
+    private const float VaultPlateOpenX = 0.135f;
+
+    private Material v5MetalDarkMaterial;
+    private Material v5MetalSteelMaterial;
+    private Material v5SirenBeamMaterial;
+    private Material[] v5StairStepMaterials;
+
+    private Transform v5LeverPivot;
+    private float currentLeverAngle = -LeverAngleMagnitude;
+
+    private Transform v5GateAnimPrimary;
+    private Transform v5GateAnimSecondary;
+    private Vector3 v5GateAnimPrimaryBasePos;
+    private Vector3 v5GateAnimSecondaryBasePos;
+    private float v5GateAnimSweepMinY;
+    private float v5GateAnimSweepMaxY;
+    private float v5GateAnimPhase = 0f;
+
+    private Transform v5SirenRotorPivot;
+    private GameObject v5SirenBeamsGroup;
+    private Transform v5StairLanternHalo;
+    private float v5StairChasePhase = 0f;
+    private int lastStairChaseStep = -2;
+    private Transform v5VaultSlideLeft;
+    private Transform v5VaultSlideRight;
+    private Transform v5VaultWheelPivot;
+    private float currentVaultSlideOffset = VaultPlateClosedX;
+    private Transform v5PodRingA;
+    private Transform v5PodRingB;
+    private Transform v5CapsuleOrbitA;
+    private Transform v5CapsuleOrbitB;
+
+    private GameObject sparkPoolRootObj;
+    private Transform[] sparkTransforms;
+    private Vector3[] sparkLocalPositions;
+    private Vector3[] sparkVelocities;
+    private float[] sparkInitialScales;
+    private Material sparkBurstMaterial;
+    private bool isSparkBurstActive = false;
+    private bool isSparkCelebrationMode = false;
+    private float sparkBurstElapsed = 0f;
+    private float sparkBurstDuration = 0.38f;
+    private Color sparkBurstBaseColor = Color.white;
+
     private static int activeGateNodeCount = 0;
     private static Mesh sharedTorusMesh;
     private static Mesh sharedDiamondSpireMesh;
@@ -286,6 +334,14 @@ public class GateNode : MonoBehaviour
     private static readonly int EmissionColorPropId = Shader.PropertyToID("_EmissionColor");
     private static readonly Color ReactiveAccentHighColor = new Color(0.14f, 1.00f, 0.78f, 1f);
     private static readonly Color ReactiveAccentLowColor = new Color(0.76f, 0.22f, 0.10f, 1f);
+    private static readonly Color TapInspectBurstColor = new Color(1.00f, 0.76f, 0.22f, 1f);
+    private static readonly Color VictoryBurstGoldColor = new Color(1.00f, 0.88f, 0.26f, 1f);
+    private static readonly Color VictoryBurstCyanColor = new Color(0.22f, 1.00f, 0.88f, 1f);
+    private static readonly Color SirenBeamHighColor = new Color(0.18f, 1.00f, 0.82f, 0.42f);
+    private static readonly Color SirenBeamLowColor = new Color(0.75f, 0.22f, 0.10f, 0.08f);
+    private static readonly Color StairStepActiveColor = new Color(1.00f, 0.94f, 0.32f, 1f);
+    private static readonly Color StairStepTrailColor = new Color(0.18f, 0.92f, 0.85f, 1f);
+    private static readonly Color StairStepIdleColor = new Color(0.26f, 0.32f, 0.42f, 1f);
 
     private static readonly float[] PacketPhaseOffsets = { 0f, 0.33f, 0.66f };
 
@@ -322,10 +378,12 @@ public class GateNode : MonoBehaviour
         InitializeContactShadowVisual();
         InitializeBaseTileVisual();
         InitializePhysicalPorts();
+        InitializeV5SharedRigMaterials();
         InitializeTotemVisual();
         InitializeOutputDioramaVisual();
         InitializeInputPinsVisual();
         InitializeShockwaveVisual();
+        InitializeSparkBurstPool();
         InitializeTouchHitbox();
     }
 
@@ -354,8 +412,11 @@ public class GateNode : MonoBehaviour
             UpdateLabelBillboard();
             AnimateTotemVisual();
             AnimateOutputDioramaVisual();
+            AnimateV5NodeMechanisms();
+            AnimateV5OutputDioramaRig();
             DetectRisingEdgeAndAnimateShockwave();
             UpdateTapBounceAnimation();
+            UpdateSparkBurstPool();
         }
         else
         {
@@ -366,6 +427,7 @@ public class GateNode : MonoBehaviour
             SetInputPinsActive(false);
             ResetShockwaveState();
             ResetTapBounceState();
+            ResetSparkBurstPool();
         }
 
         RefreshConnectionVisuals(advanceFlowPhase: true);
@@ -409,6 +471,11 @@ public class GateNode : MonoBehaviour
         portInAMaterial = null;
         portInBMaterial = null;
         portOutMaterial = null;
+        v5MetalDarkMaterial = null;
+        v5MetalSteelMaterial = null;
+        v5SirenBeamMaterial = null;
+        v5StairStepMaterials = null;
+        sparkBurstMaterial = null;
         touchHitboxCollider = null;
 
         activeGateNodeCount = Mathf.Max(0, activeGateNodeCount - 1);
@@ -580,6 +647,7 @@ public class GateNode : MonoBehaviour
         {
             UpdateOutputDioramaColors();
             UpdateReactiveAccentMaterials();
+            lastStairChaseStep = -2;
         }
     }
 
@@ -627,7 +695,10 @@ public class GateNode : MonoBehaviour
                     0.52f,
                     0.46f,
                     BaseTileTopSurfaceY,
-                    GetOutputDioramaInitialEuler(i));
+                    GetOutputDioramaInitialEuler(i),
+                    out float modelTopY,
+                    out Vector3 modelHalfExtents);
+                BuildV5OutputDioramaMechanism(i, variantRoot.transform, modelTopY, modelHalfExtents, dioramaVariantReactiveAccentMaterials[i]);
                 outputDioramaVariantObjs[i] = variantRoot;
             }
             else
@@ -1095,7 +1166,10 @@ public class GateNode : MonoBehaviour
                 maxFootprintXZ,
                 maxHeightY,
                 BaseTileTopSurfaceY,
-                GetNodeModelInitialEuler(nodeType));
+                GetNodeModelInitialEuler(nodeType),
+                out float modelTopY,
+                out Vector3 modelHalfExtents);
+            BuildV5NodeMechanism(nodeType, totemRootObj.transform, modelTopY, modelHalfExtents, totemReactiveAccentMaterials);
         }
         else
         {
@@ -1995,6 +2069,7 @@ public class GateNode : MonoBehaviour
         SetInputPinsActive(false);
         ResetShockwaveState();
         ResetTapBounceState();
+        ResetSparkBurstPool();
         UpdateVisuals();
     }
 
@@ -2520,6 +2595,7 @@ public class GateNode : MonoBehaviour
         isTapBouncePlaying = true;
         tapBounceElapsed = 0f;
         ApplyTapBounceScale(1f);
+        TriggerEnergyBurst(currentOutputValue ? ReactiveAccentHighColor : TapInspectBurstColor, 1f);
     }
 
     /// <summary>
@@ -2939,7 +3015,9 @@ public class GateNode : MonoBehaviour
         float maxFootprintXZ,
         float maxHeightY,
         float baseSurfaceY,
-        Vector3 initialLocalEuler)
+        Vector3 initialLocalEuler,
+        out float normalizedTopY,
+        out Vector3 normalizedHalfExtents)
     {
         Transform modelPivot = CreateEmptyChild($"{modelInstance.name}_Pivot", containerParent, Vector3.zero);
         modelInstance.transform.SetParent(modelPivot, false);
@@ -2950,6 +3028,8 @@ public class GateNode : MonoBehaviour
         if (!TryCalculateHierarchyMeshBounds(modelInstance.transform, modelPivot, out Bounds localBounds))
         {
             modelPivot.localPosition = new Vector3(0f, baseSurfaceY, 0f);
+            normalizedTopY = baseSurfaceY + (maxHeightY * 0.75f);
+            normalizedHalfExtents = new Vector3(maxFootprintXZ * 0.45f, maxHeightY * 0.375f, maxFootprintXZ * 0.45f);
             return modelPivot;
         }
 
@@ -2967,6 +3047,12 @@ public class GateNode : MonoBehaviour
             -localBounds.center.x * uniformScale,
             baseSurfaceY - (localBounds.min.y * uniformScale),
             -localBounds.center.z * uniformScale);
+
+        normalizedTopY = baseSurfaceY + (sizeY * uniformScale);
+        normalizedHalfExtents = new Vector3(
+            sizeX * uniformScale * 0.5f,
+            sizeY * uniformScale * 0.5f,
+            sizeZ * uniformScale * 0.5f);
 
         return modelPivot;
     }
@@ -3225,6 +3311,741 @@ public class GateNode : MonoBehaviour
                 mat.EnableKeyword("_EMISSION");
                 mat.SetColor(EmissionColorPropId, emissionColor);
             }
+        }
+    }
+
+    // =========================================================================
+    // V5.0 TAHAP 2: REACTIVE 3D MACHINES, DIORAMAS, & ZERO-GC SPARK BURST POOL
+    // =========================================================================
+
+    private void InitializeV5SharedRigMaterials()
+    {
+        v5MetalDarkMaterial = CreateSafeRemappedModelMaterial(new Color(0.18f, 0.22f, 0.28f, 1f));
+        if (v5MetalDarkMaterial != null)
+        {
+            managedMaterials.Add(v5MetalDarkMaterial);
+        }
+
+        v5MetalSteelMaterial = CreateSafeRemappedModelMaterial(new Color(0.46f, 0.54f, 0.62f, 1f));
+        if (v5MetalSteelMaterial != null)
+        {
+            managedMaterials.Add(v5MetalSteelMaterial);
+        }
+    }
+
+    private Material CreateV5ReactiveGlowMaterial(List<Material> reactiveTargetList)
+    {
+        Material glowMat = CreateSafeOpenGLMaterial();
+        if (glowMat != null)
+        {
+            glowMat.color = ReactiveAccentLowColor;
+            managedMaterials.Add(glowMat);
+            if (reactiveTargetList != null)
+            {
+                reactiveTargetList.Add(glowMat);
+            }
+        }
+
+        return glowMat;
+    }
+
+    /// <summary>
+    /// Memasang rig sakelar fisik 3D (InputSource) atau mekanisme bergerak unik per LogicGate
+    /// tepat di atas/sekeliling model Quaternius yang telah dinormalisasi.
+    /// </summary>
+    private void BuildV5NodeMechanism(
+        NodeType type,
+        Transform parentRoot,
+        float modelTopY,
+        Vector3 halfExtents,
+        List<Material> reactiveTargetList)
+    {
+        Material glowMat = CreateV5ReactiveGlowMaterial(reactiveTargetList);
+
+        switch (type)
+        {
+            case NodeType.InputSource:
+                BuildV5PhysicalInputLever(parentRoot, modelTopY, glowMat);
+                break;
+            case NodeType.AND:
+                BuildV5AndCompressorPistons(parentRoot, modelTopY, glowMat);
+                break;
+            case NodeType.OR:
+                BuildV5OrTurbineAndCrystal(parentRoot, modelTopY, glowMat);
+                break;
+            case NodeType.XOR:
+                BuildV5XorCounterGyroRings(parentRoot, modelTopY, glowMat);
+                break;
+            case NodeType.NAND:
+                BuildV5NandEnergyCoil(parentRoot, modelTopY, glowMat);
+                break;
+            case NodeType.NOT:
+                BuildV5NotLaserLensAndPhaseRing(parentRoot, modelTopY, halfExtents, glowMat);
+                break;
+        }
+    }
+
+    private void BuildV5PhysicalInputLever(Transform parentRoot, float modelTopY, Material glowMat)
+    {
+        Transform rigRoot = CreateEmptyChild("AR_PhysicalLeverRig", parentRoot, new Vector3(0f, modelTopY - 0.005f, 0f));
+
+        // Blok engsel metalik gelap + penjepit baja di puncak konsol
+        CreatePrimitivePart("Lever_HingeBase", PrimitiveType.Cube, rigRoot,
+            new Vector3(0f, 0.016f, 0f), Vector3.zero, new Vector3(0.145f, 0.032f, 0.095f), v5MetalDarkMaterial);
+        CreatePrimitivePart("Lever_BracketL", PrimitiveType.Cube, rigRoot,
+            new Vector3(-0.048f, 0.034f, 0f), Vector3.zero, new Vector3(0.018f, 0.028f, 0.072f), v5MetalSteelMaterial);
+        CreatePrimitivePart("Lever_BracketR", PrimitiveType.Cube, rigRoot,
+            new Vector3(0.048f, 0.034f, 0f), Vector3.zero, new Vector3(0.018f, 0.028f, 0.072f), v5MetalSteelMaterial);
+
+        // Indikator LED depan menyala sesuai bit 0/1
+        CreatePrimitivePart("Lever_FrontLED", PrimitiveType.Cube, rigRoot,
+            new Vector3(0f, 0.018f, -0.052f), Vector3.zero, new Vector3(0.096f, 0.016f, 0.014f), glowMat);
+
+        // Pivot tuas yang menjungkit halus antara -38 derajat (LOW/0) dan +38 derajat (HIGH/1)
+        currentLeverAngle = initialInputState ? LeverAngleMagnitude : -LeverAngleMagnitude;
+        v5LeverPivot = CreateEmptyChild("Lever_Pivot", rigRoot, new Vector3(0f, 0.024f, 0f));
+        v5LeverPivot.localRotation = Quaternion.Euler(0f, 0f, -currentLeverAngle);
+
+        CreatePrimitivePart("Lever_Shaft", PrimitiveType.Cylinder, v5LeverPivot,
+            new Vector3(0f, 0.056f, 0f), Vector3.zero, new Vector3(0.018f, 0.056f, 0.018f), v5MetalSteelMaterial);
+        CreatePrimitivePart("Lever_Grip", PrimitiveType.Cube, v5LeverPivot,
+            new Vector3(0f, 0.114f, 0f), Vector3.zero, new Vector3(0.030f, 0.030f, 0.116f), glowMat);
+        CreatePrimitivePart("Lever_CapFront", PrimitiveType.Sphere, v5LeverPivot,
+            new Vector3(0f, 0.114f, -0.058f), Vector3.zero, Vector3.one * 0.034f, v5MetalDarkMaterial);
+        CreatePrimitivePart("Lever_CapBack", PrimitiveType.Sphere, v5LeverPivot,
+            new Vector3(0f, 0.114f, 0.058f), Vector3.zero, Vector3.one * 0.034f, v5MetalDarkMaterial);
+    }
+
+    private void BuildV5AndCompressorPistons(Transform parentRoot, float modelTopY, Material glowMat)
+    {
+        Transform rigRoot = CreateEmptyChild("AR_AndCompressorRig", parentRoot, Vector3.zero);
+        float mountY = modelTopY - 0.004f;
+
+        CreatePrimitivePart("AND_MountLeft", PrimitiveType.Cylinder, rigRoot,
+            new Vector3(-0.095f, mountY + 0.014f, 0f), Vector3.zero, new Vector3(0.068f, 0.016f, 0.068f), v5MetalDarkMaterial);
+        CreatePrimitivePart("AND_MountRight", PrimitiveType.Cylinder, rigRoot,
+            new Vector3(0.095f, mountY + 0.014f, 0f), Vector3.zero, new Vector3(0.068f, 0.016f, 0.068f), v5MetalDarkMaterial);
+
+        v5GateAnimPrimaryBasePos = new Vector3(-0.095f, mountY + 0.030f, 0f);
+        v5GateAnimPrimary = CreateEmptyChild("AND_PistonLeft", rigRoot, v5GateAnimPrimaryBasePos);
+        CreatePrimitivePart("AND_RodLeft", PrimitiveType.Cylinder, v5GateAnimPrimary,
+            new Vector3(0f, 0.030f, 0f), Vector3.zero, new Vector3(0.024f, 0.034f, 0.024f), v5MetalSteelMaterial);
+        CreatePrimitivePart("AND_CrownLeft", PrimitiveType.Cylinder, v5GateAnimPrimary,
+            new Vector3(0f, 0.066f, 0f), Vector3.zero, new Vector3(0.074f, 0.014f, 0.074f), glowMat);
+
+        v5GateAnimSecondaryBasePos = new Vector3(0.095f, mountY + 0.030f, 0f);
+        v5GateAnimSecondary = CreateEmptyChild("AND_PistonRight", rigRoot, v5GateAnimSecondaryBasePos);
+        CreatePrimitivePart("AND_RodRight", PrimitiveType.Cylinder, v5GateAnimSecondary,
+            new Vector3(0f, 0.030f, 0f), Vector3.zero, new Vector3(0.024f, 0.034f, 0.024f), v5MetalSteelMaterial);
+        CreatePrimitivePart("AND_CrownRight", PrimitiveType.Cylinder, v5GateAnimSecondary,
+            new Vector3(0f, 0.066f, 0f), Vector3.zero, new Vector3(0.074f, 0.014f, 0.074f), glowMat);
+    }
+
+    private void BuildV5OrTurbineAndCrystal(Transform parentRoot, float modelTopY, Material glowMat)
+    {
+        float hubY = Mathf.Max(BaseTileTopSurfaceY + 0.14f, modelTopY + 0.045f);
+        Transform rigRoot = CreateEmptyChild("AR_OrTurbineRig", parentRoot, Vector3.zero);
+
+        v5GateAnimPrimary = CreateEmptyChild("OR_TurbinePivot", rigRoot, new Vector3(0f, hubY, 0f));
+        CreateProceduralMeshPart("OR_TurbineRing", GetSharedTorusMesh(), v5GateAnimPrimary,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.135f, v5MetalSteelMaterial);
+        CreatePrimitivePart("OR_VaneX", PrimitiveType.Cube, v5GateAnimPrimary,
+            Vector3.zero, new Vector3(14f, 0f, 0f), new Vector3(0.24f, 0.010f, 0.026f), v5MetalDarkMaterial);
+        CreatePrimitivePart("OR_VaneZ", PrimitiveType.Cube, v5GateAnimPrimary,
+            Vector3.zero, new Vector3(0f, 0f, 14f), new Vector3(0.026f, 0.010f, 0.24f), v5MetalDarkMaterial);
+
+        v5GateAnimSecondaryBasePos = new Vector3(0f, hubY + 0.030f, 0f);
+        v5GateAnimSecondary = CreateEmptyChild("OR_CrystalPivot", rigRoot, v5GateAnimSecondaryBasePos);
+        CreateProceduralMeshPart("OR_FloatingCrystal", GetSharedDiamondSpireMesh(), v5GateAnimSecondary,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.072f, glowMat);
+    }
+
+    private void BuildV5XorCounterGyroRings(Transform parentRoot, float modelTopY, Material glowMat)
+    {
+        float centerY = Mathf.Max(BaseTileTopSurfaceY + 0.17f, modelTopY * 0.68f);
+        Transform rigRoot = CreateEmptyChild("AR_XorGyroRig", parentRoot, Vector3.zero);
+
+        v5GateAnimPrimary = CreateEmptyChild("XOR_GyroOuterPivot", rigRoot, new Vector3(0f, centerY, 0f));
+        CreateProceduralMeshPart("XOR_GyroOuterRing", GetSharedTorusMesh(), v5GateAnimPrimary,
+            Vector3.zero, new Vector3(58f, 0f, 0f), Vector3.one * 0.145f, v5MetalSteelMaterial);
+
+        v5GateAnimSecondary = CreateEmptyChild("XOR_GyroInnerPivot", rigRoot, new Vector3(0f, centerY, 0f));
+        CreateProceduralMeshPart("XOR_GyroInnerRing", GetSharedTorusMesh(), v5GateAnimSecondary,
+            Vector3.zero, new Vector3(-58f, 90f, 0f), Vector3.one * 0.105f, glowMat);
+        CreateProceduralMeshPart("XOR_CenterCore", GetSharedDiamondSpireMesh(), v5GateAnimSecondary,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.052f, glowMat);
+    }
+
+    private void BuildV5NandEnergyCoil(Transform parentRoot, float modelTopY, Material glowMat)
+    {
+        v5GateAnimSweepMinY = BaseTileTopSurfaceY + 0.070f;
+        v5GateAnimSweepMaxY = Mathf.Max(v5GateAnimSweepMinY + 0.12f, modelTopY - 0.035f);
+
+        v5GateAnimPrimaryBasePos = new Vector3(0f, v5GateAnimSweepMinY, 0f);
+        v5GateAnimPrimary = CreateEmptyChild("AR_NandEnergyCoil", parentRoot, v5GateAnimPrimaryBasePos);
+
+        CreateProceduralMeshPart("NAND_CoilRing", GetSharedTorusMesh(), v5GateAnimPrimary,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.165f, glowMat);
+        CreatePrimitivePart("NAND_ClampL", PrimitiveType.Cube, v5GateAnimPrimary,
+            new Vector3(-0.165f, 0f, 0f), Vector3.zero, new Vector3(0.028f, 0.024f, 0.044f), v5MetalDarkMaterial);
+        CreatePrimitivePart("NAND_ClampR", PrimitiveType.Cube, v5GateAnimPrimary,
+            new Vector3(0.165f, 0f, 0f), Vector3.zero, new Vector3(0.028f, 0.024f, 0.044f), v5MetalDarkMaterial);
+    }
+
+    private void BuildV5NotLaserLensAndPhaseRing(Transform parentRoot, float modelTopY, Vector3 halfExtents, Material glowMat)
+    {
+        float muzzleX = Mathf.Min(0.22f, halfExtents.x + 0.018f);
+        float muzzleY = BaseTileTopSurfaceY + ((modelTopY - BaseTileTopSurfaceY) * 0.52f);
+        Transform rigRoot = CreateEmptyChild("AR_NotLaserRig", parentRoot, Vector3.zero);
+
+        v5GateAnimPrimaryBasePos = new Vector3(muzzleX, muzzleY, 0f);
+        v5GateAnimPrimary = CreateEmptyChild("NOT_FocusLensPivot", rigRoot, v5GateAnimPrimaryBasePos);
+        CreateProceduralMeshPart("NOT_LensHousing", GetSharedTorusMesh(), v5GateAnimPrimary,
+            Vector3.zero, new Vector3(0f, 0f, 90f), Vector3.one * 0.072f, v5MetalSteelMaterial);
+        CreatePrimitivePart("NOT_LensFinA", PrimitiveType.Cube, v5GateAnimPrimary,
+            new Vector3(0f, 0.068f, 0f), Vector3.zero, new Vector3(0.022f, 0.032f, 0.014f), v5MetalDarkMaterial);
+        CreatePrimitivePart("NOT_LensFinB", PrimitiveType.Cube, v5GateAnimPrimary,
+            new Vector3(0f, -0.034f, 0.059f), new Vector3(120f, 0f, 0f), new Vector3(0.022f, 0.032f, 0.014f), v5MetalDarkMaterial);
+        CreatePrimitivePart("NOT_LensFinC", PrimitiveType.Cube, v5GateAnimPrimary,
+            new Vector3(0f, -0.034f, -0.059f), new Vector3(-120f, 0f, 0f), new Vector3(0.022f, 0.032f, 0.014f), v5MetalDarkMaterial);
+
+        v5GateAnimSecondaryBasePos = new Vector3(muzzleX + 0.035f, muzzleY, 0f);
+        v5GateAnimSecondary = CreateEmptyChild("NOT_PhaseProjectorRing", rigRoot, v5GateAnimSecondaryBasePos);
+        CreateProceduralMeshPart("NOT_PhaseRingMesh", GetSharedTorusMesh(), v5GateAnimSecondary,
+            Vector3.zero, new Vector3(0f, 0f, 90f), Vector3.one * 0.052f, glowMat);
+    }
+
+    private void AnimateV5NodeMechanisms()
+    {
+        if (nodeType == NodeType.OutputActuator)
+        {
+            return;
+        }
+
+        if (nodeType == NodeType.InputSource && v5LeverPivot != null)
+        {
+            float targetAngle = currentOutputValue ? LeverAngleMagnitude : -LeverAngleMagnitude;
+            float smooth = 1f - Mathf.Exp(-14f * Time.deltaTime);
+            currentLeverAngle = Mathf.Lerp(currentLeverAngle, targetAngle, smooth);
+            v5LeverPivot.localRotation = Quaternion.Euler(0f, 0f, -currentLeverAngle);
+            return;
+        }
+
+        if (v5GateAnimPrimary == null)
+        {
+            return;
+        }
+
+        float dt = Time.deltaTime;
+        float speedFactor = currentOutputValue ? 1f : 0.12f;
+        v5GateAnimPhase += dt * (currentOutputValue ? 10.5f : 1.2f);
+
+        switch (nodeType)
+        {
+            case NodeType.AND:
+                float pistonLift = currentOutputValue ? ((Mathf.Sin(v5GateAnimPhase) * 0.5f + 0.5f) * 0.048f) : 0f;
+                v5GateAnimPrimary.localPosition = v5GateAnimPrimaryBasePos + new Vector3(0f, pistonLift, 0f);
+                if (v5GateAnimSecondary != null)
+                {
+                    v5GateAnimSecondary.localPosition = v5GateAnimSecondaryBasePos + new Vector3(0f, pistonLift, 0f);
+                }
+                break;
+
+            case NodeType.OR:
+                v5GateAnimPrimary.Rotate(Vector3.up, 290f * speedFactor * dt, Space.Self);
+                if (v5GateAnimSecondary != null)
+                {
+                    v5GateAnimSecondary.Rotate(Vector3.up, -210f * speedFactor * dt, Space.Self);
+                    float hoverY = currentOutputValue ? (Mathf.Sin(v5GateAnimPhase * 0.6f) * 0.018f) : 0f;
+                    v5GateAnimSecondary.localPosition = v5GateAnimSecondaryBasePos + new Vector3(0f, hoverY, 0f);
+                }
+                break;
+
+            case NodeType.XOR:
+                v5GateAnimPrimary.Rotate(new Vector3(0.30f, 1f, 0.25f), 270f * speedFactor * dt, Space.Self);
+                if (v5GateAnimSecondary != null)
+                {
+                    v5GateAnimSecondary.Rotate(new Vector3(-0.30f, -1f, 0.25f), 340f * speedFactor * dt, Space.Self);
+                }
+                break;
+
+            case NodeType.NAND:
+                if (currentOutputValue)
+                {
+                    float t = Mathf.Sin(v5GateAnimPhase * 0.48f) * 0.5f + 0.5f;
+                    float y = Mathf.Lerp(v5GateAnimSweepMinY, v5GateAnimSweepMaxY, t);
+                    v5GateAnimPrimary.localPosition = new Vector3(0f, y, 0f);
+                    v5GateAnimPrimary.Rotate(Vector3.up, 200f * dt, Space.Self);
+                }
+                else
+                {
+                    float settledY = Mathf.Lerp(v5GateAnimPrimary.localPosition.y, v5GateAnimSweepMinY, 1f - Mathf.Exp(-8f * dt));
+                    v5GateAnimPrimary.localPosition = new Vector3(0f, settledY, 0f);
+                }
+                break;
+
+            case NodeType.NOT:
+                v5GateAnimPrimary.Rotate(Vector3.right, 320f * speedFactor * dt, Space.Self);
+                if (v5GateAnimSecondary != null)
+                {
+                    float pulseX = currentOutputValue ? (Mathf.Sin(v5GateAnimPhase * 0.85f) * 0.016f) : 0f;
+                    v5GateAnimSecondary.localPosition = v5GateAnimSecondaryBasePos + new Vector3(pulseX, 0f, 0f);
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Memasang mekanisme bergerak spesifik pada masing-masing dari 5 varian diorama Quaternius OutputActuator.
+    /// </summary>
+    private void BuildV5OutputDioramaMechanism(
+        int variantIndex,
+        Transform variantRoot,
+        float modelTopY,
+        Vector3 halfExtents,
+        List<Material> reactiveTargetList)
+    {
+        Material glowMat = CreateV5ReactiveGlowMaterial(reactiveTargetList);
+
+        switch (variantIndex)
+        {
+            case 0:
+                BuildV5SirenDioramaRig(variantRoot, modelTopY, glowMat);
+                break;
+            case 1:
+                BuildV5StaircaseDioramaRig(variantRoot, modelTopY, glowMat);
+                break;
+            case 2:
+                BuildV5VaultDoorDioramaRig(variantRoot, modelTopY, halfExtents, glowMat);
+                break;
+            case 3:
+                BuildV5ReactorPodDioramaRig(variantRoot, modelTopY, glowMat);
+                break;
+            default:
+                BuildV5CapsuleOrbitalDioramaRig(variantRoot, modelTopY, glowMat);
+                break;
+        }
+    }
+
+    private void BuildV5SirenDioramaRig(Transform variantRoot, float modelTopY, Material glowMat)
+    {
+        float baseY = modelTopY - 0.004f;
+        Transform towerRoot = CreateEmptyChild("V5Siren_Tower", variantRoot, new Vector3(0f, baseY, 0f));
+
+        CreatePrimitivePart("V5Siren_Pedestal", PrimitiveType.Cylinder, towerRoot,
+            new Vector3(0f, 0.025f, 0f), Vector3.zero, new Vector3(0.115f, 0.025f, 0.115f), v5MetalDarkMaterial);
+        CreatePrimitivePart("V5Siren_BeaconDome", PrimitiveType.Sphere, towerRoot,
+            new Vector3(0f, 0.068f, 0f), Vector3.zero, Vector3.one * 0.072f, glowMat);
+
+        v5SirenBeamMaterial = CreateSafeOpenGLMaterial();
+        if (v5SirenBeamMaterial != null)
+        {
+            v5SirenBeamMaterial.color = SirenBeamLowColor;
+            managedMaterials.Add(v5SirenBeamMaterial);
+        }
+
+        v5SirenRotorPivot = CreateEmptyChild("V5Siren_RotorPivot", towerRoot, new Vector3(0f, 0.072f, 0f));
+        CreatePrimitivePart("V5Siren_RotorCap", PrimitiveType.Cube, v5SirenRotorPivot,
+            Vector3.zero, Vector3.zero, new Vector3(0.088f, 0.020f, 0.030f), v5MetalSteelMaterial);
+
+        v5SirenBeamsGroup = CreateEmptyChild("V5Siren_Beams", v5SirenRotorPivot, Vector3.zero).gameObject;
+        CreatePrimitivePart("V5Siren_BeamL", PrimitiveType.Cube, v5SirenBeamsGroup.transform,
+            new Vector3(-0.145f, 0.012f, 0f), new Vector3(0f, 0f, -8f), new Vector3(0.22f, 0.042f, 0.032f), v5SirenBeamMaterial);
+        CreatePrimitivePart("V5Siren_BeamR", PrimitiveType.Cube, v5SirenBeamsGroup.transform,
+            new Vector3(0.145f, 0.012f, 0f), new Vector3(0f, 0f, 8f), new Vector3(0.22f, 0.042f, 0.032f), v5SirenBeamMaterial);
+    }
+
+    private void BuildV5StaircaseDioramaRig(Transform variantRoot, float modelTopY, Material glowMat)
+    {
+        Transform rigRoot = CreateEmptyChild("V5Stair_LightsRig", variantRoot, Vector3.zero);
+        v5StairStepMaterials = new Material[3];
+
+        float heightSpan = Mathf.Max(0.16f, modelTopY - BaseTileTopSurfaceY);
+        for (int s = 0; s < 3; s++)
+        {
+            Material stepMat = CreateSafeOpenGLMaterial();
+            if (stepMat != null)
+            {
+                stepMat.color = StairStepIdleColor;
+                managedMaterials.Add(stepMat);
+            }
+            v5StairStepMaterials[s] = stepMat;
+
+            float frac = (s + 0.5f) / 3f;
+            float stepX = Mathf.Lerp(-0.14f, 0.14f, frac);
+            float stepY = BaseTileTopSurfaceY + (heightSpan * (0.20f + (frac * 0.65f)));
+
+            CreatePrimitivePart($"V5Stair_StepStrip_{s}", PrimitiveType.Cube, rigRoot,
+                new Vector3(stepX, stepY, 0f), Vector3.zero, new Vector3(0.036f, 0.014f, 0.30f), stepMat);
+        }
+
+        // Lentera puncak di ujung atas tangga
+        Transform lanternRoot = CreateEmptyChild("V5Stair_TopLantern", rigRoot, new Vector3(0.16f, modelTopY + 0.036f, 0f));
+        CreatePrimitivePart("V5Stair_LanternPost", PrimitiveType.Cylinder, lanternRoot,
+            new Vector3(0f, -0.018f, 0f), Vector3.zero, new Vector3(0.018f, 0.022f, 0.018f), v5MetalSteelMaterial);
+        CreatePrimitivePart("V5Stair_LanternBulb", PrimitiveType.Sphere, lanternRoot,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.056f, glowMat);
+        v5StairLanternHalo = CreateProceduralMeshPart("V5Stair_LanternHalo", GetSharedTorusMesh(), lanternRoot,
+            Vector3.zero, new Vector3(18f, 0f, 0f), Vector3.one * 0.068f, glowMat).transform;
+    }
+
+    private void BuildV5VaultDoorDioramaRig(Transform variantRoot, float modelTopY, Vector3 halfExtents, Material glowMat)
+    {
+        float midY = BaseTileTopSurfaceY + ((modelTopY - BaseTileTopSurfaceY) * 0.48f);
+        float frontZ = -(Mathf.Max(0.05f, halfExtents.z) + 0.016f);
+        Transform rigRoot = CreateEmptyChild("V5Vault_MechanismRig", variantRoot, new Vector3(0f, midY, frontZ));
+
+        currentVaultSlideOffset = VaultPlateClosedX;
+
+        // Sepasang daun pelat brankas geser kiri-kanan
+        v5VaultSlideLeft = CreateEmptyChild("V5Vault_PlateLeft", rigRoot, new Vector3(-currentVaultSlideOffset, 0f, 0f));
+        CreatePrimitivePart("V5Vault_SlabL", PrimitiveType.Cube, v5VaultSlideLeft,
+            Vector3.zero, Vector3.zero, new Vector3(0.106f, 0.25f, 0.024f), v5MetalDarkMaterial);
+        CreatePrimitivePart("V5Vault_TrimL", PrimitiveType.Cube, v5VaultSlideLeft,
+            new Vector3(0.044f, 0f, -0.014f), Vector3.zero, new Vector3(0.012f, 0.22f, 0.008f), glowMat);
+
+        v5VaultSlideRight = CreateEmptyChild("V5Vault_PlateRight", rigRoot, new Vector3(currentVaultSlideOffset, 0f, 0f));
+        CreatePrimitivePart("V5Vault_SlabR", PrimitiveType.Cube, v5VaultSlideRight,
+            Vector3.zero, Vector3.zero, new Vector3(0.106f, 0.25f, 0.024f), v5MetalDarkMaterial);
+        CreatePrimitivePart("V5Vault_TrimR", PrimitiveType.Cube, v5VaultSlideRight,
+            new Vector3(-0.044f, 0f, -0.014f), Vector3.zero, new Vector3(0.012f, 0.22f, 0.008f), glowMat);
+
+        // Roda kunci mekanis di tengah pintu brankas
+        v5VaultWheelPivot = CreateEmptyChild("V5Vault_LockWheel", rigRoot, new Vector3(0f, 0f, -0.022f));
+        CreateProceduralMeshPart("V5Vault_WheelRim", GetSharedTorusMesh(), v5VaultWheelPivot,
+            Vector3.zero, new Vector3(90f, 0f, 0f), Vector3.one * 0.056f, v5MetalSteelMaterial);
+        CreatePrimitivePart("V5Vault_SpokeH", PrimitiveType.Cube, v5VaultWheelPivot,
+            Vector3.zero, Vector3.zero, new Vector3(0.105f, 0.014f, 0.012f), v5MetalSteelMaterial);
+        CreatePrimitivePart("V5Vault_SpokeV", PrimitiveType.Cube, v5VaultWheelPivot,
+            Vector3.zero, Vector3.zero, new Vector3(0.014f, 0.105f, 0.012f), v5MetalSteelMaterial);
+        CreatePrimitivePart("V5Vault_WheelHub", PrimitiveType.Sphere, v5VaultWheelPivot,
+            Vector3.zero, Vector3.zero, Vector3.one * 0.032f, glowMat);
+    }
+
+    private void BuildV5ReactorPodDioramaRig(Transform variantRoot, float modelTopY, Material glowMat)
+    {
+        float midY = BaseTileTopSurfaceY + ((modelTopY - BaseTileTopSurfaceY) * 0.50f);
+        Transform rigRoot = CreateEmptyChild("V5Pod_TurbineRig", variantRoot, new Vector3(0f, midY, 0f));
+
+        v5PodRingA = CreateEmptyChild("V5Pod_TurbineRingA", rigRoot, Vector3.zero);
+        CreateProceduralMeshPart("V5Pod_RingMeshA", GetSharedTorusMesh(), v5PodRingA,
+            Vector3.zero, new Vector3(36f, 0f, 0f), Vector3.one * 0.215f, v5MetalSteelMaterial);
+        CreatePrimitivePart("V5Pod_NodeA", PrimitiveType.Sphere, v5PodRingA,
+            new Vector3(0.215f, 0f, 0f), Vector3.zero, Vector3.one * 0.032f, glowMat);
+
+        v5PodRingB = CreateEmptyChild("V5Pod_TurbineRingB", rigRoot, Vector3.zero);
+        CreateProceduralMeshPart("V5Pod_RingMeshB", GetSharedTorusMesh(), v5PodRingB,
+            Vector3.zero, new Vector3(-36f, 90f, 0f), Vector3.one * 0.195f, glowMat);
+    }
+
+    private void BuildV5CapsuleOrbitalDioramaRig(Transform variantRoot, float modelTopY, Material glowMat)
+    {
+        float midY = BaseTileTopSurfaceY + ((modelTopY - BaseTileTopSurfaceY) * 0.50f);
+        Transform rigRoot = CreateEmptyChild("V5Capsule_OrbitalRig", variantRoot, new Vector3(0f, midY, 0f));
+
+        v5CapsuleOrbitA = CreateEmptyChild("V5Capsule_OrbitRingA", rigRoot, Vector3.zero);
+        CreateProceduralMeshPart("V5Capsule_OrbitMeshA", GetSharedTorusMesh(), v5CapsuleOrbitA,
+            Vector3.zero, new Vector3(24f, 0f, 18f), Vector3.one * 0.210f, glowMat);
+        CreateProceduralMeshPart("V5Capsule_SatelliteA", GetSharedDiamondSpireMesh(), v5CapsuleOrbitA,
+            new Vector3(0.210f, 0.020f, 0f), Vector3.zero, Vector3.one * 0.040f, glowMat);
+
+        v5CapsuleOrbitB = CreateEmptyChild("V5Capsule_OrbitRingB", rigRoot, Vector3.zero);
+        CreateProceduralMeshPart("V5Capsule_OrbitMeshB", GetSharedTorusMesh(), v5CapsuleOrbitB,
+            Vector3.zero, new Vector3(-28f, 45f, -18f), Vector3.one * 0.170f, v5MetalSteelMaterial);
+        CreateProceduralMeshPart("V5Capsule_SatelliteB", GetSharedDiamondSpireMesh(), v5CapsuleOrbitB,
+            new Vector3(-0.170f, 0f, 0f), Vector3.zero, Vector3.one * 0.036f, glowMat);
+    }
+
+    private void AnimateV5OutputDioramaRig()
+    {
+        if (nodeType != NodeType.OutputActuator
+            || outputDioramaVariantObjs == null
+            || activeDioramaVariantIndex < 0
+            || activeDioramaVariantIndex >= outputDioramaVariantObjs.Length)
+        {
+            return;
+        }
+
+        GameObject activeVariant = outputDioramaVariantObjs[activeDioramaVariantIndex];
+        if (activeVariant == null || !activeVariant.activeSelf)
+        {
+            return;
+        }
+
+        float dt = Time.deltaTime;
+        switch (activeDioramaVariantIndex)
+        {
+            case 0:
+                if (v5SirenBeamsGroup != null && v5SirenBeamsGroup.activeSelf != currentOutputValue)
+                {
+                    v5SirenBeamsGroup.SetActive(currentOutputValue);
+                }
+                if (v5SirenBeamMaterial != null)
+                {
+                    v5SirenBeamMaterial.color = currentOutputValue ? SirenBeamHighColor : SirenBeamLowColor;
+                }
+                if (v5SirenRotorPivot != null && currentOutputValue)
+                {
+                    v5SirenRotorPivot.Rotate(Vector3.up, 360f * dt, Space.Self);
+                }
+                break;
+
+            case 1:
+                if (v5StairStepMaterials != null && v5StairStepMaterials.Length == 3)
+                {
+                    int targetStep;
+                    if (currentOutputValue)
+                    {
+                        v5StairChasePhase = Mathf.Repeat(v5StairChasePhase + (dt * 4.5f), 3f);
+                        targetStep = Mathf.FloorToInt(v5StairChasePhase);
+                    }
+                    else
+                    {
+                        targetStep = -1;
+                    }
+
+                    if (targetStep != lastStairChaseStep)
+                    {
+                        lastStairChaseStep = targetStep;
+                        for (int s = 0; s < 3; s++)
+                        {
+                            if (v5StairStepMaterials[s] != null)
+                            {
+                                v5StairStepMaterials[s].color = targetStep < 0
+                                    ? StairStepIdleColor
+                                    : (s == targetStep ? StairStepActiveColor : StairStepTrailColor);
+                            }
+                        }
+                    }
+                }
+
+                if (v5StairLanternHalo != null && currentOutputValue)
+                {
+                    v5StairLanternHalo.Rotate(Vector3.up, 180f * dt, Space.Self);
+                }
+                break;
+
+            case 2:
+                float targetSlide = currentOutputValue ? VaultPlateOpenX : VaultPlateClosedX;
+                currentVaultSlideOffset = Mathf.Lerp(currentVaultSlideOffset, targetSlide, 1f - Mathf.Exp(-10f * dt));
+
+                if (v5VaultSlideLeft != null)
+                {
+                    v5VaultSlideLeft.localPosition = new Vector3(-currentVaultSlideOffset, 0f, 0f);
+                }
+                if (v5VaultSlideRight != null)
+                {
+                    v5VaultSlideRight.localPosition = new Vector3(currentVaultSlideOffset, 0f, 0f);
+                }
+                if (v5VaultWheelPivot != null && currentOutputValue)
+                {
+                    v5VaultWheelPivot.Rotate(Vector3.forward, 240f * dt, Space.Self);
+                }
+                break;
+
+            case 3:
+                float podSpeed = currentOutputValue ? 240f : 20f;
+                if (v5PodRingA != null)
+                {
+                    v5PodRingA.Rotate(new Vector3(0.25f, 1f, 0.15f), podSpeed * dt, Space.Self);
+                }
+                if (v5PodRingB != null)
+                {
+                    v5PodRingB.Rotate(new Vector3(-0.25f, -1f, 0.15f), podSpeed * 1.18f * dt, Space.Self);
+                }
+                break;
+
+            case 4:
+                float orbSpeed = currentOutputValue ? 260f : 22f;
+                if (v5CapsuleOrbitA != null)
+                {
+                    v5CapsuleOrbitA.Rotate(Vector3.up, orbSpeed * dt, Space.Self);
+                }
+                if (v5CapsuleOrbitB != null)
+                {
+                    v5CapsuleOrbitB.Rotate(Vector3.up, -orbSpeed * 1.2f * dt, Space.Self);
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Membangun pool 12 fragmen percikan 3D pra-alokasi (zero-GC, kebal shader stripping Android OpenGLES3)
+    /// tanpa ParticleSystem eksternal.
+    /// </summary>
+    private void InitializeSparkBurstPool()
+    {
+        sparkBurstMaterial = CreateSafeOpenGLMaterial();
+        if (sparkBurstMaterial != null)
+        {
+            sparkBurstMaterial.color = ReactiveAccentHighColor;
+            managedMaterials.Add(sparkBurstMaterial);
+        }
+
+        sparkPoolRootObj = CreateEmptyChild("AR_SparkBurstPool", transform, Vector3.zero).gameObject;
+        sparkTransforms = new Transform[SparkPoolSize];
+        sparkLocalPositions = new Vector3[SparkPoolSize];
+        sparkVelocities = new Vector3[SparkPoolSize];
+        sparkInitialScales = new float[SparkPoolSize];
+
+        Mesh sparkMesh = GetSharedDiamondSpireMesh();
+        for (int i = 0; i < SparkPoolSize; i++)
+        {
+            GameObject frag = CreateProceduralMeshPart(
+                $"SparkFrag_{i}",
+                sparkMesh,
+                sparkPoolRootObj.transform,
+                Vector3.zero,
+                Vector3.zero,
+                Vector3.zero,
+                sparkBurstMaterial);
+            sparkTransforms[i] = frag.transform;
+        }
+
+        sparkPoolRootObj.SetActive(false);
+    }
+
+    /// <summary>
+    /// Melontarkan percikan energi 3D radial singkat (~0.38 detik) dengan gravitasi ringan dan scale fade-out zero-GC.
+    /// </summary>
+    public void TriggerEnergyBurst(Color burstColor, float speedScale = 1f)
+    {
+        if (!isTracked || sparkPoolRootObj == null || sparkTransforms == null)
+        {
+            return;
+        }
+
+        LaunchSparkBurstInternal(
+            burstColor,
+            isCelebration: false,
+            duration: 0.38f,
+            originY: 0.22f,
+            speedScale: Mathf.Max(0.25f, speedScale),
+            baseFragScale: 0.032f);
+    }
+
+    /// <summary>
+    /// Selebrasi percikan 3D emas-sian meriah di atas diorama OutputActuator saat verifikasi level dinyatakan lulus.
+    /// </summary>
+    public void TriggerVictoryCelebration()
+    {
+        if (!isTracked || sparkPoolRootObj == null || sparkTransforms == null)
+        {
+            return;
+        }
+
+        LaunchSparkBurstInternal(
+            VictoryBurstGoldColor,
+            isCelebration: true,
+            duration: 0.62f,
+            originY: 0.30f,
+            speedScale: 1.65f,
+            baseFragScale: 0.048f);
+    }
+
+    private void LaunchSparkBurstInternal(
+        Color baseColor,
+        bool isCelebration,
+        float duration,
+        float originY,
+        float speedScale,
+        float baseFragScale)
+    {
+        isSparkBurstActive = true;
+        isSparkCelebrationMode = isCelebration;
+        sparkBurstElapsed = 0f;
+        sparkBurstDuration = Mathf.Max(0.10f, duration);
+        sparkBurstBaseColor = baseColor;
+
+        float phaseSeed = Mathf.Repeat(Time.time * 2.3f, Mathf.PI * 2f);
+        const float goldenAngle = 2.39996323f;
+
+        for (int i = 0; i < SparkPoolSize; i++)
+        {
+            float angle = phaseSeed + (i * goldenAngle);
+            float radialSpeed = (0.48f + ((i % 3) * 0.16f)) * speedScale;
+            float upwardSpeed = ((isCelebration ? 0.85f : 0.56f) + ((i % 4) * 0.12f)) * speedScale;
+
+            sparkLocalPositions[i] = new Vector3(0f, originY, 0f);
+            sparkVelocities[i] = new Vector3(
+                Mathf.Cos(angle) * radialSpeed,
+                upwardSpeed,
+                Mathf.Sin(angle) * radialSpeed);
+            sparkInitialScales[i] = baseFragScale * (0.82f + ((i % 3) * 0.18f));
+
+            Transform st = sparkTransforms[i];
+            if (st != null)
+            {
+                st.localPosition = sparkLocalPositions[i];
+                st.localScale = Vector3.one * sparkInitialScales[i];
+                st.localRotation = Quaternion.Euler(i * 31f, i * 47f, i * 19f);
+            }
+        }
+
+        if (sparkBurstMaterial != null)
+        {
+            sparkBurstMaterial.color = baseColor;
+        }
+
+        if (!sparkPoolRootObj.activeSelf)
+        {
+            sparkPoolRootObj.SetActive(true);
+        }
+    }
+
+    private void UpdateSparkBurstPool()
+    {
+        if (!isSparkBurstActive || sparkTransforms == null)
+        {
+            return;
+        }
+
+        float dt = Time.deltaTime;
+        sparkBurstElapsed += dt;
+        float t = Mathf.Clamp01(sparkBurstElapsed / sparkBurstDuration);
+
+        if (t >= 1f)
+        {
+            ResetSparkBurstPool();
+            return;
+        }
+
+        float scaleFade = 1f - (t * t);
+        float gravity = isSparkCelebrationMode ? 1.85f : 1.65f;
+
+        if (sparkBurstMaterial != null)
+        {
+            Color col = isSparkCelebrationMode
+                ? Color.Lerp(VictoryBurstGoldColor, VictoryBurstCyanColor, t)
+                : sparkBurstBaseColor;
+            col.a = Mathf.Clamp01(1f - t);
+            sparkBurstMaterial.color = col;
+        }
+
+        for (int i = 0; i < SparkPoolSize; i++)
+        {
+            sparkVelocities[i].y -= gravity * dt;
+            sparkLocalPositions[i] += sparkVelocities[i] * dt;
+
+            Transform st = sparkTransforms[i];
+            if (st != null)
+            {
+                st.localPosition = sparkLocalPositions[i];
+                st.localScale = Vector3.one * (sparkInitialScales[i] * scaleFade);
+                st.Rotate(new Vector3(180f, 240f, 120f) * dt, Space.Self);
+            }
+        }
+    }
+
+    private void ResetSparkBurstPool()
+    {
+        isSparkBurstActive = false;
+        isSparkCelebrationMode = false;
+        sparkBurstElapsed = 0f;
+
+        if (sparkPoolRootObj != null && sparkPoolRootObj.activeSelf)
+        {
+            sparkPoolRootObj.SetActive(false);
         }
     }
 }
