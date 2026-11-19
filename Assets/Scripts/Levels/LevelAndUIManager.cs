@@ -146,6 +146,20 @@ public class LevelAndUIManager : MonoBehaviour
     private bool isOscilloscopeTabActive = false;
     private bool isScannerHudCollapsed = false;
 
+    // Komponen Modal Pemilih Level Instan (Direct Level Selector, v4.0)
+    private GameObject levelSelectorModalPanel;
+    private Button levelSelectorOpenButton;
+    private Button levelSelectorCloseButton;
+    private Button levelSelectorSandboxButton;
+    private Image levelSelectorSandboxBg;
+    private Outline levelSelectorSandboxOutline;
+    private TMP_Text txtLevelSelectorSandboxStatus;
+    private Button[] levelSelectorItemButtons;
+    private UnityEngine.Events.UnityAction[] levelSelectorItemHandlers;
+    private Image[] levelSelectorItemBackgrounds;
+    private Outline[] levelSelectorItemOutlines;
+    private TMP_Text[] levelSelectorItemStatusTexts;
+
     // Referensi Tombol HUD Bawaan Unity (Reskin Tema Sci-Fi v4.0)
     private Button btnInputA;
     private Image imgBtnInputA;
@@ -292,6 +306,15 @@ public class LevelAndUIManager : MonoBehaviour
     private static readonly Color ResetBtnBgColor = new Color(0.14f, 0.16f, 0.22f, 0.96f);
     private static readonly Color ResetBtnOutlineColor = new Color(0.92f, 0.44f, 0.28f, 0.94f);
     private static readonly Color ResetBtnTextColor = new Color(1.00f, 0.64f, 0.48f, 1f);
+    private static readonly Color LevelSelectorOpenBgColor = new Color(0.08f, 0.24f, 0.36f, 0.96f);
+    private static readonly Color LevelSelectorCardIdleBgColor = new Color(0.08f, 0.15f, 0.25f, 0.95f);
+    private static readonly Color LevelSelectorCardClearedBgColor = new Color(0.08f, 0.24f, 0.24f, 0.95f);
+    private static readonly Color LevelSelectorCardActiveBgColor = new Color(0.11f, 0.38f, 0.54f, 0.98f);
+    private static readonly Color LevelSelectorCardIdleOutlineColor = new Color(0.24f, 0.50f, 0.68f, 0.85f);
+    private static readonly Color LevelSelectorCardActiveOutlineColor = new Color(0.32f, 0.96f, 1.00f, 1.00f);
+    private static readonly Color LevelSelectorSandboxIdleBgColor = new Color(0.14f, 0.24f, 0.38f, 0.96f);
+    private static readonly Color LevelSelectorSandboxActiveBgColor = new Color(0.12f, 0.46f, 0.44f, 0.98f);
+    private static readonly Color LevelSelectorSandboxOutlineColor = new Color(0.35f, 0.95f, 0.82f, 0.95f);
 
     private static readonly ColorBlock SciFiButtonColorBlock = new ColorBlock
     {
@@ -407,6 +430,43 @@ public class LevelAndUIManager : MonoBehaviour
             collapseHudButton.onClick.RemoveListener(ToggleCollapseScannerHud);
             collapseHudButton = null;
         }
+
+        if (levelSelectorOpenButton != null)
+        {
+            levelSelectorOpenButton.onClick.RemoveListener(ToggleLevelSelector);
+            levelSelectorOpenButton = null;
+        }
+
+        if (levelSelectorCloseButton != null)
+        {
+            levelSelectorCloseButton.onClick.RemoveListener(CloseLevelSelectorWithAudio);
+            levelSelectorCloseButton = null;
+        }
+
+        if (levelSelectorSandboxButton != null)
+        {
+            levelSelectorSandboxButton.onClick.RemoveListener(OnLevelSelectorSandboxClicked);
+            levelSelectorSandboxButton = null;
+        }
+
+        if (levelSelectorItemButtons != null)
+        {
+            for (int i = 0; i < levelSelectorItemButtons.Length; i++)
+            {
+                if (levelSelectorItemButtons[i] != null)
+                {
+                    if (levelSelectorItemHandlers != null
+                        && i < levelSelectorItemHandlers.Length
+                        && levelSelectorItemHandlers[i] != null)
+                    {
+                        levelSelectorItemButtons[i].onClick.RemoveListener(levelSelectorItemHandlers[i]);
+                    }
+                    levelSelectorItemButtons[i] = null;
+                }
+            }
+            levelSelectorItemButtons = null;
+        }
+        levelSelectorItemHandlers = null;
 
         uiRaycastResults.Clear();
         cachedPointerEventData = null;
@@ -870,8 +930,9 @@ public class LevelAndUIManager : MonoBehaviour
         CreateScaffoldingHintButton(footerGroupRect, safeFont);
         CreateCompetencyReportButton(footerGroupRect, safeFont);
 
-        // Modal Rapor Kompetensi Informatika Fase E (default tersembunyi)
+        // Modal Rapor Kompetensi Informatika Fase E & Pemilih Level Instan (default tersembunyi)
         InitializeCompetencyReportUI(targetCanvas.transform, safeFont);
+        InitializeLevelSelectorUI(targetCanvas.transform, safeFont);
 
         isOscilloscopeTabActive = false;
         isScannerHudCollapsed = false;
@@ -1614,6 +1675,7 @@ public class LevelAndUIManager : MonoBehaviour
             return;
         }
 
+        CloseLevelSelector(playAudio: false);
         RefreshCompetencyReportUI();
         competencyReportPanelObj.transform.SetAsLastSibling();
         competencyReportPanelObj.SetActive(true);
@@ -1624,6 +1686,411 @@ public class LevelAndUIManager : MonoBehaviour
         if (competencyReportPanelObj != null && competencyReportPanelObj.activeSelf)
         {
             competencyReportPanelObj.SetActive(false);
+        }
+    }
+
+    /// <summary>
+    /// Membangun tombol "Pilih Level" (tepat di bawah Btn_ResetLevel) dan modal "Panel_LevelSelector"
+    /// bergrid 2x4 untuk lompat instan ke Level 1-7 maupun Mode Sandbox Bebas.
+    /// </summary>
+    private void InitializeLevelSelectorUI(Transform canvasTransform, TMP_FontAsset fontAsset)
+    {
+        if (levelSelectorModalPanel != null || canvasTransform == null)
+        {
+            return;
+        }
+
+        CreateLevelSelectorOpenButton(canvasTransform, fontAsset);
+
+        levelSelectorModalPanel = new GameObject("Panel_LevelSelector", typeof(RectTransform), typeof(Image));
+        levelSelectorModalPanel.transform.SetParent(canvasTransform, false);
+        levelSelectorModalPanel.transform.SetAsLastSibling();
+
+        RectTransform modalRect = levelSelectorModalPanel.GetComponent<RectTransform>();
+        modalRect.anchorMin = new Vector2(0.5f, 0.5f);
+        modalRect.anchorMax = new Vector2(0.5f, 0.5f);
+        modalRect.pivot = new Vector2(0.5f, 0.5f);
+        modalRect.anchoredPosition = Vector2.zero;
+        modalRect.sizeDelta = new Vector2(720f, 470f);
+
+        Image modalBg = levelSelectorModalPanel.GetComponent<Image>();
+        modalBg.color = new Color(0.04f, 0.08f, 0.14f, 0.96f);
+        modalBg.raycastTarget = true;
+
+        // Bingkai sian 4 sisi seragam dengan Panel_CompetencyReport
+        CreateReportBorderStrip("Border_Top", modalRect, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), Vector2.zero, new Vector2(0f, 3f));
+        CreateReportBorderStrip("Border_Bottom", modalRect, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f), Vector2.zero, new Vector2(0f, 3f));
+        CreateReportBorderStrip("Border_Left", modalRect, new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(0f, 0.5f), Vector2.zero, new Vector2(3f, 0f));
+        CreateReportBorderStrip("Border_Right", modalRect, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(1f, 0.5f), Vector2.zero, new Vector2(3f, 0f));
+
+        TMP_Text headerTitle = CreateMatrixText("Txt_LevelSelectorHeader", modalRect, new Vector2(20f, -14f), new Vector2(680f, 30f),
+            "PILIH MISI & MODE SIMULASI (LEVEL 1 - 7 & SANDBOX)", 17.5f, TextAlignmentOptions.Center, MatrixAccentCyanColor, fontAsset);
+        headerTitle.enableAutoSizing = true;
+        headerTitle.fontSizeMin = 12.5f;
+        headerTitle.fontSizeMax = 18f;
+
+        RectTransform topDivRect = CreateModalContainer("Divider_LevelSelectorTop", modalRect, 20f, -48f, 680f, 2f, new Color(0.22f, 0.65f, 0.85f, 0.55f));
+        topDivRect.GetComponent<Image>().raycastTarget = false;
+
+        int levelCount = Mathf.Min(7, (levels != null && levels.Count > 0) ? levels.Count : 7);
+        levelSelectorItemButtons = new Button[levelCount];
+        levelSelectorItemHandlers = new UnityEngine.Events.UnityAction[levelCount];
+        levelSelectorItemBackgrounds = new Image[levelCount];
+        levelSelectorItemOutlines = new Outline[levelCount];
+        levelSelectorItemStatusTexts = new TMP_Text[levelCount];
+
+        const float cardWidth = 332f;
+        const float cardHeight = 72f;
+        const float colLeftX = 20f;
+        const float colRightX = 368f;
+        const float gridTopY = -62f;
+        const float rowStepY = 82f;
+
+        for (int i = 0; i < levelCount; i++)
+        {
+            int col = i % 2;
+            int row = i / 2;
+            float xPos = col == 0 ? colLeftX : colRightX;
+            float yPos = gridTopY - (row * rowStepY);
+
+            RectTransform cardRect = CreateModalContainer($"Btn_SelectLevel_{i + 1}", modalRect, xPos, yPos, cardWidth, cardHeight, LevelSelectorCardIdleBgColor);
+            Image cardBg = cardRect.GetComponent<Image>();
+            cardBg.raycastTarget = true;
+
+            Button cardBtn = cardRect.gameObject.AddComponent<Button>();
+            cardBtn.targetGraphic = cardBg;
+            cardBtn.transition = Selectable.Transition.ColorTint;
+            cardBtn.colors = SciFiButtonColorBlock;
+
+            Outline cardOutline = cardRect.gameObject.AddComponent<Outline>();
+            cardOutline.effectColor = LevelSelectorCardIdleOutlineColor;
+            cardOutline.effectDistance = new Vector2(1.8f, -1.8f);
+            cardOutline.useGraphicAlpha = true;
+
+            int capturedIndex = i;
+            UnityEngine.Events.UnityAction handler = () => OnLevelSelectorItemClicked(capturedIndex);
+            cardBtn.onClick.AddListener(handler);
+
+            TMP_Text cardTitle = CreateMatrixText($"Txt_SelectLevelTitle_{i + 1}", cardRect, new Vector2(12f, -8f), new Vector2(cardWidth - 24f, 28f),
+                GetLevelSelectorCardTitle(i), 14.5f, TextAlignmentOptions.Left, Color.white, fontAsset);
+            cardTitle.enableAutoSizing = true;
+            cardTitle.fontSizeMin = 11.5f;
+            cardTitle.fontSizeMax = 15f;
+
+            TMP_Text cardStatus = CreateMatrixText($"Txt_SelectLevelStatus_{i + 1}", cardRect, new Vector2(12f, -38f), new Vector2(cardWidth - 24f, 24f),
+                "Bintang: [...] | SIAP", 13f, TextAlignmentOptions.Left, MatrixBrightCyanColor, fontAsset);
+            cardStatus.enableAutoSizing = true;
+            cardStatus.fontSizeMin = 10.5f;
+            cardStatus.fontSizeMax = 13.5f;
+
+            levelSelectorItemButtons[i] = cardBtn;
+            levelSelectorItemHandlers[i] = handler;
+            levelSelectorItemBackgrounds[i] = cardBg;
+            levelSelectorItemOutlines[i] = cardOutline;
+            levelSelectorItemStatusTexts[i] = cardStatus;
+        }
+
+        // Slot ke-8 (Baris 4 Kolom Kanan): Mode Sandbox Bebas
+        RectTransform sandboxRect = CreateModalContainer("Btn_SelectSandbox", modalRect, colRightX, gridTopY - (3 * rowStepY), cardWidth, cardHeight, LevelSelectorSandboxIdleBgColor);
+        levelSelectorSandboxBg = sandboxRect.GetComponent<Image>();
+        levelSelectorSandboxBg.raycastTarget = true;
+
+        levelSelectorSandboxButton = sandboxRect.gameObject.AddComponent<Button>();
+        levelSelectorSandboxButton.targetGraphic = levelSelectorSandboxBg;
+        levelSelectorSandboxButton.transition = Selectable.Transition.ColorTint;
+        levelSelectorSandboxButton.colors = SciFiButtonColorBlock;
+        levelSelectorSandboxButton.onClick.AddListener(OnLevelSelectorSandboxClicked);
+
+        levelSelectorSandboxOutline = sandboxRect.gameObject.AddComponent<Outline>();
+        levelSelectorSandboxOutline.effectColor = LevelSelectorSandboxOutlineColor;
+        levelSelectorSandboxOutline.effectDistance = new Vector2(1.8f, -1.8f);
+        levelSelectorSandboxOutline.useGraphicAlpha = true;
+
+        TMP_Text sandboxTitle = CreateMatrixText("Txt_SelectSandboxTitle", sandboxRect, new Vector2(12f, -8f), new Vector2(cardWidth - 24f, 28f),
+            "MODE SANDBOX BEBAS", 15f, TextAlignmentOptions.Left, new Color(0.84f, 1.00f, 0.94f, 1f), fontAsset);
+        sandboxTitle.enableAutoSizing = true;
+        sandboxTitle.fontSizeMin = 12f;
+        sandboxTitle.fontSizeMax = 15.5f;
+
+        txtLevelSelectorSandboxStatus = CreateMatrixText("Txt_SelectSandboxStatus", sandboxRect, new Vector2(12f, -38f), new Vector2(cardWidth - 24f, 24f),
+            "Eksplorasi Bebas Tanpa Batas Kuota", 12.5f, TextAlignmentOptions.Left, MatrixBrightCyanColor, fontAsset);
+        txtLevelSelectorSandboxStatus.enableAutoSizing = true;
+        txtLevelSelectorSandboxStatus.fontSizeMin = 10.5f;
+        txtLevelSelectorSandboxStatus.fontSizeMax = 13f;
+
+        RectTransform botDivRect = CreateModalContainer("Divider_LevelSelectorBottom", modalRect, 20f, -394f, 680f, 2f, new Color(0.22f, 0.65f, 0.85f, 0.55f));
+        botDivRect.GetComponent<Image>().raycastTarget = false;
+
+        levelSelectorCloseButton = CreateReportModalButton("Btn_LevelSelectorClose", modalRect, 240f, -408f, 240f, 46f,
+            "Tutup", new Color(0.14f, 0.30f, 0.44f, 1f), Color.white, fontAsset, CloseLevelSelectorWithAudio);
+        levelSelectorCloseButton.colors = SciFiButtonColorBlock;
+        Outline closeOutline = levelSelectorCloseButton.gameObject.AddComponent<Outline>();
+        closeOutline.effectColor = MatrixAccentCyanColor;
+        closeOutline.effectDistance = new Vector2(1.8f, -1.8f);
+        closeOutline.useGraphicAlpha = true;
+
+        levelSelectorModalPanel.SetActive(false);
+        RefreshLevelSelectorUI();
+    }
+
+    private void CreateLevelSelectorOpenButton(Transform canvasTransform, TMP_FontAsset fontAsset)
+    {
+        if (levelSelectorOpenButton != null)
+        {
+            return;
+        }
+
+        Transform parentTransform = canvasTransform;
+        Vector2 anchorMin = new Vector2(0.5f, 0.5f);
+        Vector2 anchorMax = new Vector2(0.5f, 0.5f);
+        Vector2 pivot = new Vector2(0.5f, 0.5f);
+        Vector2 anchoredPosition = new Vector2(800f, 295f);
+        Vector2 sizeDelta = new Vector2(220f, 56f);
+
+        RectTransform resetRect = null;
+        if (resetLevelButtonObj != null)
+        {
+            resetRect = resetLevelButtonObj.GetComponent<RectTransform>();
+        }
+        else if (btnResetLevel != null)
+        {
+            resetRect = btnResetLevel.GetComponent<RectTransform>();
+        }
+
+        if (resetRect != null)
+        {
+            if (resetRect.parent != null)
+            {
+                parentTransform = resetRect.parent;
+            }
+
+            anchorMin = resetRect.anchorMin;
+            anchorMax = resetRect.anchorMax;
+            pivot = resetRect.pivot;
+            float width = resetRect.sizeDelta.x > 10f ? resetRect.sizeDelta.x : 220f;
+            float height = 56f;
+            const float verticalGap = 14f;
+            float yBelowReset = resetRect.anchoredPosition.y - (resetRect.sizeDelta.y * 0.5f) - verticalGap - (height * 0.5f);
+            anchoredPosition = new Vector2(resetRect.anchoredPosition.x, yBelowReset);
+            sizeDelta = new Vector2(width, height);
+        }
+
+        GameObject btnObj = new GameObject("Btn_OpenLevelSelector", typeof(RectTransform), typeof(Image), typeof(Button));
+        btnObj.transform.SetParent(parentTransform, false);
+
+        RectTransform rect = btnObj.GetComponent<RectTransform>();
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.pivot = pivot;
+        rect.anchoredPosition = anchoredPosition;
+        rect.sizeDelta = sizeDelta;
+
+        TMP_Text btnLabel = CreateMatrixText("Txt_OpenLevelSelector", rect, Vector2.zero, sizeDelta,
+            "Pilih Level", 22f, TextAlignmentOptions.Center, Color.white, fontAsset);
+        btnLabel.enableAutoSizing = true;
+        btnLabel.fontSizeMin = 15f;
+        btnLabel.fontSizeMax = 24f;
+        RectTransform labelRect = btnLabel.rectTransform;
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.pivot = new Vector2(0.5f, 0.5f);
+        labelRect.offsetMin = new Vector2(8f, 0f);
+        labelRect.offsetMax = new Vector2(-8f, 0f);
+
+        levelSelectorOpenButton = btnObj.GetComponent<Button>();
+        ApplySingleSciFiButtonStyle(
+            levelSelectorOpenButton,
+            LevelSelectorOpenBgColor,
+            MatrixAccentCyanColor,
+            new Color(0.86f, 0.98f, 1.00f, 1f),
+            out _,
+            out _);
+        levelSelectorOpenButton.onClick.AddListener(ToggleLevelSelector);
+    }
+
+    public void ToggleLevelSelector()
+    {
+        if (isVerifying)
+        {
+            PlaySfx(clipToggleInput);
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = "Tunggu hingga proses Uji Rangkaian selesai sebelum berpindah level.";
+                txtFeedback.color = new Color(1.00f, 0.78f, 0.28f, 1f);
+            }
+            return;
+        }
+
+        if (levelSelectorModalPanel == null)
+        {
+            return;
+        }
+
+        if (levelSelectorModalPanel.activeSelf)
+        {
+            CloseLevelSelector(playAudio: true);
+        }
+        else
+        {
+            OpenLevelSelector();
+        }
+    }
+
+    public void OpenLevelSelector()
+    {
+        if (isVerifying || levelSelectorModalPanel == null)
+        {
+            return;
+        }
+
+        CloseCompetencyReport();
+        PlaySfx(clipToggleInput);
+        RefreshLevelSelectorUI();
+        levelSelectorModalPanel.transform.SetAsLastSibling();
+        levelSelectorModalPanel.SetActive(true);
+    }
+
+    public void CloseLevelSelector(bool playAudio = false)
+    {
+        if (playAudio)
+        {
+            PlaySfx(clipToggleInput);
+        }
+
+        if (levelSelectorModalPanel != null && levelSelectorModalPanel.activeSelf)
+        {
+            levelSelectorModalPanel.SetActive(false);
+        }
+    }
+
+    private void CloseLevelSelectorWithAudio()
+    {
+        CloseLevelSelector(playAudio: true);
+    }
+
+    private void OnLevelSelectorItemClicked(int levelIndex)
+    {
+        if (isVerifying)
+        {
+            PlaySfx(clipToggleInput);
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = "Tunggu hingga proses Uji Rangkaian selesai sebelum berpindah level.";
+                txtFeedback.color = new Color(1.00f, 0.78f, 0.28f, 1f);
+            }
+            return;
+        }
+
+        PlaySfx(clipToggleInput);
+        CloseLevelSelector(playAudio: false);
+        LoadLevel(levelIndex);
+    }
+
+    private void OnLevelSelectorSandboxClicked()
+    {
+        if (isVerifying)
+        {
+            PlaySfx(clipToggleInput);
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = "Tunggu hingga proses Uji Rangkaian selesai sebelum berpindah ke Mode Sandbox.";
+                txtFeedback.color = new Color(1.00f, 0.78f, 0.28f, 1f);
+            }
+            return;
+        }
+
+        PlaySfx(clipToggleInput);
+        CloseLevelSelector(playAudio: false);
+        EnterSandboxMode();
+    }
+
+    private void RefreshLevelSelectorUI()
+    {
+        EnsureLevelProgressArraysInitialized();
+
+        if (levelSelectorItemButtons != null)
+        {
+            for (int i = 0; i < levelSelectorItemButtons.Length; i++)
+            {
+                bool isCleared = levelCompletedFlags != null && i < levelCompletedFlags.Length && levelCompletedFlags[i];
+                int bestStars = (levelBestStars != null && i < levelBestStars.Length) ? levelBestStars[i] : 0;
+                bool isActive = !isSandboxMode && i == currentLevelIndex;
+
+                if (levelSelectorItemBackgrounds != null && i < levelSelectorItemBackgrounds.Length && levelSelectorItemBackgrounds[i] != null)
+                {
+                    levelSelectorItemBackgrounds[i].color = isActive
+                        ? LevelSelectorCardActiveBgColor
+                        : (isCleared ? LevelSelectorCardClearedBgColor : LevelSelectorCardIdleBgColor);
+                }
+
+                if (levelSelectorItemOutlines != null && i < levelSelectorItemOutlines.Length && levelSelectorItemOutlines[i] != null)
+                {
+                    levelSelectorItemOutlines[i].effectColor = isActive
+                        ? LevelSelectorCardActiveOutlineColor
+                        : (isCleared ? NextLevelBtnOutlineColor : LevelSelectorCardIdleOutlineColor);
+                }
+
+                if (levelSelectorItemStatusTexts != null && i < levelSelectorItemStatusTexts.Length && levelSelectorItemStatusTexts[i] != null)
+                {
+                    string statusTag = isActive ? "AKTIF" : (isCleared ? "SELESAI" : "SIAP");
+                    levelSelectorItemStatusTexts[i].text = $"Bintang: {FormatStarsAscii(bestStars)} | {statusTag}";
+                    if (isActive)
+                    {
+                        levelSelectorItemStatusTexts[i].color = new Color(1.00f, 0.90f, 0.30f, 1f);
+                    }
+                    else if (bestStars >= 3)
+                    {
+                        levelSelectorItemStatusTexts[i].color = new Color(1.00f, 0.86f, 0.25f, 1f);
+                    }
+                    else if (isCleared)
+                    {
+                        levelSelectorItemStatusTexts[i].color = MatrixBrightGreenColor;
+                    }
+                    else
+                    {
+                        levelSelectorItemStatusTexts[i].color = new Color(0.70f, 0.84f, 0.94f, 1f);
+                    }
+                }
+            }
+        }
+
+        if (levelSelectorSandboxBg != null)
+        {
+            levelSelectorSandboxBg.color = isSandboxMode
+                ? LevelSelectorSandboxActiveBgColor
+                : LevelSelectorSandboxIdleBgColor;
+        }
+
+        if (levelSelectorSandboxOutline != null)
+        {
+            levelSelectorSandboxOutline.effectColor = isSandboxMode
+                ? LevelSelectorCardActiveOutlineColor
+                : LevelSelectorSandboxOutlineColor;
+        }
+
+        if (txtLevelSelectorSandboxStatus != null)
+        {
+            txtLevelSelectorSandboxStatus.text = isSandboxMode
+                ? "MODE AKTIF | Tanpa Batas Kuota"
+                : "Eksplorasi Bebas Tanpa Batas Kuota";
+            txtLevelSelectorSandboxStatus.color = isSandboxMode
+                ? new Color(1.00f, 0.90f, 0.30f, 1f)
+                : MatrixBrightCyanColor;
+        }
+    }
+
+    private static string GetLevelSelectorCardTitle(int levelIndex)
+    {
+        switch (levelIndex)
+        {
+            case 0: return "L1 [OR] - Alarm Pintu";
+            case 1: return "L2 [XOR] - Sakelar Tangga";
+            case 2: return "L3 [AND+NOT] - Brankas";
+            case 3: return "L4 [NAND] - Reaktor";
+            case 4: return "L5 [XNOR] - Inti Kembar";
+            case 5: return "L6 [NOR] - Ruang Server";
+            case 6: return "L7 [De Morgan] - Biometrik";
+            default: return $"L{levelIndex + 1} - Misi Logika";
         }
     }
 
@@ -3792,7 +4259,8 @@ public class LevelAndUIManager : MonoBehaviour
             return;
         }
 
-        if (competencyReportPanelObj != null && competencyReportPanelObj.activeSelf)
+        if ((competencyReportPanelObj != null && competencyReportPanelObj.activeSelf)
+            || (levelSelectorModalPanel != null && levelSelectorModalPanel.activeSelf))
         {
             return;
         }

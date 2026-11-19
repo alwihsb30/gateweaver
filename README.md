@@ -1,4 +1,4 @@
-# GateWeaver AR (v3.0)
+# GateWeaver AR (v4.0 — Spatial AR UX & Ergonomics Edition)
 
 **Media Pembelajaran Interaktif *Tangible Spatial Augmented Reality* untuk Rangkaian Gerbang Logika Kombinasional Berbasis Kurikulum Merdeka (Fase E)**
 
@@ -6,7 +6,7 @@
 
 ## 1. Deskripsi Proyek & Pemetaan Kurikulum Merdeka
 
-**GateWeaver AR v3.0** adalah aplikasi pembelajaran interaktif berbasis **Tangible Spatial Augmented Reality** untuk perangkat Android yang memungkinkan peserta didik menyusun kartu marker fisik gerbang logika secara langsung di atas meja, memantau telemetri pin I/O serta osiloskop gelombang sinyal digital biner (`0` / `1`) secara *real-time* dalam ruang 3D, memperoleh bimbingan bertingkat (*scaffolding*) dan diagnostik miskonsepsi otomatis, serta memverifikasi tabel kebenaran rangkaian secara menyeluruh.
+**GateWeaver AR v4.0** adalah aplikasi pembelajaran interaktif berbasis **Tangible Spatial Augmented Reality** untuk perangkat Android yang memindahkan pusat interaksi langsung ke hologram 3D AR di atas meja, membebaskan bidang pandang kamera melalui antarmuka HUD bertab yang dapat dilipat (*collapsible*), serta menyediakan navigasi lompat level instan, telemetri pin I/O, osiloskop sinyal digital, bimbingan bertingkat (*scaffolding*), dan diagnostik miskonsepsi otomatis.
 
 ### Pemetaan Capaian Pembelajaran (CP)
 - **Mata Pelajaran:** Informatika (Kurikulum Merdeka — SMA/SMK Kelas X Fase E, serta pengayaan SMP Fase D)
@@ -15,7 +15,7 @@
   - Memahami fungsi, simbol, dan tabel kebenaran gerbang logika dasar maupun kombinasional (`AND`, `OR`, `NOT`, `XOR`, `NAND`, `NOR`, `XNOR`, serta ekuivalensi **Hukum De Morgan**).
   - Menerjemahkan spesifikasi permasalahan logika nyata menjadi ekspresi aljabar Boolean dan rangkaian kartu gerbang kombinasional.
   - Menganalisis perubahan sinyal waktu nyata menggunakan diagram pewaktuan digital (*timing diagram*) `A(t)`, `B(t)`, dan `Y(t)` serta mendiagnosis kesalahan sambungan atau polaritas rangkaian.
-  - Mengoptimasi efisiensi rangkaian sesuai batas kuota komponen dan mengembangkan kecakapan abad ke-21 (**4C**: *Critical Thinking*, *Collaboration*, *Communication*, dan *Creativity*) melalui eksperimen kolaboratif berbasis kartu fisik.
+  - Mengoptimasi efisiensi rangkaian sesuai batas kuota komponen dan mengembangkan kecakapan abad ke-21 (**4C**: *Critical Thinking*, *Collaboration*, *Communication*, dan *Creativity*) melalui manipulasi fisik dan interaksi sentuh hologram 3D langsung.
 
 ---
 
@@ -25,20 +25,20 @@ Seluruh target marker terdaftar pada basis data Vuforia [GateWeaverDB.xml](Asset
 
 | No | Nama Target Vuforia | Objek Scene | Peran (`NodeType`) | Kuota Input | Keterangan Interaksi |
 | :--- | :--- | :--- | :--- | :---: | :--- |
-| 1 | `InputA` | `Card_Input_A` | `InputSource` | `0` | Sumber sinyal `A` (`0`/`1`), dapat diubah dengan memutar kartu fisik `~90°` atau menekan `Btn_ToggleInputA` |
-| 2 | `InputB` | `Card_Input_B` | `InputSource` | `0` | Sumber sinyal `B` (`0`/`1`), dapat diubah dengan memutar kartu fisik `~90°` atau menekan `Btn_ToggleInputB` |
-| 3 | `AND` | `Card_Gate_AND` | `AND` | `2` | Output `1` hanya jika kedua input bernilai `1` |
-| 4 | `OR` | `Card_Gate_OR` | `OR` | `2` | Output `1` jika minimal salah satu input bernilai `1` |
-| 5 | `XOR` | `Card_Gate_XOR` | `XOR` | `2` | Output `1` jika kedua input bernilai berbeda |
+| 1 | `InputA` | `Card_Input_A` | `InputSource` | `0` | Sumber sinyal `A` (`0`/`1`), diubah lewat sentuh langsung hologram 3D, rotasi kartu `~90°`, atau tombol `Btn_ToggleInputA` |
+| 2 | `InputB` | `Card_Input_B` | `InputSource` | `0` | Sumber sinyal `B` (`0`/`1`), diubah lewat sentuh langsung hologram 3D, rotasi kartu `~90°`, atau tombol `Btn_ToggleInputB` |
+| 3 | `AND` | `Card_Gate_AND` | `AND` | `2` | Output `1` hanya jika kedua input bernilai `1` (sentuh hologram 3D untuk inspeksi pin & fungsi) |
+| 4 | `OR` | `Card_Gate_OR` | `OR` | `2` | Output `1` jika minimal salah satu input bernilai `1` (sentuh hologram 3D untuk inspeksi pin & fungsi) |
+| 5 | `XOR` | `Card_Gate_XOR` | `XOR` | `2` | Output `1` jika kedua input bernilai berbeda (sentuh hologram 3D untuk inspeksi pin & fungsi) |
 | 6 | `NAND` | `Card_Gate_NAND` | `NAND` | `2` | Output `0` hanya jika kedua input bernilai `1` (`NOT(A AND B)`) |
 | 7 | `NOT` | `Card_Gate_NOT` | `NOT` | `1` | Pembalik fase logika biner (`0 -> 1`, `1 -> 0`) |
-| 8 | `Output` | `Card_Output` | `OutputActuator` | `1` | Aktuator 3D akhir penerima hasil evaluasi yang menampilkan diorama kontekstual sesuai misi level |
+| 8 | `Output` | `Card_Output` | `OutputActuator` | `1` | Aktuator 3D akhir dengan 5 diorama kontekstual; sentuh hologram 3D untuk memicu uji rangkaian (Level) atau inspeksi rumus (Sandbox) |
 
 ---
 
 ## 3. Kurikulum 7 Level Progresif & Mode Sandbox Bebas (Total 21 Bintang)
 
-Seluruh skenario misi dikelola oleh `LevelAndUIManager` ([LevelAndUIManager.cs](Assets/Scripts/Levels/LevelAndUIManager.cs)) dengan sistem penghargaan **3 bintang per level** (skor maksimal **21 bintang** untuk 7 level):
+Seluruh skenario misi dikelola oleh `LevelAndUIManager` ([LevelAndUIManager.cs](Assets/Scripts/Levels/LevelAndUIManager.cs)) dengan penghargaan **3 bintang per level** (skor maksimal **21 bintang**) dan dapat diakses langsung melalui modal **`Panel_LevelSelector`** (`"Pilih Level"`):
 
 | Level | Judul Misi | Deskripsi Misi | Rangkaian Solusi | Kuota Gerbang | Tabel Kebenaran Target (`AB: 00, 01, 10, 11`) |
 | :---: | :--- | :--- | :--- | :---: | :---: |
@@ -53,44 +53,44 @@ Seluruh skenario misi dikelola oleh `LevelAndUIManager` ([LevelAndUIManager.cs](
 
 ---
 
-## 4. Arsitektur Fitur Lengkap (v1.0 s.d. v3.0)
+## 4. Arsitektur Fitur Lengkap (v1.0 s.d. v4.0)
 
-### A. Fondasi Rangkaian Spasial & Visualisasi 3D (v1.0–v2.0 | Hari ke-1 s.d. Hari ke-11)
+### A. Fondasi Rangkaian Spasial & Visualisasi 3D (v1.0–v2.0)
 1. **Algoritma Routing Spasial *Greedy Closest-Pair* ([`CircuitManager.cs`](Assets/Scripts/Core/CircuitManager.cs))**
-   - Mengurutkan kartu terlacak dari kiri ke kanan di ruang lokal kamera utama tanpa alokasi closure per frame.
-   - Memblokir sambungan langsung `InputSource -> OutputActuator` selama masih ada kartu gerbang logika aktif (`activeGateCardsCount > 0`).
-   - Memisahkan fase sambungan `Input -> Gate` (jangkauan `maxSnapDistance * inputSourceRangeMultiplier`, default `3.0f * 1.8f`) serta fase *Gate-to-Gate* lalu *Gate-to-Output* (`maxSnapDistance = 3.0f`) dengan guard anti-siklus (`WouldCreateCycle`) untuk mendukung susunan zig-zag hingga 5 kartu.
-   - Evaluasi sinyal multi-pass stabil, *tracking loss debounce* (`trackingLossDebounceTime = 0.4f`), dan toggle input via rotasi kartu fisik `~90°` (`rotationAngleThreshold = 45f`) di [`GateNode.cs`](Assets/Scripts/Core/GateNode.cs).
-2. ***3D Quadratic Bezier Energy Arc*, Paket Data Mengalir, & Soket Terminal ([`GateNode.cs`](Assets/Scripts/Core/GateNode.cs))**
-   - Busur energi 3D bersegmen 20 titik (`LineRenderer`, shader `Sprites/Default`), 3 bola paket data yang bergerak sepanjang kurva `P0 -> P1 -> P2` sesuai kondisi sinyal `HIGH (1)` / `LOW (0)`, dan cakram soket terminal tanpa `Collider`.
-3. **Totem Reaktor Hologram 3D & 5 Varian Diorama Aktuator ([`GateNode.cs`](Assets/Scripts/Core/GateNode.cs))**
-   - Totem 3D unik per jenis kartu menggunakan mesh bersama berbasis reference count (`sharedTorusMesh`, `sharedDiamondSpireMesh`) agar hemat memori.
-   - 5 varian diorama kontekstual pada `Card_Output` (*Emergency Rotary Siren Tower*, *Twin Staircase Lantern*, *Mechanical Vault Door*, *Reactor Containment Core*, dan *Twin Sync Cyber Obelisk*) yang dipetakan hingga Level 7 via `ResolveDioramaVariantForLevel`.
-4. **Pemindai Tabel Kebenaran *Real-Time* & Generator Aljabar Boolean ([`CircuitManager.cs`](Assets/Scripts/Core/CircuitManager.cs), [`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
-   - [`GetCircuitBooleanExpression()`](Assets/Scripts/Core/CircuitManager.cs) menelusuri pohon koneksi mundur dari `Card_Output` menghasilkan ekspresi real-time (mis. `Y = (A AND (NOT B))`, `Y = ((NOT A) NAND B)`, atau `Y = (Belum Terhubung)`).
-   - Panel non-blocking `Panel_TruthTableScanner` menampilkan rumus rakitan, status `Output Y`, sorotan baris aktif manual, dan animasi pindai sekuensial baris `00..11`.
-5. **Synthesizer Audio Prosedural PCM, Haptik Android, & Rating Bintang ([`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
-   - Menghasilkan 9 klip audio mono `44100 Hz` secara prosedural via `AudioClip.Create` (toggle input, snap koneksi, nada pindai baris `00..11`, pass/fail, dan arpeggio fanfare kemenangan) dengan kontrol `Btn_AudioToggle` (`Audio: ON` / `Audio: OFF`) serta getar haptik (`Handheld.Vibrate()` pada build Android).
+   - Pengurutan kartu terlacak dari kiri ke kanan di ruang lokal kamera tanpa alokasi closure per frame (`ResolveMainCameraTransform()`, `CompareNodesByCameraX`).
+   - Pemblokiran sambungan bypass `InputSource -> OutputActuator` saat masih ada kartu gerbang aktif (`activeGateCardsCount > 0`), jangkauan `Input -> Gate` (`maxSnapDistance * inputSourceRangeMultiplier`, default `3.0f * 1.8f`), *Gate-to-Gate* lalu *Gate-to-Output* (`maxSnapDistance = 3.0f`), dan guard anti-siklus (`WouldCreateCycle`).
+   - Evaluasi sinyal multi-pass, *tracking loss debounce* (`0.4f`), dan input rotasi fisik `~90°` di [`GateNode.cs`](Assets/Scripts/Core/GateNode.cs).
+2. ***3D Quadratic Bezier Energy Arc*, Totem Reaktor 3D, & 5 Varian Diorama ([`GateNode.cs`](Assets/Scripts/Core/GateNode.cs))**
+   - Busur energi 20 segmen (`Sprites/Default`), 3 bola paket data mengalir, soket terminal, totem unik per gerbang dengan mesh bersama (`sharedTorusMesh`, `sharedDiamondSpireMesh`), dan 5 diorama aktuator pada `Card_Output`.
+3. **Pemindai Tabel Kebenaran, Aljabar Boolean, & Synthesizer Audio PCM ([`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
+   - `GetCircuitBooleanExpression()` menampilkan rumus Boolean real-time, dipadukan dengan verifikasi otomatis 4 baris (`00..11`), 9 klip audio mono `44100 Hz` prosedural (`AudioClip.Create`), haptik Android, serta sistem skor 3 bintang per level.
 
-### B. Ekspansi GateWeaver AR v3.0 (Hari ke-12 s.d. Hari ke-17)
-6. **Telemetri Pin Input-Output 3D, Indikator Mikro Slot Input, & *Rising-Edge Shockwave Ring* (Hari ke-12 | [`GateNode.cs`](Assets/Scripts/Core/GateNode.cs))**
-   - `Label_Status3D` menampilkan status pin masuk dan keluaran eksplisit berkarakter ASCII aman untuk `LiberationSans SDF` (contoh: `AND [1,0] -> 0`, `OR [1,?] -> 1`, `NOT [1] -> 0`, dan `NAND [?,?] -> 1`).
-   - Indikator mikro fisik 3D (`InputPin_0`, `InputPin_1`) di sisi kiri kartu gerbang dan `OutputActuator` menyala sesuai kondisi terhubung `HIGH (1)`, `LOW (0)`, atau belum terhubung (`?`).
-   - Transisi logika keluaran `0 -> 1` (*rising edge*) memicu gelombang kejut torus meluas `ShockwaveRing3D` di atas kartu.
-7. ***3-Tier Pedagogical Scaffolding Hint System* & Mesin Diagnostik Miskonsepsi (Hari ke-13 | [`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
-   - Tombol interaktif `Btn_ScaffoldingHint` menyediakan petunjuk bertahap per level (`Petunjuk (0/3)` -> **Tier 1 Konsep** -> **Tier 2 Komponen** -> **Tier 3 Struktur**), dengan aturan batas maksimal `2` bintang jika membuka Tier 3 sebelum level diselesaikan pertama kali.
-   - `BuildMisconceptionDiagnostic()` menganalisis penyebab spesifik kegagalan verifikasi tabel kebenaran (kartu `NOT` belum terpasang, gerbang terbalik mis. `AND` vs `OR` / `XOR` vs `NAND`, sinyal konstan, atau polaritas terbalik pada hukum De Morgan) langsung pada `Txt_Feedback`.
-8. **Ekspansi Kurikulum 7 Level — Kombinasi `NOR` & *De Morgan Boss* (Hari ke-14 | [`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
-   - Penambahan **Level 6 (Sensor Hening Ruang Server — NOR)** dan **Level 7 (Kunci Biometrik De Morgan)** beserta dukungan ekuivalensi dua jalur solusi sah (`A OR (NOT B)` dan `(NOT A) NAND B`), petunjuk 3 tingkat, serta pemetaan diorama otomatis.
-9. **Osiloskop Gelombang Sinyal Digital *Real-Time* `[A(t) | B(t) | Y(t)]` (Hari ke-15 | [`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
-   - Seksi `Panel_WaveformMonitor` di bawah `Btn_ScaffoldingHint` menyampel kondisi sinyal setiap perubahan logika maupun interval `0.25 detik` (`WaveformSampleIntervalSeconds`) ke 3 kanal x 16 kolom bar gelombang kotak (`48` elemen teralokasi statis).
-10. **Penyimpanan Progres Permanen (`PlayerPrefs`) & Modal Laporan Kompetensi Interaktif (Hari ke-16 | [`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
-    - Progres penyelesaian tiap level, perolehan bintang terbaik (`GW_v3_LevelCleared_`, `GW_v3_LevelStars_`, `GW_v3_LastUnlockedLevel`), dan preferensi suara (`GW_v3_AudioMuted`) tersimpan otomatis dan dipulihkan pada sesi berikutnya.
-    - Tombol `Btn_OpenCompetencyReport` membuka modal `Panel_CompetencyReport` berisi tabel capaian Level 1–7, skor kumulatif `/21` bintang, predikat kompetensi Informatika, akses cepat ke **Mode Sandbox (`Btn_ReportSandbox`)**, serta tombol **Reset Progres (`Btn_ReportReset`)**.
-11. **Audit Siklus Hidup Memori v3.0, Optimasi *Zero-GC*, & Konfigurasi Rilis Android `3.0` (Hari ke-17)**
-    - `GateNode.OnDestroy()` menghancurkan seluruh material prosedural termasuk `shockwaveMaterial` dan `inputPinMaterials[]`, serta membebaskan `sharedTorusMesh` dan `sharedDiamondSpireMesh` saat tidak ada node aktif tersisa.
-    - `LevelAndUIManager.OnDestroy()` dan `OnApplicationPause()` menjaga konsistensi `PlayerPrefs.Save()`, melepas seluruh listener tombol (`hintButton`, `reportOpenButton`, `reportCloseButton`, `reportSandboxButton`, `reportResetButton`, `audioToggleButton`), menghentikan coroutine, membersihkan klip audio prosedural (`DestroyProceduralAudioClips()`), serta mengembalikan `Screen.sleepTimeout = SleepTimeout.SystemSetting`.
-    - Penghapusan alokasi closure, cache kamera utama (`ResolveMainCameraTransform()`), dan pembaruan UI HUD berbasis perubahan status mencegah alokasi sampah memori berlebihan tiap frame pada perangkat Android `60 FPS`.
+### B. Ekspansi Pedagogi, Osiloskop, & Persistensi (v3.0)
+4. **Telemetri Pin I/O 3D, Indikator Mikro Slot Input, & *Rising-Edge Shockwave Ring* ([`GateNode.cs`](Assets/Scripts/Core/GateNode.cs))**
+   - `Label_Status3D` menampilkan status eksplisit ASCII aman (mis. `AND [1,0] -> 0`, `OR [1,?] -> 1`, `NOT [1] -> 0`), dilengkapi pin mikro 3D (`InputPin_0`, `InputPin_1`) dan cincin gelombang kejut `ShockwaveRing3D` pada transisi naik `0 -> 1`.
+5. **Petunjuk *Scaffolding* 3 Tingkat, Mesin Diagnostik Miskonsepsi, & 7 Level Kurikulum ([`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
+   - `Btn_ScaffoldingHint` menyediakan 3 tingkatan petunjuk (*Konsep -> Komponen -> Struktur*, batas maksimal 2 bintang jika Tier 3 dibuka sebelum lulus pertama kali), `BuildMisconceptionDiagnostic()` menjelaskan penyebab kegagalan spesifik per baris, serta tambahan Level 6 (`NOR`) dan Level 7 (`De Morgan` dual solusi).
+6. **Osiloskop Sinyal Digital `[A(t) | B(t) | Y(t)]`, Persistensi `PlayerPrefs`, & Rapor CP ([`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
+   - Sampling ring-buffer 3 kanal x 16 pulsa (`0.25s`), penyimpanan permanen progres/bintang/audio (`GW_v3_*`), serta modal **`Panel_CompetencyReport`** dengan ringkasan capaian `/21` bintang.
+
+### C. Pembaruan Ergonomi AR & UX (v4.0 — 3 Tahap)
+7. ***Direct 3D AR Raycast Touch Interaction* (v4.0 Tahap 1 | [`GateNode.cs`](Assets/Scripts/Core/GateNode.cs), [`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
+   - Setiap `GateNode` membangun satu hitbox trigger ringan `AR_TouchHitbox3D` (`SphereCollider`, `isTrigger = true`, `localPosition = (0, 0.08, 0)`, `radius = 0.26f`) yang otomatis aktif hanya ketika `isTracked == true`.
+   - Deteksi tap layar Android dan klik mouse Editor memanfaatkan **New Input System** (`UnityEngine.InputSystem`, `#if ENABLE_INPUT_SYSTEM`), `Physics.RaycastNonAlloc` zero-GC (`touchRaycastHits[8]`), serta proteksi tumpukan UI 2D (`EventSystem.RaycastAll` dengan `uiRaycastResults(8)` & `cachedPointerEventData`) dan guard modal aktif.
+   - Menyentuh hologram 3D memicu animasi pantulan skala elastis zero-GC (`TriggerTapFeedback()`, `0.18s`, puncak `1.18x`) pada kontainer visual tanpa drift:
+     - **`Card_Input_A` / `Card_Input_B`:** langsung toggle nilai biner `0 <-> 1`.
+     - **`Card_Output`:** memicu `OnVerifyButtonClicked()` di mode Level, atau menampilkan status rumus & output aktif di mode Sandbox.
+     - **Kartu Gerbang (`AND`, `OR`, `XOR`, `NAND`, `NOT`):** menampilkan ringkasan fungsi & telemetri pin (`GetTouchInspectionSummary()`) di `Txt_Feedback`.
+8. **Diet UI — *Tabbed & Collapsible Scanner HUD* + *Sci-Fi Dark-Cyan Reskin* (v4.0 Tahap 2 | [`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
+   - Tinggi `Panel_TruthTableScanner` saat terbuka dipangkas dari `536 px` menjadi **`416 px`** dengan bar navigasi 3 tombol:
+     - **`Btn_TabTruthTable` (`"Tabel"`):** menampilkan matriks 4 baris (`00..11`) pada slot konten utama.
+     - **`Btn_TabOscilloscope` (`"Osiloskop"`):** menukar slot konten yang sama ke `Panel_WaveformMonitor` berdimensi lega (`188 px`), sementara perekaman 16 pulsa sinyal tetap berjalan di latar belakang meski tab tidak aktif.
+     - **`Btn_ToggleCollapseHUD` (`"Lipat"` / `"Buka"`):** melipat panel menjadi mode mini **`108 px`** yang hanya menyisakan header, tombol Audio/`Buka`, rumus Boolean, dan `Output Y`.
+   - **Auto-Expand saat Verifikasi:** `EnsureTruthTableVisibleForVerification()` otomatis membuka panel yang terlipat dan beralih ke tab `"Tabel"` ketika pengujian 4 baris dimulai.
+   - **`ApplySciFiHudButtonTheme()`:** menyelaraskan seluruh tombol putih bawaan Unity (`Btn_ToggleInputA`, `Btn_ToggleInputB`, `Btn_VerifyCircuit`, `Btn_NextLevel`, `Btn_ResetLevel`) ke tema gelap-sian dengan `Outline` `1.8 px`, `FontStyles.Bold`, `SciFiButtonColorBlock`, serta warna dinamis `LOW (0)` / `HIGH (1)` pada tombol Input A dan B.
+9. ***Direct Level Selector* & Audit Siklus Hidup Memori v4.0 (v4.0 Tahap 3 | [`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs))**
+   - Tombol **`Btn_OpenLevelSelector` (`"Pilih Level"`)** terpasang prosedural tepat di bawah `Btn_ResetLevel` (sejajar posisi X dan lebarnya) untuk membuka modal **`Panel_LevelSelector`** (`720 x 470 px`) bergrid `2 x 4` berisi akses lompat instan ke **Level 1–7** dan **Mode Sandbox Bebas**.
+   - Setiap kartu misi menampilkan capaian bintang terkini dan sorotan level aktif, dilengkapi proteksi `isVerifying` (mencegah `isSimulationOverride` macet), *mutual exclusion* dengan `Panel_CompetencyReport`, guard raycast 3D, serta pelepasan seluruh listener tombol (`onClick.RemoveListener`) di `OnDestroy()`.
 
 ---
 
@@ -102,8 +102,9 @@ Dikonfigurasi berdasarkan [ProjectVersion.txt](ProjectSettings/ProjectVersion.tx
 | :--- | :--- |
 | **Unity Editor Version** | `6000.6.9f1` (`8c45277fb9c5`) |
 | **AR SDK** | PTC Vuforia Engine `11.4.4` (`com.ptc.vuforia.engine`) |
+| **Input System** | Unity New Input System `1.20.1` (`activeInputHandler: 1`, `ENABLE_INPUT_SYSTEM`) |
 | **Application ID (Android)** | `com.GateWeaverStudio.GateWeaverAR` |
-| **Version / Version Code** | **`3.0`** / **`3`** (`bundleVersion: 3.0`, `AndroidBundleVersionCode: 3`) |
+| **Version / Version Code** | **`4.0`** / **`4`** (`bundleVersion: 4.0`, `AndroidBundleVersionCode: 4`) |
 | **Minimum API Level** | Android `10.0` (`API Level 29`) |
 | **Scripting Backend** | `IL2CPP` (`scriptingBackend.Android: 1`) |
 | **Target Architecture** | `ARM64` (`AndroidTargetArchitectures: 2`) |
@@ -139,10 +140,12 @@ GateWeaverAR/
 
 ---
 
-## 7. Pengaturan & Verifikasi di Unity Editor
+## 7. Pengaturan, Verifikasi *Play Mode*, & Build `GateWeaverAR_v4.apk`
 
-1. Buka `Assets/Scenes/SampleScene.unity`.
-2. Pastikan **`ARCamera`**, **`CircuitManager`**, **`LevelAndUIManager`**, seluruh 8 kartu (`Card_Input_A`, `Card_Input_B`, `Card_Gate_AND`, `Card_Gate_OR`, `Card_Gate_XOR`, `Card_Gate_NAND`, `Card_Gate_NOT`, `Card_Output`), serta Canvas HUD (`1920 x 1080`) aktif di Hierarchy.
-3. Pada komponen **`CircuitManager`**, pastikan parameter `maxSnapDistance = 3` dan `inputSourceRangeMultiplier = 1.8`.
-4. Uji coba di Unity Editor (*Play Mode*) untuk memverifikasi ke-7 level + Mode Sandbox, telemetri pin `Label_Status3D`, osiloskop `[A(t) | B(t) | Y(t)]`, petunjuk 3 tingkat, diagnostik miskonsepsi, serta tombol modal **Laporan Kompetensi**.
-5. Untuk build rilis **`GateWeaverAR_v3.apk`**: buka **File → Build Profiles → Android → Build**, pastikan `Version` terbaca **`3.0`**, `Bundle Version Code` bernilai **`3`**, arsitektur **ARM64**, Scripting Backend **IL2CPP**, dan Minimum API Level **Android 10.0 (API 29)**.
+1. Buka `Assets/Scenes/SampleScene.unity` di Unity Editor (`6000.6.9f1`).
+2. Pastikan **`ARCamera`**, **`EventSystem`**, **`CircuitManager`** (`maxSnapDistance = 3`, `inputSourceRangeMultiplier = 1.8`), **`LevelAndUIManager`**, seluruh 8 kartu marker, dan Canvas HUD (`1920 x 1080`) aktif di Hierarchy.
+3. Uji di *Play Mode*:
+   - Klik/sentuh langsung hologram 3D **`Card_Input_A`** / **`Card_Input_B`** (toggle `0 <-> 1` + pantulan elastis), kartu gerbang logika (ringkasan inspeksi di `Txt_Feedback`), serta **`Card_Output`** (uji rangkaian / inspeksi Sandbox).
+   - Uji tab **`Tabel`** vs **`Osiloskop`**, tombol **`Lipat`** / **`Buka`**, *auto-expand* saat menekan **`Uji Rangkaian`**, serta tema gelap-sian pada seluruh tombol HUD.
+   - Tekan **`Pilih Level`** di bawah **`Reset Level`** untuk melompat langsung ke Level 1–7 maupun **Mode Sandbox Bebas**, lalu pastikan modal tidak bertumpuk dengan **`Rapor CP`** dan tidak dapat memutus uji rangkaian yang sedang berjalan.
+4. Untuk build rilis **`GateWeaverAR_v4.apk`**: buka **File → Build Profiles → Android → Build**, lalu pastikan **`Version = 4.0`**, **`Bundle Version Code = 4`**, Scripting Backend **IL2CPP**, Target Architecture **ARM64**, Graphics API **OpenGLES3**, dan Minimum API Level **Android 10.0 (API 29)**.
