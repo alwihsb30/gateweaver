@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -112,8 +113,8 @@ public class GateNode : MonoBehaviour
     public float socketRingThickness = 0.006f;
 
     [Header("7. Visual Totem Reaktor Hologram 3D (Hari 12)")]
-    [Tooltip("Ketinggian minimum Label_Status3D agar melayang rapi di atas totem 3D tanpa bertabrakan")]
-    public float totemLabelMinHeight = 0.24f;
+    [Tooltip("Ketinggian minimum Label_Status3D agar melayang rapi di atas model/totem 3D tanpa bertabrakan")]
+    public float totemLabelMinHeight = 0.48f;
 
     [Tooltip("Kecepatan putar totem (derajat/detik) saat sinyal bernilai 1 (HIGH)")]
     public float totemHighSpinSpeed = 145f;
@@ -126,7 +127,7 @@ public class GateNode : MonoBehaviour
 
     [Header("8. Visual Diorama Aktuator 3D Kontekstual (Hari 13)")]
     [Tooltip("Ketinggian minimum Label_Status3D pada kartu OutputActuator agar melayang bersih di atas diorama 3D")]
-    public float outputLabelMinHeight = 0.26f;
+    public float outputLabelMinHeight = 0.52f;
 
     [Tooltip("Kecepatan putar rotor sirine darurat (derajat/detik) pada Level 1 saat OUTPUT = 1")]
     public float sirenRotorSpeed = 360f;
@@ -154,6 +155,13 @@ public class GateNode : MonoBehaviour
 
     [Tooltip("Puncak pengali skala pantulan elastis saat hologram kartu disentuh")]
     public float tapBouncePeakScale = 1.18f;
+
+    [Header("v5/v6 Spatial & Model Config")]
+    [Tooltip("Aktifkan agar pose spasial dan isTracked dikendalikan sistem eksternal (v6 markerless/hand-tracking), bukan callback Vuforia")]
+    public bool useExternalSpatialPose = false;
+
+    [Tooltip("Prefab/model 3D kustom opsional via Inspector; jika null akan memuat model Quaternius dari Resources/Models/V5_SciFi/")]
+    public GameObject customModelPrefab;
 
     [HideInInspector]
     public LineRenderer lineRenderer;
@@ -244,9 +252,40 @@ public class GateNode : MonoBehaviour
     private bool isTapBouncePlaying = false;
     private float tapBounceElapsed = 0f;
 
+    // Arsitektur v5.0 / v6-Ready: AR Grounding, Port Fisik 3D, & Material Quaternius Reaktif
+    private const string V5ModelsResourcePrefix = "Models/V5_SciFi/";
+    private const float BaseTileTopSurfaceY = 0.040f;
+    private const float BaseTileFootprintXZ = 0.56f;
+    private const float BaseTileThicknessY = 0.038f;
+    private const float BaseTileBottomY = 0.002f;
+
+    private GameObject contactShadowObj;
+    private GameObject baseTileRootObj;
+    private Transform portInATransform;
+    private Transform portInBTransform;
+    private Transform portOutTransform;
+    private Material portInAMaterial;
+    private Material portInBMaterial;
+    private Material portOutMaterial;
+
+    private readonly List<Material> managedMaterials = new List<Material>();
+    private readonly List<Material> totemReactiveAccentMaterials = new List<Material>();
+    private List<Material>[] dioramaVariantReactiveAccentMaterials;
+    private int lastAppliedAccentState = -1;
+    private int lastAppliedAccentDioramaVariant = -1;
+    private int lastPortInAVisualState = -2;
+    private int lastPortInBVisualState = -2;
+    private int lastPortOutVisualState = -2;
+
     private static int activeGateNodeCount = 0;
     private static Mesh sharedTorusMesh;
     private static Mesh sharedDiamondSpireMesh;
+    private static Texture2D sharedContactShadowTexture;
+
+    private static readonly int ColorPropId = Shader.PropertyToID("_Color");
+    private static readonly int EmissionColorPropId = Shader.PropertyToID("_EmissionColor");
+    private static readonly Color ReactiveAccentHighColor = new Color(0.14f, 1.00f, 0.78f, 1f);
+    private static readonly Color ReactiveAccentLowColor = new Color(0.76f, 0.22f, 0.10f, 1f);
 
     private static readonly float[] PacketPhaseOffsets = { 0f, 0.33f, 0.66f };
 
@@ -280,6 +319,9 @@ public class GateNode : MonoBehaviour
         InitializeLineRenderer();
         Initialize3DVisualFeedback();
         InitializeArcAndTerminalVisuals();
+        InitializeContactShadowVisual();
+        InitializeBaseTileVisual();
+        InitializePhysicalPorts();
         InitializeTotemVisual();
         InitializeOutputDioramaVisual();
         InitializeInputPinsVisual();
@@ -308,6 +350,7 @@ public class GateNode : MonoBehaviour
         if (isTracked)
         {
             SetTouchHitboxEnabled(true);
+            SetGroundingAndPortsActive(true);
             UpdateLabelBillboard();
             AnimateTotemVisual();
             AnimateOutputDioramaVisual();
@@ -317,6 +360,7 @@ public class GateNode : MonoBehaviour
         else
         {
             SetTouchHitboxEnabled(false);
+            SetGroundingAndPortsActive(false);
             SetTotemActive(false);
             SetOutputDioramaActive(false);
             SetInputPinsActive(false);
@@ -354,11 +398,25 @@ public class GateNode : MonoBehaviour
             }
         }
 
+        for (int i = 0; i < managedMaterials.Count; i++)
+        {
+            Material mat = managedMaterials[i];
+            DestroyProceduralMaterial(ref mat);
+        }
+        managedMaterials.Clear();
+        totemReactiveAccentMaterials.Clear();
+        dioramaVariantReactiveAccentMaterials = null;
+        portInAMaterial = null;
+        portInBMaterial = null;
+        portOutMaterial = null;
+        touchHitboxCollider = null;
+
         activeGateNodeCount = Mathf.Max(0, activeGateNodeCount - 1);
         if (activeGateNodeCount == 0)
         {
             DestroyProceduralMesh(ref sharedTorusMesh);
             DestroyProceduralMesh(ref sharedDiamondSpireMesh);
+            DestroyProceduralTexture(ref sharedContactShadowTexture);
         }
     }
 
@@ -438,6 +496,15 @@ public class GateNode : MonoBehaviour
         }
     }
 
+    private static void DestroyProceduralTexture(ref Texture2D tex)
+    {
+        if (tex != null)
+        {
+            Destroy(tex);
+            tex = null;
+        }
+    }
+
     /// <summary>
     /// Membuat 3D TextMeshPro world-space di atas setiap kartu secara otomatis saat Awake().
     /// Ketinggian teks dinaikkan agar selalu berada bersih di atas totem atau diorama 3D.
@@ -481,8 +548,16 @@ public class GateNode : MonoBehaviour
     }
 
     /// <summary>
+    /// Alias publik v5.0 untuk mengganti tema/varian diorama 3D OutputActuator berdasarkan level aktif.
+    /// </summary>
+    public void SetOutputDioramaTheme(int themeIndex)
+    {
+        SetOutputDioramaVariant(themeIndex);
+    }
+
+    /// <summary>
     /// Mengatur varian diorama 3D kontekstual pada kartu OutputActuator berdasarkan indeks level aktif.
-    /// Menggunakan modulo aman agar kompatibel dengan ekspansi Level 4, Level 5, dan Sandbox.
+    /// Menggunakan modulo aman agar kompatibel dengan ekspansi Level 4..7 dan Sandbox.
     /// </summary>
     public void SetOutputDioramaVariant(int variantIndex)
     {
@@ -504,11 +579,12 @@ public class GateNode : MonoBehaviour
         if (isTracked)
         {
             UpdateOutputDioramaColors();
+            UpdateReactiveAccentMaterials();
         }
     }
 
     /// <summary>
-    /// Membangun kontainer OutputDiorama3D dengan 3 sub-model mekanis 3D kontekstual (tanpa Collider)
+    /// Membangun kontainer OutputDiorama3D dengan 5 varian model 3D Quaternius terkurasi (fallback prosedural bila aset tidak ada)
     /// khusus untuk kartu bertipe OutputActuator.
     /// </summary>
     private void InitializeOutputDioramaVisual()
@@ -529,15 +605,53 @@ public class GateNode : MonoBehaviour
         outputDioramaRootObj.transform.localScale = Vector3.one;
 
         outputDioramaVariantObjs = new GameObject[OutputDioramaVariantCount];
-        outputDioramaVariantObjs[0] = BuildSirenDiorama(outputDioramaRootObj.transform);
-        outputDioramaVariantObjs[1] = BuildStaircaseLanternDiorama(outputDioramaRootObj.transform);
-        outputDioramaVariantObjs[2] = BuildVaultDiorama(outputDioramaRootObj.transform);
-        outputDioramaVariantObjs[3] = BuildReactorContainmentDiorama(outputDioramaRootObj.transform);
-        outputDioramaVariantObjs[4] = BuildTwinSyncObeliskDiorama(outputDioramaRootObj.transform);
+        dioramaVariantReactiveAccentMaterials = new List<Material>[OutputDioramaVariantCount];
+
+        for (int i = 0; i < OutputDioramaVariantCount; i++)
+        {
+            dioramaVariantReactiveAccentMaterials[i] = new List<Material>();
+            GameObject prefab = (i == 0 && customModelPrefab != null)
+                ? customModelPrefab
+                : LoadV5ModelPrefab(GetOutputDioramaModelResourceName(i));
+
+            if (prefab != null)
+            {
+                GameObject variantRoot = CreateEmptyChild($"Diorama_V5_{i}", outputDioramaRootObj.transform, Vector3.zero).gameObject;
+                GameObject modelInstance = Instantiate(prefab);
+                modelInstance.name = prefab.name;
+                RemoveCollidersRecursive(modelInstance);
+                SanitizeAndRegisterModelMaterials(modelInstance, dioramaVariantReactiveAccentMaterials[i]);
+                NormalizeModelToFitFootprint(
+                    modelInstance,
+                    variantRoot.transform,
+                    0.52f,
+                    0.46f,
+                    BaseTileTopSurfaceY,
+                    GetOutputDioramaInitialEuler(i));
+                outputDioramaVariantObjs[i] = variantRoot;
+            }
+            else
+            {
+                outputDioramaVariantObjs[i] = BuildFallbackOutputDioramaVariant(i, outputDioramaRootObj.transform);
+            }
+        }
 
         ApplyActiveDioramaVariantVisibility();
         UpdateOutputDioramaColors();
+        UpdateReactiveAccentMaterials();
         outputDioramaRootObj.SetActive(false);
+    }
+
+    private GameObject BuildFallbackOutputDioramaVariant(int variantIndex, Transform root)
+    {
+        switch (variantIndex)
+        {
+            case 0: return BuildSirenDiorama(root);
+            case 1: return BuildStaircaseLanternDiorama(root);
+            case 2: return BuildVaultDiorama(root);
+            case 3: return BuildReactorContainmentDiorama(root);
+            default: return BuildTwinSyncObeliskDiorama(root);
+        }
     }
 
     private GameObject BuildSirenDiorama(Transform root)
@@ -962,26 +1076,50 @@ public class GateNode : MonoBehaviour
         totemRootObj.transform.localRotation = Quaternion.identity;
         totemRootObj.transform.localScale = Vector3.one;
 
-        switch (nodeType)
+        GameObject curatedPrefab = customModelPrefab != null
+            ? customModelPrefab
+            : LoadV5ModelPrefab(GetNodeModelResourceName(nodeType));
+
+        if (curatedPrefab != null)
         {
-            case NodeType.InputSource:
-                BuildInputSourceTotem(totemRootObj.transform);
-                break;
-            case NodeType.AND:
-                BuildAndTotem(totemRootObj.transform);
-                break;
-            case NodeType.OR:
-                BuildOrTotem(totemRootObj.transform);
-                break;
-            case NodeType.XOR:
-                BuildXorTotem(totemRootObj.transform);
-                break;
-            case NodeType.NAND:
-                BuildNandTotem(totemRootObj.transform);
-                break;
-            case NodeType.NOT:
-                BuildNotTotem(totemRootObj.transform);
-                break;
+            GameObject modelInstance = Instantiate(curatedPrefab);
+            modelInstance.name = curatedPrefab.name;
+            RemoveCollidersRecursive(modelInstance);
+            SanitizeAndRegisterModelMaterials(modelInstance, totemReactiveAccentMaterials);
+
+            float maxFootprintXZ = (nodeType == NodeType.InputSource) ? 0.44f : 0.48f;
+            float maxHeightY = (nodeType == NodeType.InputSource) ? 0.38f : 0.42f;
+            NormalizeModelToFitFootprint(
+                modelInstance,
+                totemRootObj.transform,
+                maxFootprintXZ,
+                maxHeightY,
+                BaseTileTopSurfaceY,
+                GetNodeModelInitialEuler(nodeType));
+        }
+        else
+        {
+            switch (nodeType)
+            {
+                case NodeType.InputSource:
+                    BuildInputSourceTotem(totemRootObj.transform);
+                    break;
+                case NodeType.AND:
+                    BuildAndTotem(totemRootObj.transform);
+                    break;
+                case NodeType.OR:
+                    BuildOrTotem(totemRootObj.transform);
+                    break;
+                case NodeType.XOR:
+                    BuildXorTotem(totemRootObj.transform);
+                    break;
+                case NodeType.NAND:
+                    BuildNandTotem(totemRootObj.transform);
+                    break;
+                case NodeType.NOT:
+                    BuildNotTotem(totemRootObj.transform);
+                    break;
+            }
         }
 
         if (totemFloatGroup != null)
@@ -996,6 +1134,7 @@ public class GateNode : MonoBehaviour
         }
 
         UpdateTotemColors();
+        UpdateReactiveAccentMaterials();
         totemRootObj.SetActive(false);
     }
 
@@ -1542,12 +1681,15 @@ public class GateNode : MonoBehaviour
         sourceNormal = transform.up.sqrMagnitude > 0.0001f ? transform.up.normalized : Vector3.up;
         targetNormal = connectedTarget.transform.up.sqrMagnitude > 0.0001f ? connectedTarget.transform.up.normalized : Vector3.up;
 
-        // Offset tipis sesuai indeks input di kartu tujuan agar dua soket pendarat tidak z-fighting
-        int targetSlotIndex = connectedTarget.connectedInputs != null ? connectedTarget.connectedInputs.IndexOf(this) : -1;
-        float targetOffset = socketSurfaceOffset + (targetSlotIndex > 0 ? targetSlotIndex * 0.003f : 0f);
+        // Tentukan indeks slot port tujuan (0 atau 1) secara konsisten sesuai urutan input pada targetNode
+        int targetSlotIndex = connectedTarget.connectedInputs != null ? connectedTarget.connectedInputs.IndexOf(this) : 0;
+        if (targetSlotIndex < 0)
+        {
+            targetSlotIndex = 0;
+        }
 
-        p0 = transform.position + sourceNormal * socketSurfaceOffset;
-        p2 = connectedTarget.transform.position + targetNormal * targetOffset;
+        p0 = GetOutputPortWorldPosition();
+        p2 = connectedTarget.GetInputPortWorldPosition(targetSlotIndex);
 
         Vector3 combinedNormal = sourceNormal + targetNormal;
         Vector3 avgNormal = combinedNormal.sqrMagnitude > 0.0001f ? combinedNormal.normalized : sourceNormal;
@@ -1757,9 +1899,15 @@ public class GateNode : MonoBehaviour
     /// Dipanggil oleh event Vuforia DefaultObserverEventHandler:
     /// - OnTargetFound() -> SetTrackingState(true)
     /// - OnTargetLost()  -> SetTrackingState(false)
+    /// Diabaikan saat useExternalSpatialPose == true agar sistem tracking v6 tidak ditimpa Vuforia.
     /// </summary>
     public void SetTrackingState(bool tracked)
     {
+        if (useExternalSpatialPose)
+        {
+            return;
+        }
+
         if (tracked)
         {
             if (debounceCoroutine != null)
@@ -1789,6 +1937,41 @@ public class GateNode : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Hook tracking agnostik (v6-Ready) untuk memosisikan kartu dan mengatur status pelacakan
+    /// dari sistem markerless / hand-tracking eksternal saat useExternalSpatialPose == true.
+    /// </summary>
+    public void SetExternalSpatialPose(bool tracked, Vector3 worldPosition, Quaternion worldRotation)
+    {
+        if (!useExternalSpatialPose)
+        {
+            return;
+        }
+
+        if (debounceCoroutine != null)
+        {
+            StopCoroutine(debounceCoroutine);
+            debounceCoroutine = null;
+        }
+
+        transform.SetPositionAndRotation(worldPosition, worldRotation);
+
+        if (tracked)
+        {
+            bool wasTracked = isTracked;
+            isTracked = true;
+            if (!wasTracked)
+            {
+                EvaluateGateLogic();
+                UpdateVisuals();
+            }
+        }
+        else if (isTracked)
+        {
+            ApplyTrackingLost();
+        }
+    }
+
     private IEnumerator TrackingLossDebounceRoutine()
     {
         yield return new WaitForSeconds(trackingLossDebounceTime);
@@ -1806,6 +1989,7 @@ public class GateNode : MonoBehaviour
 
         SetConnectionVisualsActive(false);
         SetTouchHitboxEnabled(false);
+        SetGroundingAndPortsActive(false);
         SetTotemActive(false);
         SetOutputDioramaActive(false);
         SetInputPinsActive(false);
@@ -1979,8 +2163,9 @@ public class GateNode : MonoBehaviour
         // 1. Perbarui busur energi Quadratic Bezier, bola paket data, & cincin soket terminal
         RefreshConnectionVisuals(advanceFlowPhase: false);
 
-        // 2. Perbarui totem reaktor hologram 3D, indikator pin mikro 3D, hitbox sentuh 3D, & diorama OutputActuator
+        // 2. Perbarui grounding AR, port fisik, totem/model 3D, indikator pin mikro 3D, hitbox sentuh 3D, & diorama OutputActuator
         SetTouchHitboxEnabled(isTracked);
+        SetGroundingAndPortsActive(isTracked);
         SetTotemActive(isTracked);
         SetOutputDioramaActive(isTracked);
         SetInputPinsActive(isTracked);
@@ -1988,6 +2173,8 @@ public class GateNode : MonoBehaviour
         {
             UpdateTotemColors();
             UpdateOutputDioramaColors();
+            UpdateReactiveAccentMaterials();
+            UpdatePortVisuals();
             UpdateInputPinsVisual();
         }
 
@@ -2086,7 +2273,7 @@ public class GateNode : MonoBehaviour
 
         for (int i = 0; i < pinCount; i++)
         {
-            float zOffset = pinCount == 2 ? (i == 0 ? 0.056f : -0.056f) : 0f;
+            float zOffset = pinCount == 2 ? (i == 0 ? 0.10f : -0.10f) : 0f;
             Material pinMat = CreateSafeOpenGLMaterial();
             if (pinMat != null)
             {
@@ -2098,9 +2285,9 @@ public class GateNode : MonoBehaviour
                 $"InputPinNode_{i}",
                 PrimitiveType.Sphere,
                 transform,
-                new Vector3(-0.15f, 0.024f, zOffset),
+                new Vector3(-0.27f, 0.064f, zOffset),
                 Vector3.zero,
-                Vector3.one * 0.024f,
+                Vector3.one * 0.028f,
                 pinMat);
             pinObj.SetActive(false);
             inputPinObjs[i] = pinObj;
@@ -2295,7 +2482,7 @@ public class GateNode : MonoBehaviour
             hitboxObj.transform.SetParent(transform, false);
         }
 
-        hitboxObj.transform.localPosition = new Vector3(0f, 0.08f, 0f);
+        hitboxObj.transform.localPosition = new Vector3(0f, 0.20f, 0f);
         hitboxObj.transform.localRotation = Quaternion.identity;
         hitboxObj.transform.localScale = Vector3.one;
 
@@ -2307,7 +2494,7 @@ public class GateNode : MonoBehaviour
 
         touchHitboxCollider.isTrigger = true;
         touchHitboxCollider.center = Vector3.zero;
-        touchHitboxCollider.radius = 0.26f;
+        touchHitboxCollider.radius = 0.34f;
         touchHitboxCollider.enabled = isTracked;
     }
 
@@ -2422,5 +2609,622 @@ public class GateNode : MonoBehaviour
         }
 
         ApplyTapBounceScale(1f);
+    }
+
+    // =========================================================================
+    // V5.0 / V6-READY: AR GROUNDING, PHYSICAL PORTS, MODEL PIPELINE & SANITIZER
+    // =========================================================================
+
+    /// <summary>
+    /// Mengembalikan posisi dunia (world space) anchor port input fisik kartu (slot 0 = Port_InA, slot 1 = Port_InB).
+    /// </summary>
+    public Vector3 GetInputPortWorldPosition(int slotIndex)
+    {
+        if (slotIndex == 1 && portInBTransform != null)
+        {
+            return portInBTransform.position;
+        }
+
+        if (portInATransform != null)
+        {
+            return portInATransform.position;
+        }
+
+        Vector3 normal = transform.up.sqrMagnitude > 0.0001f ? transform.up.normalized : Vector3.up;
+        return transform.position + normal * socketSurfaceOffset;
+    }
+
+    /// <summary>
+    /// Mengembalikan posisi dunia (world space) anchor port output fisik kartu (Port_Out).
+    /// </summary>
+    public Vector3 GetOutputPortWorldPosition()
+    {
+        if (portOutTransform != null)
+        {
+            return portOutTransform.position;
+        }
+
+        Vector3 normal = transform.up.sqrMagnitude > 0.0001f ? transform.up.normalized : Vector3.up;
+        return transform.position + normal * socketSurfaceOffset;
+    }
+
+    /// <summary>
+    /// Membangun bayangan kontak radial transparan (Fake Contact Shadow) di Y = 0.001f
+    /// menggunakan satu Texture2D 64x64 statis bersama agar mesin menapak nyata di atas meja AR.
+    /// </summary>
+    private void InitializeContactShadowVisual()
+    {
+        Material shadowMat = CreateSafeOpenGLMaterial();
+        if (shadowMat != null)
+        {
+            shadowMat.mainTexture = GetSharedContactShadowTexture();
+            shadowMat.color = Color.white;
+            managedMaterials.Add(shadowMat);
+        }
+
+        contactShadowObj = CreatePrimitivePart(
+            "AR_ContactShadow",
+            PrimitiveType.Quad,
+            transform,
+            new Vector3(0f, 0.001f, 0f),
+            new Vector3(90f, 0f, 0f),
+            new Vector3(0.72f, 0.72f, 1f),
+            shadowMat);
+        contactShadowObj.SetActive(false);
+    }
+
+    private static Texture2D GetSharedContactShadowTexture()
+    {
+        if (sharedContactShadowTexture != null)
+        {
+            return sharedContactShadowTexture;
+        }
+
+        const int texSize = 64;
+        Texture2D tex = new Texture2D(texSize, texSize, TextureFormat.RGBA32, false);
+        tex.name = "AR_ContactShadowRadial64";
+        tex.wrapMode = TextureWrapMode.Clamp;
+        tex.filterMode = FilterMode.Bilinear;
+
+        Color[] pixels = new Color[texSize * texSize];
+        float half = (texSize - 1) * 0.5f;
+
+        for (int y = 0; y < texSize; y++)
+        {
+            float dy = (y - half) / half;
+            for (int x = 0; x < texSize; x++)
+            {
+                float dx = (x - half) / half;
+                float dist = Mathf.Sqrt((dx * dx) + (dy * dy));
+                float falloff = Mathf.Clamp01(1f - dist);
+                float smooth = falloff * falloff * (3f - (2f * falloff));
+                float alpha = smooth * 0.62f;
+                pixels[(y * texSize) + x] = new Color(0f, 0f, 0f, alpha);
+            }
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply(false, true);
+        sharedContactShadowTexture = tex;
+        return sharedContactShadowTexture;
+    }
+
+    /// <summary>
+    /// Membangun landasan soket menapak kartu ("AR_BaseTile3D") dari FloorTile_Basic (dinormalisasi ke 0.56 x 0.038 x 0.56)
+    /// dengan fallback pelat prosedural bila aset tidak tersedia.
+    /// </summary>
+    private void InitializeBaseTileVisual()
+    {
+        baseTileRootObj = new GameObject("AR_BaseTile3D");
+        baseTileRootObj.transform.SetParent(transform, false);
+        baseTileRootObj.transform.localPosition = Vector3.zero;
+        baseTileRootObj.transform.localRotation = Quaternion.identity;
+        baseTileRootObj.transform.localScale = Vector3.one;
+
+        GameObject floorPrefab = LoadV5ModelPrefab("FloorTile_Basic");
+        if (floorPrefab != null)
+        {
+            GameObject tileInstance = Instantiate(floorPrefab);
+            tileInstance.name = floorPrefab.name;
+            RemoveCollidersRecursive(tileInstance);
+            SanitizeAndRegisterModelMaterials(tileInstance, null);
+            NormalizeBaseTileToSlab(tileInstance, baseTileRootObj.transform, BaseTileFootprintXZ, BaseTileThicknessY, BaseTileBottomY);
+        }
+        else
+        {
+            Material fallbackBaseMat = CreateSafeOpenGLMaterial();
+            if (fallbackBaseMat != null)
+            {
+                fallbackBaseMat.color = new Color(0.18f, 0.24f, 0.32f, 1f);
+                managedMaterials.Add(fallbackBaseMat);
+            }
+
+            CreatePrimitivePart(
+                "BaseTile_Fallback",
+                PrimitiveType.Cube,
+                baseTileRootObj.transform,
+                new Vector3(0f, BaseTileBottomY + (BaseTileThicknessY * 0.5f), 0f),
+                Vector3.zero,
+                new Vector3(BaseTileFootprintXZ, BaseTileThicknessY, BaseTileFootprintXZ),
+                fallbackBaseMat);
+        }
+
+        baseTileRootObj.SetActive(false);
+    }
+
+    /// <summary>
+    /// Membangun anchor port fisik standar (Port_InA, Port_InB, Port_Out) dengan cincin soket menyala
+    /// di tepi kiri/kanan alas mesin agar kabel energi menancap akurat di posisi fisik.
+    /// </summary>
+    private void InitializePhysicalPorts()
+    {
+        int maxInputs = GetMaxInputCount();
+
+        if (maxInputs >= 1)
+        {
+            float inAZ = maxInputs == 2 ? 0.10f : 0f;
+            portInAMaterial = CreateManagedPortMaterial(PinUnconnectedColor);
+            portInATransform = CreatePhysicalPortAnchor("Port_InA", new Vector3(-0.27f, 0.055f, inAZ), portInAMaterial);
+        }
+
+        if (maxInputs >= 2)
+        {
+            portInBMaterial = CreateManagedPortMaterial(PinUnconnectedColor);
+            portInBTransform = CreatePhysicalPortAnchor("Port_InB", new Vector3(-0.27f, 0.055f, -0.10f), portInBMaterial);
+        }
+
+        if (nodeType != NodeType.OutputActuator)
+        {
+            portOutMaterial = CreateManagedPortMaterial(LowSocketColor);
+            portOutTransform = CreatePhysicalPortAnchor("Port_Out", new Vector3(0.27f, 0.055f, 0f), portOutMaterial);
+        }
+    }
+
+    private Material CreateManagedPortMaterial(Color initialColor)
+    {
+        Material mat = CreateSafeOpenGLMaterial();
+        if (mat != null)
+        {
+            mat.color = initialColor;
+            managedMaterials.Add(mat);
+        }
+
+        return mat;
+    }
+
+    private Transform CreatePhysicalPortAnchor(string portName, Vector3 localPos, Material ringMat)
+    {
+        Transform portRoot = CreateEmptyChild(portName, transform, localPos);
+
+        // Cincin soket menyala kecil tanpa Collider di titik anchor kabel
+        CreateProceduralMeshPart(
+            $"{portName}_Ring",
+            GetSharedTorusMesh(),
+            portRoot,
+            Vector3.zero,
+            Vector3.zero,
+            Vector3.one * 0.040f,
+            ringMat);
+
+        portRoot.gameObject.SetActive(false);
+        return portRoot;
+    }
+
+    private void SetGroundingAndPortsActive(bool active)
+    {
+        if (contactShadowObj != null && contactShadowObj.activeSelf != active)
+        {
+            contactShadowObj.SetActive(active);
+        }
+
+        if (baseTileRootObj != null && baseTileRootObj.activeSelf != active)
+        {
+            baseTileRootObj.SetActive(active);
+        }
+
+        if (portInATransform != null && portInATransform.gameObject.activeSelf != active)
+        {
+            portInATransform.gameObject.SetActive(active);
+        }
+
+        if (portInBTransform != null && portInBTransform.gameObject.activeSelf != active)
+        {
+            portInBTransform.gameObject.SetActive(active);
+        }
+
+        if (portOutTransform != null && portOutTransform.gameObject.activeSelf != active)
+        {
+            portOutTransform.gameObject.SetActive(active);
+        }
+    }
+
+    private void UpdatePortVisuals()
+    {
+        if (portInAMaterial != null)
+        {
+            int stateInA = isInputAConnected ? (inputAValue ? 1 : 0) : -1;
+            if (stateInA != lastPortInAVisualState)
+            {
+                lastPortInAVisualState = stateInA;
+                portInAMaterial.color = stateInA > 0 ? PinHighColor : (stateInA == 0 ? PinLowColor : PinUnconnectedColor);
+            }
+        }
+
+        if (portInBMaterial != null)
+        {
+            int stateInB = isInputBConnected ? (inputBValue ? 1 : 0) : -1;
+            if (stateInB != lastPortInBVisualState)
+            {
+                lastPortInBVisualState = stateInB;
+                portInBMaterial.color = stateInB > 0 ? PinHighColor : (stateInB == 0 ? PinLowColor : PinUnconnectedColor);
+            }
+        }
+
+        if (portOutMaterial != null)
+        {
+            int stateOut = currentOutputValue ? 1 : 0;
+            if (stateOut != lastPortOutVisualState)
+            {
+                lastPortOutVisualState = stateOut;
+                portOutMaterial.color = stateOut > 0 ? HighSocketColor : LowSocketColor;
+            }
+        }
+    }
+
+    private static GameObject LoadV5ModelPrefab(string modelName)
+    {
+        if (string.IsNullOrEmpty(modelName))
+        {
+            return null;
+        }
+
+        return Resources.Load<GameObject>(V5ModelsResourcePrefix + modelName);
+    }
+
+    private static string GetNodeModelResourceName(NodeType type)
+    {
+        switch (type)
+        {
+            case NodeType.InputSource: return "Props_Computer";
+            case NodeType.AND: return "Props_ContainerFull";
+            case NodeType.OR: return "Props_Teleporter_1";
+            case NodeType.XOR: return "Props_Teleporter_2";
+            case NodeType.NAND: return "Props_Vessel_Tall";
+            case NodeType.NOT: return "Props_Laser";
+            default: return string.Empty;
+        }
+    }
+
+    private static Vector3 GetNodeModelInitialEuler(NodeType type)
+    {
+        switch (type)
+        {
+            case NodeType.InputSource: return new Vector3(0f, 180f, 0f); // Layar menghadap kamera depan
+            case NodeType.NOT: return new Vector3(0f, 90f, 0f);          // Proyektor laser menghadap ke kanan (+X)
+            default: return Vector3.zero;
+        }
+    }
+
+    private static string GetOutputDioramaModelResourceName(int variantIndex)
+    {
+        switch (variantIndex)
+        {
+            case 0: return "RoofTile_OrangeVent";
+            case 1: return "Staircase";
+            case 2: return "Door_Double";
+            case 3: return "Props_Pod";
+            default: return "Props_Capsule";
+        }
+    }
+
+    private static Vector3 GetOutputDioramaInitialEuler(int variantIndex)
+    {
+        switch (variantIndex)
+        {
+            case 1: return new Vector3(0f, 90f, 0f);  // Tangga naik ke kanan (+X)
+            case 2: return new Vector3(0f, 180f, 0f); // Pintu airlock menghadap kamera
+            case 3: return new Vector3(0f, 180f, 0f); // Kaca pod menghadap kamera
+            case 4: return new Vector3(0f, 180f, 0f); // Kapsul menghadap kamera
+            default: return Vector3.zero;
+        }
+    }
+
+    /// <summary>
+    /// Menormalisasi model FBX secara seragam berdasarkan gabungan mesh bounds lokalnya
+    /// agar pas di footprint & tinggi target serta menapak tepat di atas permukaan alas kartu.
+    /// </summary>
+    private static Transform NormalizeModelToFitFootprint(
+        GameObject modelInstance,
+        Transform containerParent,
+        float maxFootprintXZ,
+        float maxHeightY,
+        float baseSurfaceY,
+        Vector3 initialLocalEuler)
+    {
+        Transform modelPivot = CreateEmptyChild($"{modelInstance.name}_Pivot", containerParent, Vector3.zero);
+        modelInstance.transform.SetParent(modelPivot, false);
+        modelInstance.transform.localPosition = Vector3.zero;
+        modelInstance.transform.localEulerAngles = initialLocalEuler;
+        modelInstance.transform.localScale = Vector3.one;
+
+        if (!TryCalculateHierarchyMeshBounds(modelInstance.transform, modelPivot, out Bounds localBounds))
+        {
+            modelPivot.localPosition = new Vector3(0f, baseSurfaceY, 0f);
+            return modelPivot;
+        }
+
+        float sizeX = Mathf.Max(0.0001f, localBounds.size.x);
+        float sizeY = Mathf.Max(0.0001f, localBounds.size.y);
+        float sizeZ = Mathf.Max(0.0001f, localBounds.size.z);
+        float maxXZ = Mathf.Max(sizeX, sizeZ);
+
+        float scaleXZ = maxFootprintXZ / maxXZ;
+        float scaleY = maxHeightY / sizeY;
+        float uniformScale = Mathf.Min(scaleXZ, scaleY);
+
+        modelPivot.localScale = Vector3.one * uniformScale;
+        modelPivot.localPosition = new Vector3(
+            -localBounds.center.x * uniformScale,
+            baseSurfaceY - (localBounds.min.y * uniformScale),
+            -localBounds.center.z * uniformScale);
+
+        return modelPivot;
+    }
+
+    private static void NormalizeBaseTileToSlab(
+        GameObject tileInstance,
+        Transform containerParent,
+        float targetFootprintXZ,
+        float targetThicknessY,
+        float bottomY)
+    {
+        Transform tilePivot = CreateEmptyChild($"{tileInstance.name}_Pivot", containerParent, Vector3.zero);
+        tileInstance.transform.SetParent(tilePivot, false);
+        tileInstance.transform.localPosition = Vector3.zero;
+        tileInstance.transform.localRotation = Quaternion.identity;
+        tileInstance.transform.localScale = Vector3.one;
+
+        if (!TryCalculateHierarchyMeshBounds(tileInstance.transform, tilePivot, out Bounds localBounds))
+        {
+            tilePivot.localPosition = new Vector3(0f, bottomY, 0f);
+            return;
+        }
+
+        float scaleX = targetFootprintXZ / Mathf.Max(0.0001f, localBounds.size.x);
+        float scaleY = targetThicknessY / Mathf.Max(0.0001f, localBounds.size.y);
+        float scaleZ = targetFootprintXZ / Mathf.Max(0.0001f, localBounds.size.z);
+
+        tilePivot.localScale = new Vector3(scaleX, scaleY, scaleZ);
+        tilePivot.localPosition = new Vector3(
+            -localBounds.center.x * scaleX,
+            bottomY - (localBounds.min.y * scaleY),
+            -localBounds.center.z * scaleZ);
+    }
+
+    private static bool TryCalculateHierarchyMeshBounds(Transform modelRoot, Transform referenceSpace, out Bounds resultBounds)
+    {
+        MeshFilter[] meshFilters = modelRoot.GetComponentsInChildren<MeshFilter>(true);
+        bool hasBounds = false;
+        resultBounds = new Bounds(Vector3.zero, Vector3.zero);
+
+        for (int i = 0; i < meshFilters.Length; i++)
+        {
+            MeshFilter mf = meshFilters[i];
+            if (mf == null || mf.sharedMesh == null)
+            {
+                continue;
+            }
+
+            Matrix4x4 toRef = BuildLocalTransformMatrix(mf.transform, referenceSpace);
+            Bounds meshBounds = mf.sharedMesh.bounds;
+            Vector3 min = meshBounds.min;
+            Vector3 max = meshBounds.max;
+
+            EncapsulateTransformedCorner(toRef, new Vector3(min.x, min.y, min.z), ref resultBounds, ref hasBounds);
+            EncapsulateTransformedCorner(toRef, new Vector3(min.x, min.y, max.z), ref resultBounds, ref hasBounds);
+            EncapsulateTransformedCorner(toRef, new Vector3(min.x, max.y, min.z), ref resultBounds, ref hasBounds);
+            EncapsulateTransformedCorner(toRef, new Vector3(min.x, max.y, max.z), ref resultBounds, ref hasBounds);
+            EncapsulateTransformedCorner(toRef, new Vector3(max.x, min.y, min.z), ref resultBounds, ref hasBounds);
+            EncapsulateTransformedCorner(toRef, new Vector3(max.x, min.y, max.z), ref resultBounds, ref hasBounds);
+            EncapsulateTransformedCorner(toRef, new Vector3(max.x, max.y, min.z), ref resultBounds, ref hasBounds);
+            EncapsulateTransformedCorner(toRef, new Vector3(max.x, max.y, max.z), ref resultBounds, ref hasBounds);
+        }
+
+        return hasBounds;
+    }
+
+    private static Matrix4x4 BuildLocalTransformMatrix(Transform leaf, Transform ancestor)
+    {
+        Matrix4x4 matrix = Matrix4x4.identity;
+        Transform current = leaf;
+        while (current != null && current != ancestor)
+        {
+            matrix = Matrix4x4.TRS(current.localPosition, current.localRotation, current.localScale) * matrix;
+            current = current.parent;
+        }
+
+        return matrix;
+    }
+
+    private static void EncapsulateTransformedCorner(Matrix4x4 matrix, Vector3 corner, ref Bounds bounds, ref bool hasBounds)
+    {
+        Vector3 transformed = matrix.MultiplyPoint3x4(corner);
+        if (!hasBounds)
+        {
+            bounds = new Bounds(transformed, Vector3.zero);
+            hasBounds = true;
+        }
+        else
+        {
+            bounds.Encapsulate(transformed);
+        }
+    }
+
+    private static void RemoveCollidersRecursive(GameObject rootObj)
+    {
+        Collider[] colliders = rootObj.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            if (colliders[i] != null)
+            {
+                Destroy(colliders[i]);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Mengklon dan menyanitasi seluruh material pada model FBX instansiasi agar aman untuk Android OpenGLES3,
+    /// mendaftarkannya ke managedMaterials untuk pembersihan di OnDestroy(), dan memetakan slot bernama "Accent"
+    /// ke daftar material reaktif sinyal biner.
+    /// </summary>
+    private void SanitizeAndRegisterModelMaterials(GameObject rootObj, List<Material> reactiveAccentList)
+    {
+        Renderer[] renderers = rootObj.GetComponentsInChildren<Renderer>(true);
+        for (int r = 0; r < renderers.Length; r++)
+        {
+            Renderer rend = renderers[r];
+            if (rend == null)
+            {
+                continue;
+            }
+
+            Material[] sourceMaterials = rend.sharedMaterials;
+            if (sourceMaterials == null || sourceMaterials.Length == 0)
+            {
+                continue;
+            }
+
+            Material[] sanitizedMaterials = new Material[sourceMaterials.Length];
+            for (int m = 0; m < sourceMaterials.Length; m++)
+            {
+                Material srcMat = sourceMaterials[m];
+                string matName = srcMat != null ? srcMat.name : string.Empty;
+                Color preservedColor = (srcMat != null && srcMat.HasProperty(ColorPropId))
+                    ? srcMat.GetColor(ColorPropId)
+                    : new Color(0.75f, 0.78f, 0.84f, 1f);
+
+                bool needsRemap = srcMat == null
+                                  || srcMat.shader == null
+                                  || !srcMat.shader.isSupported
+                                  || string.Equals(srcMat.shader.name, "Hidden/InternalErrorShader", StringComparison.Ordinal);
+
+                Material clonedMat;
+                if (needsRemap)
+                {
+                    clonedMat = CreateSafeRemappedModelMaterial(preservedColor);
+                }
+                else
+                {
+                    clonedMat = new Material(srcMat);
+                }
+
+                if (clonedMat != null)
+                {
+                    managedMaterials.Add(clonedMat);
+                    if (reactiveAccentList != null && matName.IndexOf("Accent", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        reactiveAccentList.Add(clonedMat);
+                    }
+                }
+
+                sanitizedMaterials[m] = clonedMat;
+            }
+
+            rend.sharedMaterials = sanitizedMaterials;
+        }
+    }
+
+    private Material CreateSafeRemappedModelMaterial(Color preservedColor)
+    {
+        Shader fallbackShader = Shader.Find("Standard");
+        if (fallbackShader == null || !fallbackShader.isSupported)
+        {
+            fallbackShader = Shader.Find("Mobile/Diffuse");
+        }
+
+        Material mat = (fallbackShader != null && fallbackShader.isSupported)
+            ? new Material(fallbackShader)
+            : CreateSafeOpenGLMaterial();
+
+        if (mat != null)
+        {
+            if (mat.HasProperty(ColorPropId))
+            {
+                mat.SetColor(ColorPropId, preservedColor);
+            }
+            else
+            {
+                mat.color = preservedColor;
+            }
+        }
+
+        return mat;
+    }
+
+    /// <summary>
+    /// Memperbarui warna & emisi slot material "Accent" pada model Quaternius secara zero-GC
+    /// hanya ketika state biner HIGH/LOW atau varian diorama aktif berubah.
+    /// </summary>
+    private void UpdateReactiveAccentMaterials()
+    {
+        int stateBit = currentOutputValue ? 1 : 0;
+        int currentVariant = (nodeType == NodeType.OutputActuator) ? activeDioramaVariantIndex : -1;
+
+        if (stateBit == lastAppliedAccentState && currentVariant == lastAppliedAccentDioramaVariant)
+        {
+            return;
+        }
+
+        lastAppliedAccentState = stateBit;
+        lastAppliedAccentDioramaVariant = currentVariant;
+
+        Color accentColor = currentOutputValue ? ReactiveAccentHighColor : ReactiveAccentLowColor;
+        Color emissionColor = currentOutputValue ? (ReactiveAccentHighColor * 1.15f) : (ReactiveAccentLowColor * 0.35f);
+
+        if (nodeType == NodeType.OutputActuator)
+        {
+            if (dioramaVariantReactiveAccentMaterials != null
+                && activeDioramaVariantIndex >= 0
+                && activeDioramaVariantIndex < dioramaVariantReactiveAccentMaterials.Length)
+            {
+                ApplyColorToReactiveMaterials(dioramaVariantReactiveAccentMaterials[activeDioramaVariantIndex], accentColor, emissionColor);
+            }
+        }
+        else
+        {
+            ApplyColorToReactiveMaterials(totemReactiveAccentMaterials, accentColor, emissionColor);
+        }
+    }
+
+    private static void ApplyColorToReactiveMaterials(List<Material> materials, Color baseColor, Color emissionColor)
+    {
+        if (materials == null || materials.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < materials.Count; i++)
+        {
+            Material mat = materials[i];
+            if (mat == null)
+            {
+                continue;
+            }
+
+            if (mat.HasProperty(ColorPropId))
+            {
+                mat.SetColor(ColorPropId, baseColor);
+            }
+            else
+            {
+                mat.color = baseColor;
+            }
+
+            if (mat.HasProperty(EmissionColorPropId))
+            {
+                mat.EnableKeyword("_EMISSION");
+                mat.SetColor(EmissionColorPropId, emissionColor);
+            }
+        }
     }
 }
