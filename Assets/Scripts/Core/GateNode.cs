@@ -349,6 +349,20 @@ public class GateNode : MonoBehaviour
     private float normalizedModelTopY = 0f;
     private readonly float[] dioramaVariantModelTopY = new float[OutputDioramaVariantCount];
 
+    // v7.0 Fase 1: Thin hooks untuk visual mekanisme Open Cutaway, Pod LED 2x2 Output, jangkar warna Input, & label kontekstual
+    private GateMechanismVisual mechanismVisual;
+    private OutputTruthPodVisual outputTruthPod;
+    private Material inputIdentityAccentMat;
+    private Transform labelIdentityPipTransform;
+    private bool hasContextualLabel = false;
+    private string cachedContextualLabel0;
+    private string cachedContextualLabel1;
+
+    private static readonly Color InputAIdentityCyanColor = new Color(0.18f, 0.85f, 1.00f, 1f);
+    private static readonly Color InputBIdentityGoldColor = new Color(1.00f, 0.84f, 0.22f, 1f);
+
+    public OutputTruthPodVisual OutputTruthPod => outputTruthPod;
+
     private static int activeGateNodeCount = 0;
     private static Mesh sharedTorusMesh;
     private static Mesh sharedDiamondSpireMesh;
@@ -414,6 +428,7 @@ public class GateNode : MonoBehaviour
         InitializeV5SharedRigMaterials();
         InitializeTotemVisual();
         InitializeOutputDioramaVisual();
+        InitializeOutputTruthPodVisual();
         InitializeInputPinsVisual();
         InitializeShockwaveVisual();
         InitializeSparkBurstPool();
@@ -447,6 +462,15 @@ public class GateNode : MonoBehaviour
             AnimateOutputDioramaVisual();
             AnimateV5NodeMechanisms();
             AnimateV5OutputDioramaRig();
+            if (mechanismVisual != null)
+            {
+                mechanismVisual.UpdateMechanism(isInputAConnected, inputAValue, isInputBConnected, inputBValue, currentOutputValue, isParkedPreview: false, deltaTime: Time.deltaTime);
+            }
+            if (outputTruthPod != null)
+            {
+                outputTruthPod.SetTrackedVisible(true);
+                outputTruthPod.TickAnimation(Time.deltaTime);
+            }
             DetectRisingEdgeAndAnimateShockwave();
             UpdateTapBounceAnimation();
             UpdateSparkBurstPool();
@@ -458,7 +482,12 @@ public class GateNode : MonoBehaviour
             SetGroundingAndPortsActive(true, showPorts: false);
             SetTotemActive(true);
             SetOutputDioramaActive(false);
+            SetOutputTruthPodVisible(false);
             SetInputPinsActive(false);
+            if (mechanismVisual != null)
+            {
+                mechanismVisual.UpdateMechanism(false, false, false, false, false, isParkedPreview: true, deltaTime: Time.deltaTime);
+            }
             UpdateLabelBillboard();
             UpdateTapBounceAnimation();
             ResetShockwaveState();
@@ -471,6 +500,7 @@ public class GateNode : MonoBehaviour
             SetGroundingAndPortsActive(false, showPorts: false);
             SetTotemActive(false);
             SetOutputDioramaActive(false);
+            SetOutputTruthPodVisible(false);
             SetInputPinsActive(false);
             ResetShockwaveState();
             ResetTapBounceState();
@@ -532,6 +562,10 @@ public class GateNode : MonoBehaviour
         labelBackdropObj = null;
         labelBackdropTransform = null;
         labelBackdropMaterial = null;
+        labelIdentityPipTransform = null;
+        inputIdentityAccentMat = null;
+        mechanismVisual = null;
+        outputTruthPod = null;
         touchHitboxCollider = null;
 
         activeGateNodeCount = Mathf.Max(0, activeGateNodeCount - 1);
@@ -775,6 +809,28 @@ public class GateNode : MonoBehaviour
             labelBackdropMaterial);
         labelBackdropTransform = labelBackdropObj.transform;
         labelBackdropObj.SetActive(false);
+
+        if (nodeType == NodeType.InputSource)
+        {
+            Color idColor = IsInputBNode() ? InputBIdentityGoldColor : InputAIdentityCyanColor;
+            Material pipMat = CreateSafeOpenGLMaterial();
+            if (pipMat != null)
+            {
+                pipMat.color = idColor;
+                pipMat.renderQueue = 2996;
+                managedMaterials.Add(pipMat);
+            }
+
+            GameObject pipObj = CreatePrimitivePart(
+                "AR_LabelIdentityPip",
+                PrimitiveType.Quad,
+                statusLabel.transform,
+                new Vector3(-0.308f, 0f, 0.008f),
+                Vector3.zero,
+                new Vector3(0.026f, 0.088f, 1f),
+                pipMat);
+            labelIdentityPipTransform = pipObj.transform;
+        }
     }
 
     private void UpdateLabelBackdropSize(string labelText)
@@ -785,9 +841,14 @@ public class GateNode : MonoBehaviour
         }
 
         Vector2 preferred = statusLabel.GetPreferredValues(labelText);
-        float width = preferred.x > 0.01f ? Mathf.Clamp(preferred.x + 0.055f, 0.22f, 1.05f) : 0.58f;
+        float width = preferred.x > 0.01f ? Mathf.Clamp(preferred.x + 0.055f, 0.22f, 1.14f) : 0.58f;
         float height = preferred.y > 0.01f ? Mathf.Clamp(preferred.y + 0.026f, 0.078f, 0.20f) : 0.096f;
         labelBackdropTransform.localScale = new Vector3(width, height, 1f);
+        if (labelIdentityPipTransform != null)
+        {
+            labelIdentityPipTransform.localPosition = new Vector3(-(width * 0.5f) - 0.018f, 0f, 0.008f);
+            labelIdentityPipTransform.localScale = new Vector3(0.026f, height * 0.92f, 1f);
+        }
     }
 
     /// <summary>
@@ -1326,6 +1387,28 @@ public class GateNode : MonoBehaviour
         totemRootObj.transform.localPosition = Vector3.zero;
         totemRootObj.transform.localRotation = Quaternion.identity;
         totemRootObj.transform.localScale = Vector3.one;
+
+        // v7.0 Fase 1: 5 gerbang logika menggunakan mekanisme Open Cutaway (tanpa menumpuk FBX tertutup v5)
+        if (customModelPrefab == null && IsLogicGateNodeType(nodeType))
+        {
+            mechanismVisual = GetComponent<GateMechanismVisual>();
+            if (mechanismVisual == null)
+            {
+                mechanismVisual = gameObject.AddComponent<GateMechanismVisual>();
+            }
+
+            mechanismVisual.Build(
+                nodeType,
+                totemRootObj.transform,
+                BaseTileTopSurfaceY,
+                GetSharedTorusMesh(),
+                GetSharedDiamondSpireMesh(),
+                out float cutawayTopY);
+            normalizedModelTopY = cutawayTopY;
+            UpdateStatusLabelPlacement();
+            totemRootObj.SetActive(false);
+            return;
+        }
 
         GameObject curatedPrefab = customModelPrefab != null
             ? customModelPrefab
@@ -2415,6 +2498,75 @@ public class GateNode : MonoBehaviour
         }
     }
 
+    public void InvalidateExternalRendererCache()
+    {
+        cachedExternalVisualRenderers = null;
+    }
+
+    /// <summary>
+    /// Mengatur label 3D kontekstual berbasis cerita level + lencana mikro [0]/[1] secara zero-GC
+    /// (di-cache sekali saat LoadLevel, tidak ada alokasi string di UpdateVisuals).
+    /// </summary>
+    public void SetContextualLabelConfig(string entityName, string state0Text, string state1Text)
+    {
+        if (string.IsNullOrEmpty(entityName))
+        {
+            hasContextualLabel = false;
+            cachedContextualLabel0 = null;
+            cachedContextualLabel1 = null;
+        }
+        else
+        {
+            cachedContextualLabel0 = $"{entityName}: {state0Text} [0]";
+            cachedContextualLabel1 = $"{entityName}: {state1Text} [1]";
+            hasContextualLabel = true;
+        }
+
+        lastRenderedTelemetryKey = -1;
+        if (isTracked)
+        {
+            UpdateVisuals();
+        }
+    }
+
+    private void InitializeOutputTruthPodVisual()
+    {
+        if (nodeType != NodeType.OutputActuator)
+        {
+            return;
+        }
+
+        outputTruthPod = GetComponent<OutputTruthPodVisual>();
+        if (outputTruthPod == null)
+        {
+            outputTruthPod = gameObject.AddComponent<OutputTruthPodVisual>();
+        }
+
+        outputTruthPod.Initialize(GetSharedTorusMesh());
+    }
+
+    private void SetOutputTruthPodVisible(bool visible)
+    {
+        if (outputTruthPod != null)
+        {
+            outputTruthPod.SetTrackedVisible(visible);
+        }
+    }
+
+    private bool IsInputBNode()
+    {
+        return gameObject.name.ToUpperInvariant().Contains("B");
+    }
+
+    private static bool IsLogicGateNodeType(NodeType type)
+    {
+        return type == NodeType.AND
+               || type == NodeType.OR
+               || type == NodeType.NOT
+               || type == NodeType.XOR
+               || type == NodeType.NAND;
+    }
+
     /// <summary>
     /// Melepas seluruh kendali pose/skala eksternal v6 dan mengembalikan node ke Mode Kartu Vuforia v5.
     /// </summary>
@@ -2452,6 +2604,7 @@ public class GateNode : MonoBehaviour
         SetGroundingAndPortsActive(false);
         SetTotemActive(false);
         SetOutputDioramaActive(false);
+        SetOutputTruthPodVisible(false);
         SetInputPinsActive(false);
         ResetShockwaveState();
         ResetTapBounceState();
@@ -2632,6 +2785,7 @@ public class GateNode : MonoBehaviour
         SetGroundingAndPortsActive(showModelVisual, showPorts: isTracked);
         SetTotemActive(showModelVisual);
         SetOutputDioramaActive(isTracked);
+        SetOutputTruthPodVisible(isTracked);
         SetInputPinsActive(isTracked);
         if (isTracked)
         {
@@ -2640,11 +2794,19 @@ public class GateNode : MonoBehaviour
             UpdateReactiveAccentMaterials();
             UpdatePortVisuals();
             UpdateInputPinsVisual();
+            if (mechanismVisual != null)
+            {
+                mechanismVisual.UpdateMechanism(isInputAConnected, inputAValue, isInputBConnected, inputBValue, currentOutputValue, isParkedPreview: false, deltaTime: 0f);
+            }
         }
         else if (showParkedVisual)
         {
             UpdateTotemColors();
             UpdateReactiveAccentMaterials();
+            if (mechanismVisual != null)
+            {
+                mechanismVisual.UpdateMechanism(false, false, false, false, false, isParkedPreview: true, deltaTime: 0f);
+            }
         }
 
         // 3. Perbarui indikator tambahan opsional di Inspector (jika terpasang manual)
@@ -2729,13 +2891,23 @@ public class GateNode : MonoBehaviour
     {
         if (nodeType == NodeType.InputSource)
         {
-            string inputName = gameObject.name.ToUpperInvariant().Contains("B") ? "B" : "A";
+            if (hasContextualLabel)
+            {
+                return currentOutputValue ? cachedContextualLabel1 : cachedContextualLabel0;
+            }
+
+            string inputName = IsInputBNode() ? "B" : "A";
             return $"INPUT {inputName}: {(currentOutputValue ? "1 [HIGH]" : "0 [LOW]")}";
         }
 
         string pinA = FormatPinBit(isInputAConnected, inputAValue);
         if (nodeType == NodeType.OutputActuator)
         {
+            if (hasContextualLabel)
+            {
+                return currentOutputValue ? cachedContextualLabel1 : cachedContextualLabel0;
+            }
+
             return $"OUTPUT [{pinA}] -> {(currentOutputValue ? "AKTIF" : "MATI")}";
         }
 
@@ -3249,6 +3421,48 @@ public class GateNode : MonoBehaviour
                 Vector3.zero,
                 new Vector3(BaseTileFootprintXZ, BaseTileThicknessY, BaseTileFootprintXZ),
                 fallbackBaseMat);
+        }
+
+        // v7.0 Fase 1: Jangkar warna permanen Input A (Sian) & Input B (Kuning) pada tepi pelat dasar AR_BaseTile3D
+        if (nodeType == NodeType.InputSource)
+        {
+            Color idColor = IsInputBNode() ? InputBIdentityGoldColor : InputAIdentityCyanColor;
+            inputIdentityAccentMat = CreateSafeRemappedModelMaterial(idColor);
+            if (inputIdentityAccentMat != null)
+            {
+                if (inputIdentityAccentMat.HasProperty(EmissionColorPropId))
+                {
+                    inputIdentityAccentMat.EnableKeyword("_EMISSION");
+                    inputIdentityAccentMat.SetColor(EmissionColorPropId, idColor * 0.90f);
+                }
+                managedMaterials.Add(inputIdentityAccentMat);
+            }
+
+            float trimY = BaseTileTopSurfaceY + 0.004f;
+            CreatePrimitivePart(
+                "InputIdentity_FrontRim",
+                PrimitiveType.Cube,
+                baseTileRootObj.transform,
+                new Vector3(0f, trimY, -0.266f),
+                Vector3.zero,
+                new Vector3(0.50f, 0.014f, 0.028f),
+                inputIdentityAccentMat);
+            CreatePrimitivePart(
+                "InputIdentity_LeftRim",
+                PrimitiveType.Cube,
+                baseTileRootObj.transform,
+                new Vector3(-0.266f, trimY, 0f),
+                Vector3.zero,
+                new Vector3(0.022f, 0.012f, 0.48f),
+                inputIdentityAccentMat);
+            CreatePrimitivePart(
+                "InputIdentity_RightRim",
+                PrimitiveType.Cube,
+                baseTileRootObj.transform,
+                new Vector3(0.266f, trimY, 0f),
+                Vector3.zero,
+                new Vector3(0.022f, 0.012f, 0.48f),
+                inputIdentityAccentMat);
         }
 
         baseTileRootObj.SetActive(false);

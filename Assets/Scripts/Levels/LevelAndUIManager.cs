@@ -36,6 +36,17 @@ public class LevelScenario
     [TextArea(1, 3)]
     [Tooltip("Petunjuk Tier 3 (Struktur Rakitan): urutan penyambungan Input -> Gerbang -> Output")]
     public string hintTier3Structure;
+
+    [Header("Label Kontekstual 3D (v7.0 Fase 1)")]
+    public string inputAName;
+    public string inputAState0;
+    public string inputAState1;
+    public string inputBName;
+    public string inputBState0;
+    public string inputBState1;
+    public string outputName;
+    public string outputState0;
+    public string outputState1;
 }
 
 public class LevelAndUIManager : MonoBehaviour
@@ -254,6 +265,8 @@ public class LevelAndUIManager : MonoBehaviour
     private int cachedFormulaTopologyHash = 0;
     private bool hasCachedFormulaTopologyHash = false;
     private string cachedLiveBooleanFormula = "Y = (Belum Terhubung)";
+    private int lastEdgeTopologyHash = 0;
+    private bool hasLastEdgeTopologyHash = false;
 
     // Pencahayaan AR Studio Pelengkap & Kontras Txt_Feedback (v5.0)
     private GameObject arRimFillLightObj;
@@ -3001,6 +3014,11 @@ public class LevelAndUIManager : MonoBehaviour
                 matrixRowBackgrounds[i].color = RowIdleBgColor;
             }
         }
+
+        if (outputNode != null && outputNode.OutputTruthPod != null)
+        {
+            outputNode.OutputTruthPod.ResetDiscovery();
+        }
     }
 
     private bool HasAnyScannedMatrixRow()
@@ -3039,6 +3057,11 @@ public class LevelAndUIManager : MonoBehaviour
         if (matrixRowBackgrounds[rowIndex] != null)
         {
             matrixRowBackgrounds[rowIndex].color = RowScanningBgColor;
+        }
+
+        if (outputNode != null && outputNode.OutputTruthPod != null)
+        {
+            outputNode.OutputTruthPod.SetVerificationRowScanning(rowIndex);
         }
     }
 
@@ -3083,6 +3106,11 @@ public class LevelAndUIManager : MonoBehaviour
                 ? RowSandboxDoneBgColor
                 : (passed ? RowPassBgColor : RowFailBgColor);
         }
+
+        if (outputNode != null && outputNode.OutputTruthPod != null)
+        {
+            outputNode.OutputTruthPod.SetVerificationRowResult(rowIndex, passed);
+        }
     }
 
     private int ComputeCircuitTopologyHash()
@@ -3111,6 +3139,7 @@ public class LevelAndUIManager : MonoBehaviour
                     }
 
                     hash = (hash * 31) + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(node);
+                    hash = (hash * 31) + ((int)node.nodeType * 17);
                     hash = (hash * 31) + (node.isTracked ? 1 : 0);
                     hash = (hash * 31) + (node.connectedTarget != null
                         ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(node.connectedTarget)
@@ -3124,9 +3153,11 @@ public class LevelAndUIManager : MonoBehaviour
                         for (int j = 0; j < inCount; j++)
                         {
                             GateNode input = inputs[j];
-                            hash = (hash * 31) + (input != null
+                            int inputHash = input != null
                                 ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(input)
-                                : 0);
+                                : 0;
+                            // Bobot slot port (j + 1) agar penukaran sambungan port Input A <-> Input B selalu mengubah hash
+                            hash = (hash * 31) + ((j + 1) * 131) + inputHash;
                         }
                     }
                 }
@@ -3159,27 +3190,40 @@ public class LevelAndUIManager : MonoBehaviour
         bool outputTracked = outputNode != null && outputNode.isTracked;
         int currentConnectionCount = circuitManager != null ? circuitManager.GetActiveConnectionCount() : 0;
 
+        bool edgeHashChanged = !hasLastEdgeTopologyHash || lastEdgeTopologyHash != currentTopologyHash;
         bool topologyChanged = !hasLastTopologySignature
+            || edgeHashChanged
             || lastTopologyActiveGates != activeGates
             || lastTopologyOutputTracked != outputTracked
             || lastTopologyConnectionCount != currentConnectionCount
             || !string.Equals(lastTopologySignature, currentFormula, StringComparison.Ordinal);
 
+        bool isCircuitComplete = !string.IsNullOrEmpty(currentFormula)
+            && currentFormula != "Y = (Belum Terhubung)"
+            && !currentFormula.Contains("?")
+            && !currentFormula.Contains("(Siklus)");
+
         if (!isVerifying)
         {
-            bool isCircuitComplete = circuitManager != null && circuitManager.IsCircuitCompleteToOutput(outputNode);
-
             if (hasLastTopologySignature && topologyChanged)
             {
                 if (HasAnyScannedMatrixRow())
                 {
                     ResetTruthTableScanResults();
                 }
+                else if (outputNode != null && outputNode.OutputTruthPod != null)
+                {
+                    outputNode.OutputTruthPod.ResetDiscovery();
+                }
 
                 if (currentConnectionCount > lastActiveConnectionCount)
                 {
                     PlaySfx(clipSnapConnect);
                 }
+            }
+            else if (!isCircuitComplete && wasCircuitComplete && outputNode != null && outputNode.OutputTruthPod != null)
+            {
+                outputNode.OutputTruthPod.ResetDiscovery();
             }
 
             if (!wasCircuitComplete && isCircuitComplete)
@@ -3194,6 +3238,8 @@ public class LevelAndUIManager : MonoBehaviour
             lastTopologyOutputTracked = outputTracked;
             lastTopologyConnectionCount = currentConnectionCount;
             hasLastTopologySignature = true;
+            lastEdgeTopologyHash = currentTopologyHash;
+            hasLastEdgeTopologyHash = true;
         }
 
         if (!hasRenderedFormulaBaseline || !string.Equals(lastRenderedFormula, currentFormula, StringComparison.Ordinal))
@@ -3240,6 +3286,15 @@ public class LevelAndUIManager : MonoBehaviour
                 bool curA = inputANode != null && inputANode.currentOutputValue;
                 bool curB = inputBNode != null && inputBNode.currentOutputValue;
                 activeManualRow = (curA ? 2 : 0) + (curB ? 1 : 0);
+            }
+
+            if (outputNode != null && outputNode.OutputTruthPod != null)
+            {
+                outputNode.OutputTruthPod.SetActiveManualRow(activeManualRow);
+                if (!isSandboxMode && isCircuitComplete && activeManualRow >= 0 && outputNode.isTracked)
+                {
+                    outputNode.OutputTruthPod.RecordLiveDiscovery(activeManualRow, outputNode.currentOutputValue);
+                }
             }
         }
 
@@ -3314,6 +3369,7 @@ public class LevelAndUIManager : MonoBehaviour
             hasLastTopologySignature = false;
             lastTopologySignature = string.Empty;
             hasCachedFormulaTopologyHash = false;
+            hasLastEdgeTopologyHash = false;
         }
     }
 
@@ -3965,84 +4021,105 @@ public class LevelAndUIManager : MonoBehaviour
             new LevelScenario
             {
                 levelTitle = "Level 1: Alarm Pintu & Jendela",
-                missionDescription = "Susun rangkaian agar Output = 1 jika A atau B bernilai 1",
+                missionDescription = "Bunyikan ALARM jika PINTU atau JENDELA terbuka",
                 maxGateCardsQuota = 1,
                 expectedTruthTable = new bool[] { false, true, true, true },
                 hintTier1Concept = "Output bernilai 1 jika minimal salah satu dari A atau B bernilai 1 (hanya 0 saat 00).",
                 hintTier2Component = "Siapkan 1 kartu gerbang OR di antara kartu Input (A, B) dan Output.",
-                hintTier3Structure = "Susun Input A dan B di kiri -> sambungkan keduanya ke OR -> arahkan OR ke Output."
+                hintTier3Structure = "Susun Input A dan B di kiri -> sambungkan keduanya ke OR -> arahkan OR ke Output.",
+                inputAName = "PINTU", inputAState0 = "TUTUP", inputAState1 = "BUKA",
+                inputBName = "JENDELA", inputBState0 = "TUTUP", inputBState1 = "BUKA",
+                outputName = "ALARM", outputState0 = "AMAN", outputState1 = "BUNYI"
             },
 
             // Level 2: Gerbang XOR (Maks 1 Kartu) -> AB: 00=0, 01=1, 10=1, 11=0
             new LevelScenario
             {
                 levelTitle = "Level 2: Sakelar Tangga Dua Arah",
-                missionDescription = "Susun rangkaian agar Output = 1 jika posisi A dan B berbeda",
+                missionDescription = "Nyalakan LAMPU hanya jika sakelar ATAS dan BAWAH beda arah",
                 maxGateCardsQuota = 1,
                 expectedTruthTable = new bool[] { false, true, true, false },
                 hintTier1Concept = "Output bernilai 1 hanya ketika A dan B BERBEDA (01 atau 10), dan 0 saat keduanya sama.",
                 hintTier2Component = "Siapkan 1 kartu gerbang XOR (Exclusive OR) sebagai pembanding dua sinyal.",
-                hintTier3Structure = "Susun Input A dan B di kiri -> sambungkan keduanya ke XOR -> arahkan XOR ke Output."
+                hintTier3Structure = "Susun Input A dan B di kiri -> sambungkan keduanya ke XOR -> arahkan XOR ke Output.",
+                inputAName = "ATAS", inputAState0 = "KIRI", inputAState1 = "KANAN",
+                inputBName = "BAWAH", inputBState0 = "KIRI", inputBState1 = "KANAN",
+                outputName = "LAMPU", outputState0 = "PADAM", outputState1 = "NYALA"
             },
 
             // Level 3: Kombinasi A AND (NOT B) (Maks 2 Kartu) -> AB: 00=0, 01=0, 10=1, 11=0
             new LevelScenario
             {
                 levelTitle = "Level 3: Kunci Keamanan Brankas",
-                missionDescription = "Susun rangkaian agar Output = 1 hanya saat A = 1 dan B = 0",
+                missionDescription = "Buka BRANKAS hanya saat KUNCI masuk dan DARURAT off",
                 maxGateCardsQuota = 2,
                 expectedTruthTable = new bool[] { false, false, true, false },
                 hintTier1Concept = "Output hanya boleh 1 saat A=1 dan B=0, sehingga sinyal B perlu dibalik dahulu.",
                 hintTier2Component = "Siapkan 2 kartu gerbang: NOT untuk membalik B, dan AND untuk menggabungkannya dengan A.",
-                hintTier3Structure = "Sambungkan Input B -> NOT, lalu arahkan Input A dan keluaran NOT ke AND -> Output."
+                hintTier3Structure = "Sambungkan Input B -> NOT, lalu arahkan Input A dan keluaran NOT ke AND -> Output.",
+                inputAName = "KUNCI", inputAState0 = "LEPAS", inputAState1 = "MASUK",
+                inputBName = "DARURAT", inputBState0 = "OFF", inputBState1 = "ON",
+                outputName = "BRANKAS", outputState0 = "KUNCI", outputState1 = "BUKA"
             },
 
             // Level 4: Gerbang NAND (Maks 1 Kartu) -> !(A && B): 00=1, 01=1, 10=1, 11=0
             new LevelScenario
             {
                 levelTitle = "Level 4: Pemutus Darurat Reaktor",
-                missionDescription = "Susun rangkaian agar Output = 0 hanya saat A = 1 dan B = 1",
+                missionDescription = "Putus REAKTOR hanya saat SUHU panas dan TEKANAN tinggi",
                 maxGateCardsQuota = 1,
                 expectedTruthTable = new bool[] { true, true, true, false },
                 hintTier1Concept = "Kebalikan dari AND: Output tetap 1 untuk 00, 01, 10 dan turun ke 0 hanya saat 11.",
                 hintTier2Component = "Gunakan 1 kartu gerbang NAND (Not-AND) agar hemat kuota 1 komponen.",
-                hintTier3Structure = "Susun Input A dan B di kiri -> sambungkan keduanya langsung ke NAND -> Output."
+                hintTier3Structure = "Susun Input A dan B di kiri -> sambungkan keduanya langsung ke NAND -> Output.",
+                inputAName = "SUHU", inputAState0 = "NORMAL", inputAState1 = "PANAS",
+                inputBName = "TEKANAN", inputBState0 = "OK", inputBState1 = "TINGGI",
+                outputName = "REAKTOR", outputState0 = "PUTUS", outputState1 = "AKTIF"
             },
 
             // Level 5: Gerbang XNOR (XOR -> NOT, Maks 2 Kartu) -> (A == B): 00=1, 01=0, 10=0, 11=1
             new LevelScenario
             {
                 levelTitle = "Level 5: Sinkronisasi Inti Kembar",
-                missionDescription = "Susun rangkaian agar Output = 1 saat A dan B bernilai SAMA",
+                missionDescription = "Buat SINKRON sama saat kecepatan INTI 1 dan INTI 2 sama",
                 maxGateCardsQuota = 2,
                 expectedTruthTable = new bool[] { true, false, false, true },
                 hintTier1Concept = "Output bernilai 1 jika A dan B SAMA (00 atau 11), yaitu kebalikan tepat dari XOR.",
                 hintTier2Component = "Kombinasikan 2 kartu gerbang: XOR diikuti gerbang pembalik NOT di sisi kanannya.",
-                hintTier3Structure = "Sambungkan Input A dan B ke XOR -> sambungkan keluaran XOR ke NOT -> Output."
+                hintTier3Structure = "Sambungkan Input A dan B ke XOR -> sambungkan keluaran XOR ke NOT -> Output.",
+                inputAName = "INTI 1", inputAState0 = "PELAN", inputAState1 = "CEPAT",
+                inputBName = "INTI 2", inputBState0 = "PELAN", inputBState1 = "CEPAT",
+                outputName = "SINKRON", outputState0 = "BEDA", outputState1 = "SAMA"
             },
 
             // Level 6: Gerbang NOR Kombinasional (OR -> NOT, Maks 2 Kartu) -> !(A || B): 00=1, 01=0, 10=0, 11=0
             new LevelScenario
             {
                 levelTitle = "Level 6: Sensor Hening Ruang Server (NOR)",
-                missionDescription = "Susun rangkaian NOR agar Output = 1 HANYA saat A = 0 dan B = 0",
+                missionDescription = "Nyatakan SERVER aman hanya saat SUARA hening dan GERAK diam",
                 maxGateCardsQuota = 2,
                 expectedTruthTable = new bool[] { true, false, false, false },
                 hintTier1Concept = "Gerbang NOR adalah kebalikan dari OR: Output bernilai 1 HANYA ketika kedua sensor A=0 dan B=0 (00).",
                 hintTier2Component = "Siapkan 2 kartu gerbang: kartu OR dan kartu pembalik NOT.",
-                hintTier3Structure = "Hubungkan Input A dan Input B ke gerbang OR, lalu arahkan keluaran OR ke NOT menuju Output: Y = NOT(A OR B)."
+                hintTier3Structure = "Hubungkan Input A dan Input B ke gerbang OR, lalu arahkan keluaran OR ke NOT menuju Output: Y = NOT(A OR B).",
+                inputAName = "SUARA", inputAState0 = "HENING", inputAState1 = "BISING",
+                inputBName = "GERAK", inputBState0 = "DIAM", inputBState1 = "ADA",
+                outputName = "SERVER", outputState0 = "WASPADA", outputState1 = "AMAN"
             },
 
             // Level 7 Boss Akhir: Hukum De Morgan (A OR NOT B == NOT A NAND B, Maks 2 Kartu) -> 00=1, 01=0, 10=1, 11=1
             new LevelScenario
             {
                 levelTitle = "Level 7: Kunci Biometrik De Morgan",
-                missionDescription = "Hukum De Morgan: Buat Output = 0 HANYA saat A = 0 dan B = 1",
+                missionDescription = "Kunci LAB hanya saat KARTU kosong dan MODE ketat",
                 maxGateCardsQuota = 2,
                 expectedTruthTable = new bool[] { true, false, true, true },
                 hintTier1Concept = "Menurut Hukum De Morgan, rumus A OR (NOT B) ekuivalen dengan (NOT A) NAND B. Output hanya 0 pada baris A=0, B=1.",
                 hintTier2Component = "Gunakan kartu NOT bersama kartu OR, ATAU gunakan kartu NOT bersama kartu NAND (kuota 2 gerbang).",
-                hintTier3Structure = "Jalur 1: Input B -> NOT, lalu gabungkan dengan Input A di OR. Jalur 2 (De Morgan): Input A -> NOT, lalu gabungkan dengan Input B di NAND."
+                hintTier3Structure = "Jalur 1: Input B -> NOT, lalu gabungkan dengan Input A di OR. Jalur 2 (De Morgan): Input A -> NOT, lalu gabungkan dengan Input B di NAND.",
+                inputAName = "KARTU", inputAState0 = "KOSONG", inputAState1 = "VALID",
+                inputBName = "MODE", inputBState0 = "UMUM", inputBState1 = "KETAT",
+                outputName = "LAB", outputState0 = "TERKUNCI", outputState1 = "TERBUKA"
             }
         };
 
@@ -4059,6 +4136,108 @@ public class LevelAndUIManager : MonoBehaviour
                 return 2; // Level 7 (Kunci Biometrik De Morgan) menggunakan brankas mekanis berpelindung (Diorama 2)
             default:
                 return levelIndex;
+        }
+    }
+
+    private void ResolveActiveContextualLabels(
+        int levelIndex,
+        bool sandboxMode,
+        out string inAName, out string inA0, out string inA1,
+        out string inBName, out string inB0, out string inB1,
+        out string outName, out string out0, out string out1)
+    {
+        if (sandboxMode)
+        {
+            inAName = "INPUT A"; inA0 = "OFF"; inA1 = "ON";
+            inBName = "INPUT B"; inB0 = "OFF"; inB1 = "ON";
+            outName = "OUTPUT"; out0 = "MATI"; out1 = "AKTIF";
+            return;
+        }
+
+        LevelScenario scenario = (levels != null && levelIndex >= 0 && levelIndex < levels.Count)
+            ? levels[levelIndex]
+            : null;
+        if (scenario != null && !string.IsNullOrEmpty(scenario.inputAName) && !string.IsNullOrEmpty(scenario.outputName))
+        {
+            inAName = scenario.inputAName; inA0 = scenario.inputAState0; inA1 = scenario.inputAState1;
+            inBName = scenario.inputBName; inB0 = scenario.inputBState0; inB1 = scenario.inputBState1;
+            outName = scenario.outputName; out0 = scenario.outputState0; out1 = scenario.outputState1;
+            return;
+        }
+
+        // Fallback aman apabila daftar levels di-serialize di Inspector sebelum v7.0
+        switch (levelIndex)
+        {
+            case 0:
+                inAName = "PINTU"; inA0 = "TUTUP"; inA1 = "BUKA";
+                inBName = "JENDELA"; inB0 = "TUTUP"; inB1 = "BUKA";
+                outName = "ALARM"; out0 = "AMAN"; out1 = "BUNYI";
+                break;
+            case 1:
+                inAName = "ATAS"; inA0 = "KIRI"; inA1 = "KANAN";
+                inBName = "BAWAH"; inB0 = "KIRI"; inB1 = "KANAN";
+                outName = "LAMPU"; out0 = "PADAM"; out1 = "NYALA";
+                break;
+            case 2:
+                inAName = "KUNCI"; inA0 = "LEPAS"; inA1 = "MASUK";
+                inBName = "DARURAT"; inB0 = "OFF"; inB1 = "ON";
+                outName = "BRANKAS"; out0 = "KUNCI"; out1 = "BUKA";
+                break;
+            case 3:
+                inAName = "SUHU"; inA0 = "NORMAL"; inA1 = "PANAS";
+                inBName = "TEKANAN"; inB0 = "OK"; inB1 = "TINGGI";
+                outName = "REAKTOR"; out0 = "PUTUS"; out1 = "AKTIF";
+                break;
+            case 4:
+                inAName = "INTI 1"; inA0 = "PELAN"; inA1 = "CEPAT";
+                inBName = "INTI 2"; inB0 = "PELAN"; inB1 = "CEPAT";
+                outName = "SINKRON"; out0 = "BEDA"; out1 = "SAMA";
+                break;
+            case 5:
+                inAName = "SUARA"; inA0 = "HENING"; inA1 = "BISING";
+                inBName = "GERAK"; inB0 = "DIAM"; inB1 = "ADA";
+                outName = "SERVER"; out0 = "WASPADA"; out1 = "AMAN";
+                break;
+            case 6:
+                inAName = "KARTU"; inA0 = "KOSONG"; inA1 = "VALID";
+                inBName = "MODE"; inB0 = "UMUM"; inB1 = "KETAT";
+                outName = "LAB"; out0 = "TERKUNCI"; out1 = "TERBUKA";
+                break;
+            default:
+                inAName = "INPUT A"; inA0 = "OFF"; inA1 = "ON";
+                inBName = "INPUT B"; inB0 = "OFF"; inB1 = "ON";
+                outName = "OUTPUT"; out0 = "MATI"; out1 = "AKTIF";
+                break;
+        }
+    }
+
+    private void ApplyContextualLabelsAndOutputPod(LevelScenario activeLevel, bool sandboxMode)
+    {
+        ResolveActiveContextualLabels(
+            currentLevelIndex,
+            sandboxMode,
+            out string inAName, out string inA0, out string inA1,
+            out string inBName, out string inB0, out string inB1,
+            out string outName, out string out0, out string out1);
+
+        if (inputANode != null)
+        {
+            inputANode.SetContextualLabelConfig(inAName, inA0, inA1);
+        }
+
+        if (inputBNode != null)
+        {
+            inputBNode.SetContextualLabelConfig(inBName, inB0, inB1);
+        }
+
+        if (outputNode != null)
+        {
+            outputNode.SetContextualLabelConfig(outName, out0, out1);
+            if (outputNode.OutputTruthPod != null)
+            {
+                bool[] expected = (!sandboxMode && activeLevel != null) ? activeLevel.expectedTruthTable : null;
+                outputNode.OutputTruthPod.ConfigureLevelTargets(expected, sandboxMode);
+            }
         }
     }
 
@@ -4112,7 +4291,7 @@ public class LevelAndUIManager : MonoBehaviour
         lastQuotaMaxCount = maxQuota;
 
         txtQuotaStatus.text = $"Kuota Gerbang: {activeCount} / {maxQuota}";
-        txtQuotaStatus.color = (activeCount > maxQuota) ? Color.red : Color.white;
+        txtQuotaStatus.color = (activeCount > maxQuota) ? new Color(1.00f, 0.42f, 0.38f, 1f) : Color.white;
     }
 
     /// <summary>
@@ -4159,6 +4338,8 @@ public class LevelAndUIManager : MonoBehaviour
         {
             outputNode.SetOutputDioramaVariant(ResolveDioramaVariantForLevel(currentLevelIndex));
         }
+
+        ApplyContextualLabelsAndOutputPod(currentLevel, sandboxMode: false);
 
         AutoBindActionButtonsIfNeeded();
         InitializeTruthTableMatrixUI();
@@ -4245,6 +4426,8 @@ public class LevelAndUIManager : MonoBehaviour
         {
             outputNode.SetOutputDioramaVariant(4);
         }
+
+        ApplyContextualLabelsAndOutputPod(null, sandboxMode: true);
 
         AutoBindActionButtonsIfNeeded();
         InitializeTruthTableMatrixUI();
@@ -4563,7 +4746,17 @@ public class LevelAndUIManager : MonoBehaviour
                         testB,
                         actualOutput,
                         expectedOutput);
-                    txtFeedback.text = $"Gagal di Baris [A={(testA ? 1 : 0)}, B={(testB ? 1 : 0)}]: Output aktual = {(actualOutput ? 1 : 0)}, seharusnya = {(expectedOutput ? 1 : 0)}. Diagnostik: {diagnostic}";
+                    ResolveActiveContextualLabels(
+                        currentLevelIndex,
+                        sandboxMode: false,
+                        out string ctxAName, out string ctxA0, out string ctxA1,
+                        out string ctxBName, out string ctxB0, out string ctxB1,
+                        out string ctxOutName, out string ctxOut0, out string ctxOut1);
+                    string stateA = testA ? ctxA1 : ctxA0;
+                    string stateB = testB ? ctxB1 : ctxB0;
+                    string actualOutText = actualOutput ? ctxOut1 : ctxOut0;
+                    string expectedOutText = expectedOutput ? ctxOut1 : ctxOut0;
+                    txtFeedback.text = $"Gagal saat [{ctxAName}: {stateA} [{(testA ? 1 : 0)}], {ctxBName}: {stateB} [{(testB ? 1 : 0)}]]: {ctxOutName} = {actualOutText} [{(actualOutput ? 1 : 0)}], seharusnya {expectedOutText} [{(expectedOutput ? 1 : 0)}]. {diagnostic}";
                     txtFeedback.color = Color.red;
                 }
 
