@@ -114,7 +114,7 @@ public class GateNode : MonoBehaviour
 
     [Header("7. Visual Totem Reaktor Hologram 3D (Hari 12)")]
     [Tooltip("Ketinggian minimum Label_Status3D agar melayang rapi di atas model/totem 3D tanpa bertabrakan")]
-    public float totemLabelMinHeight = 0.48f;
+    public float totemLabelMinHeight = 0.58f;
 
     [Tooltip("Kecepatan putar totem (derajat/detik) saat sinyal bernilai 1 (HIGH)")]
     public float totemHighSpinSpeed = 145f;
@@ -127,7 +127,7 @@ public class GateNode : MonoBehaviour
 
     [Header("8. Visual Diorama Aktuator 3D Kontekstual (Hari 13)")]
     [Tooltip("Ketinggian minimum Label_Status3D pada kartu OutputActuator agar melayang bersih di atas diorama 3D")]
-    public float outputLabelMinHeight = 0.52f;
+    public float outputLabelMinHeight = 0.64f;
 
     [Tooltip("Kecepatan putar rotor sirine darurat (derajat/detik) pada Level 1 saat OUTPUT = 1")]
     public float sirenRotorSpeed = 360f;
@@ -327,6 +327,9 @@ public class GateNode : MonoBehaviour
 
     // v5.0 Tahap 3: Dual-Layer Physical Energy Conduits, Tangent Bolts, & Connection Snap VFX (Zero-GC)
     private const float SnapSurgeDuration = 0.36f;
+    private const float LabelEdgeOffsetZ = 0.06f;
+    private const float LabelClearanceAboveModelY = 0.14f;
+    private const float LabelCompactScale = 0.78f;
     private readonly Vector3[] bezierPointsCache = new Vector3[ArcSegmentCount];
     private LineRenderer conduitSheathRenderer;
     private Material conduitSheathMat;
@@ -336,6 +339,13 @@ public class GateNode : MonoBehaviour
     private float portOutFlashTimer = 0f;
     private float portInAFlashTimer = 0f;
     private float portInBFlashTimer = 0f;
+    private Camera cachedMainCamera;
+    private int lastRenderedTelemetryKey = -1;
+    private GameObject labelBackdropObj;
+    private Transform labelBackdropTransform;
+    private Material labelBackdropMaterial;
+    private float normalizedModelTopY = 0f;
+    private readonly float[] dioramaVariantModelTopY = new float[OutputDioramaVariantCount];
 
     private static int activeGateNodeCount = 0;
     private static Mesh sharedTorusMesh;
@@ -344,6 +354,8 @@ public class GateNode : MonoBehaviour
 
     private static readonly int ColorPropId = Shader.PropertyToID("_Color");
     private static readonly int EmissionColorPropId = Shader.PropertyToID("_EmissionColor");
+    private static readonly int GlossinessPropId = Shader.PropertyToID("_Glossiness");
+    private static readonly int MetallicPropId = Shader.PropertyToID("_Metallic");
     private static readonly Color ReactiveAccentHighColor = new Color(0.14f, 1.00f, 0.78f, 1f);
     private static readonly Color ReactiveAccentLowColor = new Color(0.76f, 0.22f, 0.10f, 1f);
     private static readonly Color TapInspectBurstColor = new Color(1.00f, 0.76f, 0.22f, 1f);
@@ -359,14 +371,15 @@ public class GateNode : MonoBehaviour
     private static readonly Color ConduitSheathHighColor = new Color(0.16f, 0.98f, 0.82f, 0.32f);
     private static readonly Color ConduitSheathLowColor = new Color(0.72f, 0.28f, 0.14f, 0.14f);
     private static readonly Color SnapSurgeFlashColor = new Color(0.86f, 1.00f, 1.00f, 1f);
+    private static readonly Color LabelBackdropColor = new Color(0.03f, 0.06f, 0.11f, 0.88f);
     private static readonly Color SnapSurgeSheathColor = new Color(0.72f, 1.00f, 1.00f, 0.54f);
     private static readonly Color EnergyBoltHighColor = new Color(0.82f, 1.00f, 0.98f, 1f);
     private static readonly Color EnergyBoltLowColor = new Color(0.78f, 0.40f, 0.22f, 0.86f);
 
     private static readonly float[] PacketPhaseOffsets = { 0f, 0.25f, 0.50f, 0.75f };
 
-    private static readonly Color BrightGreenTextColor = new Color(0.2f, 1f, 0.3f, 1f);
-    private static readonly Color BrightRedOrangeTextColor = new Color(1f, 0.35f, 0.15f, 1f);
+    private static readonly Color BrightGreenTextColor = new Color(0.36f, 1.00f, 0.84f, 1f);
+    private static readonly Color BrightRedOrangeTextColor = new Color(1.00f, 0.54f, 0.36f, 1f);
     private static readonly Color HighSocketColor = new Color(0.15f, 1f, 0.65f, 1f);
     private static readonly Color LowSocketColor = new Color(0.65f, 0.18f, 0.1f, 1f);
     private static readonly Color HighTotemCoreColor = new Color(0.10f, 1.00f, 0.82f, 1f);
@@ -499,6 +512,10 @@ public class GateNode : MonoBehaviour
         conduitSheathMat = null;
         conduitSheathRenderer = null;
         lastVisualConnectedTarget = null;
+        cachedMainCamera = null;
+        labelBackdropObj = null;
+        labelBackdropTransform = null;
+        labelBackdropMaterial = null;
         touchHitboxCollider = null;
 
         activeGateNodeCount = Mathf.Max(0, activeGateNodeCount - 1);
@@ -526,11 +543,13 @@ public class GateNode : MonoBehaviour
         if (lineMaterial != null)
         {
             lineMaterial.color = Color.white;
-            lineRenderer.material = lineMaterial;
+            lineRenderer.sharedMaterial = lineMaterial;
         }
 
         lineRenderer.positionCount = ArcSegmentCount;
         lineRenderer.useWorldSpace = true;
+        lineRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        lineRenderer.receiveShadows = false;
         lineRenderer.numCapVertices = 4;
         lineRenderer.numCornerVertices = 4;
         lineRenderer.widthMultiplier = 0.012f;
@@ -560,11 +579,13 @@ public class GateNode : MonoBehaviour
             {
                 conduitSheathMat.color = Color.white;
                 managedMaterials.Add(conduitSheathMat);
-                conduitSheathRenderer.material = conduitSheathMat;
+                conduitSheathRenderer.sharedMaterial = conduitSheathMat;
             }
 
             conduitSheathRenderer.positionCount = ArcSegmentCount;
             conduitSheathRenderer.useWorldSpace = true;
+            conduitSheathRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            conduitSheathRenderer.receiveShadows = false;
             conduitSheathRenderer.numCapVertices = 4;
             conduitSheathRenderer.numCornerVertices = 4;
             conduitSheathRenderer.widthMultiplier = 0.032f;
@@ -631,19 +652,16 @@ public class GateNode : MonoBehaviour
     }
 
     /// <summary>
-    /// Membuat 3D TextMeshPro world-space di atas setiap kartu secara otomatis saat Awake().
-    /// Ketinggian teks dinaikkan agar selalu berada bersih di atas totem atau diorama 3D.
+    /// Membuat 3D TextMeshPro world-space tepat di atas atap mesin (localPosition.z = +0.06f) secara otomatis saat Awake(),
+    /// lengkap dengan papan latar gelap semi-transparan AR_LabelBackdrop agar teks selalu kontras dari sudut miring maupun tegak lurus.
     /// </summary>
     private void Initialize3DVisualFeedback()
     {
-        float requiredLabelHeight = (nodeType == NodeType.OutputActuator) ? outputLabelMinHeight : totemLabelMinHeight;
-        float targetYPos = Mathf.Max(labelHeightOffset, requiredLabelHeight);
-
         if (statusLabel == null)
         {
             GameObject labelObj = new GameObject("Label_Status3D");
             labelObj.transform.SetParent(transform, false);
-            labelObj.transform.localPosition = new Vector3(0f, targetYPos, 0f);
+            labelObj.transform.localPosition = Vector3.zero;
             labelObj.transform.localRotation = Quaternion.identity;
             labelObj.transform.localScale = Vector3.one;
 
@@ -661,15 +679,99 @@ public class GateNode : MonoBehaviour
 
             statusLabel = tmp3D;
         }
-        else
+
+        statusLabel.transform.localScale = Vector3.one * LabelCompactScale;
+        UpdateStatusLabelPlacement();
+        InitializeLabelBackdrop();
+    }
+
+    /// <summary>
+    /// Memastikan statusLabel selalu melayang bersih di atas atap model 3D Quaternius
+    /// (minimal +0.14f di atas modelTopY dan >= totemLabelMinHeight/outputLabelMinHeight) pada Z = +0.06f.
+    /// </summary>
+    private void UpdateStatusLabelPlacement()
+    {
+        if (statusLabel == null)
         {
-            Vector3 labelPos = statusLabel.transform.localPosition;
-            if (labelPos.y < requiredLabelHeight)
-            {
-                labelPos.y = requiredLabelHeight;
-                statusLabel.transform.localPosition = labelPos;
-            }
+            return;
         }
+
+        float requiredLabelHeight = (nodeType == NodeType.OutputActuator)
+            ? Mathf.Max(outputLabelMinHeight, 0.64f)
+            : Mathf.Max(totemLabelMinHeight, 0.58f);
+
+        float activeModelTopY = GetActiveNormalizedModelTopY();
+        float clearanceHeight = activeModelTopY > 0.001f ? (activeModelTopY + LabelClearanceAboveModelY) : 0f;
+        float targetYPos = Mathf.Max(labelHeightOffset, Mathf.Max(requiredLabelHeight, clearanceHeight));
+
+        Vector3 labelPos = statusLabel.transform.localPosition;
+        labelPos.y = targetYPos;
+        labelPos.z = LabelEdgeOffsetZ;
+        statusLabel.transform.localPosition = labelPos;
+    }
+
+    private float GetActiveNormalizedModelTopY()
+    {
+        if (nodeType == NodeType.OutputActuator)
+        {
+            if (activeDioramaVariantIndex >= 0 && activeDioramaVariantIndex < dioramaVariantModelTopY.Length)
+            {
+                return dioramaVariantModelTopY[activeDioramaVariantIndex];
+            }
+
+            return 0f;
+        }
+
+        return normalizedModelTopY;
+    }
+
+    private void InitializeLabelBackdrop()
+    {
+        if (statusLabel == null)
+        {
+            return;
+        }
+
+        Transform existingBackdrop = statusLabel.transform.Find("AR_LabelBackdrop");
+        if (existingBackdrop != null)
+        {
+            labelBackdropObj = existingBackdrop.gameObject;
+            labelBackdropTransform = existingBackdrop;
+            return;
+        }
+
+        labelBackdropMaterial = CreateSafeOpenGLMaterial();
+        if (labelBackdropMaterial != null)
+        {
+            labelBackdropMaterial.color = LabelBackdropColor;
+            // Render setelah model 3D opaque (2000) dan tepat sebelum TextMeshPro Transparent (3000)
+            labelBackdropMaterial.renderQueue = 2995;
+            managedMaterials.Add(labelBackdropMaterial);
+        }
+
+        labelBackdropObj = CreatePrimitivePart(
+            "AR_LabelBackdrop",
+            PrimitiveType.Quad,
+            statusLabel.transform,
+            new Vector3(0f, 0f, 0.012f),
+            Vector3.zero,
+            new Vector3(0.58f, 0.096f, 1f),
+            labelBackdropMaterial);
+        labelBackdropTransform = labelBackdropObj.transform;
+        labelBackdropObj.SetActive(false);
+    }
+
+    private void UpdateLabelBackdropSize(string labelText)
+    {
+        if (statusLabel == null || labelBackdropTransform == null)
+        {
+            return;
+        }
+
+        Vector2 preferred = statusLabel.GetPreferredValues(labelText);
+        float width = preferred.x > 0.01f ? Mathf.Clamp(preferred.x + 0.055f, 0.30f, 1.05f) : 0.58f;
+        float height = preferred.y > 0.01f ? Mathf.Clamp(preferred.y + 0.026f, 0.078f, 0.20f) : 0.096f;
+        labelBackdropTransform.localScale = new Vector3(width, height, 1f);
     }
 
     /// <summary>
@@ -700,6 +802,7 @@ public class GateNode : MonoBehaviour
         }
 
         ApplyActiveDioramaVariantVisibility();
+        UpdateStatusLabelPlacement();
 
         if (isTracked)
         {
@@ -756,16 +859,19 @@ public class GateNode : MonoBehaviour
                     GetOutputDioramaInitialEuler(i),
                     out float modelTopY,
                     out Vector3 modelHalfExtents);
+                dioramaVariantModelTopY[i] = modelTopY;
                 BuildV5OutputDioramaMechanism(i, variantRoot.transform, modelTopY, modelHalfExtents, dioramaVariantReactiveAccentMaterials[i]);
                 outputDioramaVariantObjs[i] = variantRoot;
             }
             else
             {
+                dioramaVariantModelTopY[i] = 0f;
                 outputDioramaVariantObjs[i] = BuildFallbackOutputDioramaVariant(i, outputDioramaRootObj.transform);
             }
         }
 
         ApplyActiveDioramaVariantVisibility();
+        UpdateStatusLabelPlacement();
         UpdateOutputDioramaColors();
         UpdateReactiveAccentMaterials();
         outputDioramaRootObj.SetActive(false);
@@ -1226,7 +1332,10 @@ public class GateNode : MonoBehaviour
                 BaseTileTopSurfaceY,
                 GetNodeModelInitialEuler(nodeType),
                 out float modelTopY,
-                out Vector3 modelHalfExtents);
+                out Vector3 modelHalfExtents,
+                forceLongestAxisVertical: (nodeType == NodeType.NAND));
+            normalizedModelTopY = modelTopY;
+            UpdateStatusLabelPlacement();
             BuildV5NodeMechanism(nodeType, totemRootObj.transform, modelTopY, modelHalfExtents, totemReactiveAccentMaterials);
         }
         else
@@ -1424,9 +1533,14 @@ public class GateNode : MonoBehaviour
         RemoveCollider(obj);
 
         Renderer rend = obj.GetComponent<Renderer>();
-        if (rend != null && mat != null)
+        if (rend != null)
         {
-            rend.sharedMaterial = mat;
+            rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            rend.receiveShadows = false;
+            if (mat != null)
+            {
+                rend.sharedMaterial = mat;
+            }
         }
 
         return obj;
@@ -1445,6 +1559,8 @@ public class GateNode : MonoBehaviour
         meshFilter.sharedMesh = mesh;
 
         MeshRenderer meshRenderer = obj.AddComponent<MeshRenderer>();
+        meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        meshRenderer.receiveShadows = false;
         if (mat != null)
         {
             meshRenderer.sharedMaterial = mat;
@@ -1773,9 +1889,14 @@ public class GateNode : MonoBehaviour
         RemoveCollider(ringObj);
 
         Renderer ringRenderer = ringObj.GetComponent<Renderer>();
-        if (ringRenderer != null && socketMaterial != null)
+        if (ringRenderer != null)
         {
-            ringRenderer.sharedMaterial = socketMaterial;
+            ringRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            ringRenderer.receiveShadows = false;
+            if (socketMaterial != null)
+            {
+                ringRenderer.sharedMaterial = socketMaterial;
+            }
         }
 
         ringObj.SetActive(false);
@@ -2055,17 +2176,31 @@ public class GateNode : MonoBehaviour
     }
 
     /// <summary>
-    /// Mengatur orientasi 3D TextMeshPro agar selalu menghadap Camera.main (billboard effect)
+    /// Mengembalikan kamera utama yang di-cache agar loop Update() tidak memanggil Camera.main per frame.
+    /// </summary>
+    private Camera ResolveMainCamera()
+    {
+        if (cachedMainCamera == null || !cachedMainCamera.isActiveAndEnabled)
+        {
+            cachedMainCamera = Camera.main;
+        }
+
+        return cachedMainCamera;
+    }
+
+    /// <summary>
+    /// Mengatur orientasi 3D TextMeshPro agar selalu menghadap kamera utama (billboard effect)
     /// dan tidak terbalik saat kamera AR bergerak.
     /// </summary>
     private void UpdateLabelBillboard()
     {
-        if (statusLabel == null || Camera.main == null)
+        Camera mainCam = ResolveMainCamera();
+        if (statusLabel == null || mainCam == null)
         {
             return;
         }
 
-        Transform camTransform = Camera.main.transform;
+        Transform camTransform = mainCam.transform;
         Vector3 dirFromCamera = statusLabel.transform.position - camTransform.position;
         if (dirFromCamera.sqrMagnitude > 0.0001f)
         {
@@ -2079,13 +2214,14 @@ public class GateNode : MonoBehaviour
     /// </summary>
     private void CheckPhysicalRotationInput()
     {
-        if (Camera.main == null)
+        Camera mainCam = ResolveMainCamera();
+        if (mainCam == null)
         {
             return;
         }
 
         // Proyeksikan arah atas kartu (transform.forward pada bidang ImageTarget) ke ruang lokal kamera
-        Vector3 localCardForward = Camera.main.transform.InverseTransformDirection(transform.forward);
+        Vector3 localCardForward = mainCam.transform.InverseTransformDirection(transform.forward);
         float angleFromVertical = Mathf.Abs(Mathf.Atan2(localCardForward.x, localCardForward.y) * Mathf.Rad2Deg);
 
         // Jika kartu diputar miring mendekati 90 derajat (45° s/d 135°), terdeteksi sebagai logika 1
@@ -2195,6 +2331,7 @@ public class GateNode : MonoBehaviour
     {
         isTracked = false;
         rotationInitialized = false;
+        lastRenderedTelemetryKey = -1;
         connectedInputs.Clear();
         connectedTarget = null;
         UpdateInputPinTelemetry();
@@ -2406,7 +2543,7 @@ public class GateNode : MonoBehaviour
             }
         }
 
-        // 4. Perbarui visibilitas, teks telemetri pin, warna, dan orientasi 3D TextMeshPro di atas kartu
+        // 4. Perbarui visibilitas, teks telemetri pin, warna, latar AR_LabelBackdrop, dan orientasi 3D TextMeshPro
         if (statusLabel != null)
         {
             if (statusLabel.gameObject.activeSelf != isTracked)
@@ -2414,10 +2551,26 @@ public class GateNode : MonoBehaviour
                 statusLabel.gameObject.SetActive(isTracked);
             }
 
+            if (labelBackdropObj != null && labelBackdropObj.activeSelf != isTracked)
+            {
+                labelBackdropObj.SetActive(isTracked);
+            }
+
             if (isTracked)
             {
-                statusLabel.text = BuildTelemetryStatusText();
-                statusLabel.color = currentOutputValue ? BrightGreenTextColor : BrightRedOrangeTextColor;
+                int telemetryKey = (isInputAConnected ? 1 : 0)
+                                   | (inputAValue ? 2 : 0)
+                                   | (isInputBConnected ? 4 : 0)
+                                   | (inputBValue ? 8 : 0)
+                                   | (currentOutputValue ? 16 : 0);
+                if (telemetryKey != lastRenderedTelemetryKey)
+                {
+                    lastRenderedTelemetryKey = telemetryKey;
+                    string telemetryText = BuildTelemetryStatusText();
+                    statusLabel.text = telemetryText;
+                    statusLabel.color = currentOutputValue ? BrightGreenTextColor : BrightRedOrangeTextColor;
+                    UpdateLabelBackdropSize(telemetryText);
+                }
                 UpdateLabelBillboard();
             }
         }
@@ -3187,6 +3340,7 @@ public class GateNode : MonoBehaviour
         switch (type)
         {
             case NodeType.InputSource: return new Vector3(0f, 180f, 0f); // Layar menghadap kamera depan
+            case NodeType.NAND: return new Vector3(-90f, 0f, 0f);        // Tegakkan tabung Props_Vessel_Tall (FBX Z-up -> Unity +Y)
             case NodeType.NOT: return new Vector3(0f, 90f, 0f);          // Proyektor laser menghadap ke kanan (+X)
             default: return Vector3.zero;
         }
@@ -3228,7 +3382,8 @@ public class GateNode : MonoBehaviour
         float baseSurfaceY,
         Vector3 initialLocalEuler,
         out float normalizedTopY,
-        out Vector3 normalizedHalfExtents)
+        out Vector3 normalizedHalfExtents,
+        bool forceLongestAxisVertical = false)
     {
         Transform modelPivot = CreateEmptyChild($"{modelInstance.name}_Pivot", containerParent, Vector3.zero);
         modelInstance.transform.SetParent(modelPivot, false);
@@ -3242,6 +3397,16 @@ public class GateNode : MonoBehaviour
             normalizedTopY = baseSurfaceY + (maxHeightY * 0.75f);
             normalizedHalfExtents = new Vector3(maxFootprintXZ * 0.45f, maxHeightY * 0.375f, maxFootprintXZ * 0.45f);
             return modelPivot;
+        }
+
+        // Pengaman orientasi vertikal (mis. Props_Vessel_Tall pada NAND) agar sumbu terpanjang selalu berdiri tegak di +Y
+        if (forceLongestAxisVertical && localBounds.size.y < Mathf.Max(localBounds.size.x, localBounds.size.z))
+        {
+            Quaternion uprightCorrection = localBounds.size.z >= localBounds.size.x
+                ? Quaternion.Euler(-90f, 0f, 0f)
+                : Quaternion.Euler(0f, 0f, 90f);
+            modelInstance.transform.localRotation = uprightCorrection * modelInstance.transform.localRotation;
+            TryCalculateHierarchyMeshBounds(modelInstance.transform, modelPivot, out localBounds);
         }
 
         float sizeX = Mathf.Max(0.0001f, localBounds.size.x);
@@ -3371,6 +3536,7 @@ public class GateNode : MonoBehaviour
 
     /// <summary>
     /// Mengklon dan menyanitasi seluruh material pada model FBX instansiasi agar aman untuk Android OpenGLES3,
+    /// mematikan real-time shadow yang berat di GPU mobile, meredam kilap plastik berlebih pada permukaan solid,
     /// mendaftarkannya ke managedMaterials untuk pembersihan di OnDestroy(), dan memetakan slot bernama "Accent"
     /// ke daftar material reaktif sinyal biner.
     /// </summary>
@@ -3385,6 +3551,10 @@ public class GateNode : MonoBehaviour
                 continue;
             }
 
+            // Matikan bayangan real-time berat di GPU mobile; kedalaman di atas meja AR ditangani AR_ContactShadow
+            rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            rend.receiveShadows = false;
+
             Material[] sourceMaterials = rend.sharedMaterials;
             if (sourceMaterials == null || sourceMaterials.Length == 0)
             {
@@ -3396,6 +3566,8 @@ public class GateNode : MonoBehaviour
             {
                 Material srcMat = sourceMaterials[m];
                 string matName = srcMat != null ? srcMat.name : string.Empty;
+                bool isAccentSlot = matName.IndexOf("Accent", StringComparison.OrdinalIgnoreCase) >= 0;
+                bool isGlassSlot = matName.IndexOf("Glass", StringComparison.OrdinalIgnoreCase) >= 0;
                 Color preservedColor = (srcMat != null && srcMat.HasProperty(ColorPropId))
                     ? srcMat.GetColor(ColorPropId)
                     : new Color(0.75f, 0.78f, 0.84f, 1f);
@@ -3417,8 +3589,9 @@ public class GateNode : MonoBehaviour
 
                 if (clonedMat != null)
                 {
+                    ApplyQuaterniusContrastPolish(clonedMat, isAccentSlot, isGlassSlot);
                     managedMaterials.Add(clonedMat);
-                    if (reactiveAccentList != null && matName.IndexOf("Accent", StringComparison.OrdinalIgnoreCase) >= 0)
+                    if (reactiveAccentList != null && isAccentSlot)
                     {
                         reactiveAccentList.Add(clonedMat);
                     }
@@ -3428,6 +3601,36 @@ public class GateNode : MonoBehaviour
             }
 
             rend.sharedMaterials = sanitizedMaterials;
+        }
+    }
+
+    private static void ApplyQuaterniusContrastPolish(Material mat, bool isAccentSlot, bool isGlassSlot)
+    {
+        if (mat == null || isAccentSlot)
+        {
+            return;
+        }
+
+        // Redam kilap plastik & metalik berlebih di lingkungan AR tanpa reflection probe agar bodi solid tetap tegas
+        float maxGloss = isGlassSlot ? 0.55f : 0.26f;
+        float maxMetallic = isGlassSlot ? 0.15f : 0.18f;
+
+        if (mat.HasProperty(GlossinessPropId))
+        {
+            float currentGloss = mat.GetFloat(GlossinessPropId);
+            if (currentGloss > maxGloss)
+            {
+                mat.SetFloat(GlossinessPropId, maxGloss);
+            }
+        }
+
+        if (mat.HasProperty(MetallicPropId))
+        {
+            float currentMetallic = mat.GetFloat(MetallicPropId);
+            if (currentMetallic > maxMetallic)
+            {
+                mat.SetFloat(MetallicPropId, maxMetallic);
+            }
         }
     }
 
@@ -3452,6 +3655,16 @@ public class GateNode : MonoBehaviour
             else
             {
                 mat.color = preservedColor;
+            }
+
+            if (mat.HasProperty(GlossinessPropId))
+            {
+                mat.SetFloat(GlossinessPropId, 0.26f);
+            }
+
+            if (mat.HasProperty(MetallicPropId))
+            {
+                mat.SetFloat(MetallicPropId, 0.18f);
             }
         }
 

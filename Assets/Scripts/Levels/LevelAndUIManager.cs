@@ -238,6 +238,17 @@ public class LevelAndUIManager : MonoBehaviour
     private int lastQuotaActiveCount = -1;
     private int lastQuotaMaxCount = -1;
     private int lastQuotaSandboxMode = -1;
+    private int cachedFormulaTopologyHash = 0;
+    private bool hasCachedFormulaTopologyHash = false;
+    private string cachedLiveBooleanFormula = "Y = (Belum Terhubung)";
+
+    // Pencahayaan AR Studio Pelengkap & Kontras Txt_Feedback (v5.0)
+    private GameObject arRimFillLightObj;
+    private GameObject feedbackBackdropObj;
+    private bool ownsFeedbackBackdrop = false;
+    private Material feedbackOriginalSharedMaterial;
+    private Material feedbackTextMaterialInstance;
+    private string lastCheckedFeedbackText;
 
     // Interaksi Sentuh 3D AR Raycast (New Input System + Zero-GC, v4.0)
     private const float TouchRaycastMaxDistance = 100f;
@@ -354,12 +365,14 @@ public class LevelAndUIManager : MonoBehaviour
         AutoBindToggleButtonsTextIfNeeded();
         AutoBindActionButtonsIfNeeded();
         ApplySciFiHudButtonTheme();
+        ApplyFeedbackContrastStyle();
         InitializeProceduralAudio();
         InitializeTruthTableMatrixUI();
     }
 
     private void Start()
     {
+        ConfigureARStudioLighting();
         LoadLevel(currentLevelIndex);
     }
 
@@ -371,6 +384,7 @@ public class LevelAndUIManager : MonoBehaviour
         UpdateTruthTableMatrixLive();
         UpdateWaveformMonitorLive();
         MonitorInputStateAudio();
+        UpdateFeedbackBackdropVisibility();
     }
 
     private void OnDestroy()
@@ -472,6 +486,35 @@ public class LevelAndUIManager : MonoBehaviour
         cachedPointerEventData = null;
         cachedMainCamera = null;
 
+        if (arRimFillLightObj != null)
+        {
+            Destroy(arRimFillLightObj);
+            arRimFillLightObj = null;
+        }
+
+        if (feedbackTextMaterialInstance != null)
+        {
+            if (txtFeedback != null && feedbackOriginalSharedMaterial != null)
+            {
+                txtFeedback.fontSharedMaterial = feedbackOriginalSharedMaterial;
+            }
+            Destroy(feedbackTextMaterialInstance);
+            feedbackTextMaterialInstance = null;
+        }
+        feedbackOriginalSharedMaterial = null;
+
+        if (feedbackBackdropObj != null)
+        {
+            if (ownsFeedbackBackdrop)
+            {
+                Destroy(feedbackBackdropObj);
+            }
+            feedbackBackdropObj = null;
+        }
+        ownsFeedbackBackdrop = false;
+
+        lastCheckedFeedbackText = null;
+
         PlayerPrefs.Save();
         DestroyProceduralAudioClips();
         Screen.sleepTimeout = SleepTimeout.SystemSetting;
@@ -493,6 +536,70 @@ public class LevelAndUIManager : MonoBehaviour
     {
         Application.targetFrameRate = 60;
         Screen.sleepTimeout = SleepTimeout.NeverSleep;
+    }
+
+    /// <summary>
+    /// Mengatur pencahayaan lingkungan Trilight yang seimbang untuk kamera AR Android serta menambahkan
+    /// satu AR_RimFillLight tanpa bayangan bila scene hanya memiliki <= 1 Directional Light agar sisi gelap
+    /// dan siluet model 3D Quaternius tetap terbaca jelas di atas meja nyata pada 60 FPS.
+    /// </summary>
+    private void ConfigureARStudioLighting()
+    {
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+        RenderSettings.ambientSkyColor = new Color(0.76f, 0.85f, 0.96f, 1f);
+        RenderSettings.ambientEquatorColor = new Color(0.56f, 0.62f, 0.70f, 1f);
+        RenderSettings.ambientGroundColor = new Color(0.32f, 0.38f, 0.48f, 1f);
+
+#if UNITY_6000_5_OR_NEWER
+        Light[] sceneLights = FindObjectsByType<Light>();
+#else
+        Light[] sceneLights = FindObjectsByType<Light>(FindObjectsSortMode.None);
+#endif
+
+        int directionalLightCount = 0;
+        Light primaryDirectional = null;
+        bool hasExistingRimLight = false;
+
+        if (sceneLights != null)
+        {
+            for (int i = 0; i < sceneLights.Length; i++)
+            {
+                Light lightComp = sceneLights[i];
+                if (lightComp == null || !lightComp.isActiveAndEnabled)
+                {
+                    continue;
+                }
+
+                if (string.Equals(lightComp.gameObject.name, "AR_RimFillLight", StringComparison.Ordinal))
+                {
+                    hasExistingRimLight = true;
+                }
+
+                if (lightComp.type == LightType.Directional)
+                {
+                    directionalLightCount++;
+                    if (primaryDirectional == null)
+                    {
+                        primaryDirectional = lightComp;
+                    }
+                }
+            }
+        }
+
+        if (directionalLightCount <= 1 && !hasExistingRimLight)
+        {
+            arRimFillLightObj = new GameObject("AR_RimFillLight");
+            Light rimLight = arRimFillLightObj.AddComponent<Light>();
+            rimLight.type = LightType.Directional;
+            rimLight.shadows = LightShadows.None;
+            rimLight.intensity = 0.42f;
+            rimLight.color = new Color(0.82f, 0.94f, 1.00f, 1f);
+
+            float baseYaw = primaryDirectional != null
+                ? primaryDirectional.transform.eulerAngles.y
+                : -30f;
+            arRimFillLightObj.transform.rotation = Quaternion.Euler(34f, baseYaw + 145f, 0f);
+        }
     }
 
     /// <summary>
@@ -691,6 +798,100 @@ public class LevelAndUIManager : MonoBehaviour
         // Paksa penyegaran tampilan status 0/1 pada tombol Input A & B segera setelah tema diterapkan
         lastDisplayedInputA = -1;
         lastDisplayedInputB = -1;
+    }
+
+    /// <summary>
+    /// Mempertajam keterbacaan Txt_Feedback di atas kartu marker putih terang menggunakan outline SDF gelap
+    /// pada material klon khusus TMP + latar kapsul gelap tipis yang menempel pada RectTransform Txt_Feedback
+    /// dan otomatis nonaktif bila teks kosong.
+    /// </summary>
+    private void ApplyFeedbackContrastStyle()
+    {
+        if (txtFeedback == null)
+        {
+            return;
+        }
+
+        txtFeedback.margin = new Vector4(14f, 6f, 14f, 6f);
+        txtFeedback.raycastTarget = false;
+
+        // 1. Terapkan outline SDF hitam pekat pada klon material TMP khusus (dibersihkan di OnDestroy)
+        if (feedbackTextMaterialInstance == null && txtFeedback.fontSharedMaterial != null)
+        {
+            feedbackOriginalSharedMaterial = txtFeedback.fontSharedMaterial;
+            feedbackTextMaterialInstance = new Material(feedbackOriginalSharedMaterial);
+            feedbackTextMaterialInstance.EnableKeyword("OUTLINE_ON");
+            if (feedbackTextMaterialInstance.HasProperty(ShaderUtilities.ID_OutlineWidth))
+            {
+                feedbackTextMaterialInstance.SetFloat(ShaderUtilities.ID_OutlineWidth, 0.14f);
+            }
+            if (feedbackTextMaterialInstance.HasProperty(ShaderUtilities.ID_OutlineColor))
+            {
+                feedbackTextMaterialInstance.SetColor(ShaderUtilities.ID_OutlineColor, new Color(0.02f, 0.04f, 0.08f, 1f));
+            }
+            txtFeedback.fontMaterial = feedbackTextMaterialInstance;
+        }
+
+        // 2. Tempelkan kapsul latar gelap tipis tepat di belakang RectTransform Txt_Feedback (bukan panel HUD baru)
+        RectTransform fbRect = txtFeedback.rectTransform;
+        Transform fbParent = fbRect != null ? fbRect.parent : null;
+        if (fbRect != null && fbParent != null && feedbackBackdropObj == null)
+        {
+            Transform existingBackdrop = fbParent.Find("Txt_Feedback_Backdrop");
+            if (existingBackdrop != null)
+            {
+                feedbackBackdropObj = existingBackdrop.gameObject;
+                ownsFeedbackBackdrop = false;
+            }
+            else
+            {
+                feedbackBackdropObj = new GameObject("Txt_Feedback_Backdrop", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(Outline));
+                ownsFeedbackBackdrop = true;
+                feedbackBackdropObj.transform.SetParent(fbParent, false);
+                feedbackBackdropObj.transform.SetSiblingIndex(fbRect.GetSiblingIndex());
+
+                RectTransform bgRect = feedbackBackdropObj.GetComponent<RectTransform>();
+                bgRect.anchorMin = fbRect.anchorMin;
+                bgRect.anchorMax = fbRect.anchorMax;
+                bgRect.pivot = fbRect.pivot;
+                bgRect.anchoredPosition = fbRect.anchoredPosition;
+                bgRect.sizeDelta = new Vector2(fbRect.sizeDelta.x + 18f, fbRect.sizeDelta.y + 8f);
+                bgRect.localRotation = fbRect.localRotation;
+                bgRect.localScale = fbRect.localScale;
+
+                Image bgImage = feedbackBackdropObj.GetComponent<Image>();
+                bgImage.color = new Color(0.03f, 0.06f, 0.12f, 0.84f);
+                bgImage.raycastTarget = false;
+
+                Outline bgOutline = feedbackBackdropObj.GetComponent<Outline>();
+                bgOutline.effectColor = new Color(0.18f, 0.86f, 1.00f, 0.52f);
+                bgOutline.effectDistance = new Vector2(1.4f, -1.4f);
+            }
+        }
+
+        lastCheckedFeedbackText = null;
+        UpdateFeedbackBackdropVisibility();
+    }
+
+    private void UpdateFeedbackBackdropVisibility()
+    {
+        if (feedbackBackdropObj == null || txtFeedback == null)
+        {
+            return;
+        }
+
+        string currentText = txtFeedback.text;
+        if (ReferenceEquals(currentText, lastCheckedFeedbackText))
+        {
+            return;
+        }
+
+        lastCheckedFeedbackText = currentText;
+        bool hasVisibleText = !string.IsNullOrWhiteSpace(currentText) && txtFeedback.gameObject.activeInHierarchy;
+        if (feedbackBackdropObj.activeSelf != hasVisibleText)
+        {
+            feedbackBackdropObj.SetActive(hasVisibleText);
+        }
     }
 
     private static Button ResolveSceneHudButton(string buttonName, Canvas targetCanvas)
@@ -2678,6 +2879,57 @@ public class LevelAndUIManager : MonoBehaviour
         }
     }
 
+    private int ComputeCircuitTopologyHash()
+    {
+        unchecked
+        {
+            int hash = 17;
+            if (outputNode != null)
+            {
+                hash = (hash * 31) + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(outputNode);
+                hash = (hash * 31) + (outputNode.isTracked ? 1 : 0);
+            }
+
+            if (circuitManager != null && circuitManager.allNodes != null)
+            {
+                List<GateNode> nodes = circuitManager.allNodes;
+                int count = nodes.Count;
+                hash = (hash * 31) + count;
+                for (int i = 0; i < count; i++)
+                {
+                    GateNode node = nodes[i];
+                    if (node == null)
+                    {
+                        hash = (hash * 31) + 7;
+                        continue;
+                    }
+
+                    hash = (hash * 31) + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(node);
+                    hash = (hash * 31) + (node.isTracked ? 1 : 0);
+                    hash = (hash * 31) + (node.connectedTarget != null
+                        ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(node.connectedTarget)
+                        : 0);
+
+                    List<GateNode> inputs = node.connectedInputs;
+                    if (inputs != null)
+                    {
+                        int inCount = inputs.Count;
+                        hash = (hash * 31) + inCount;
+                        for (int j = 0; j < inCount; j++)
+                        {
+                            GateNode input = inputs[j];
+                            hash = (hash * 31) + (input != null
+                                ? System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(input)
+                                : 0);
+                        }
+                    }
+                }
+            }
+
+            return hash;
+        }
+    }
+
     private void UpdateTruthTableMatrixLive()
     {
         if (txtBooleanFormula == null)
@@ -2685,9 +2937,17 @@ public class LevelAndUIManager : MonoBehaviour
             return;
         }
 
-        string currentFormula = circuitManager != null
-            ? circuitManager.GetCircuitBooleanExpression(outputNode)
-            : "Y = (Belum Terhubung)";
+        int currentTopologyHash = ComputeCircuitTopologyHash();
+        if (!hasCachedFormulaTopologyHash || currentTopologyHash != cachedFormulaTopologyHash)
+        {
+            cachedFormulaTopologyHash = currentTopologyHash;
+            hasCachedFormulaTopologyHash = true;
+            cachedLiveBooleanFormula = circuitManager != null
+                ? circuitManager.GetCircuitBooleanExpression(outputNode)
+                : "Y = (Belum Terhubung)";
+        }
+
+        string currentFormula = cachedLiveBooleanFormula;
 
         int activeGates = circuitManager != null ? circuitManager.activeGateCardsCount : 0;
         bool outputTracked = outputNode != null && outputNode.isTracked;
@@ -2847,6 +3107,7 @@ public class LevelAndUIManager : MonoBehaviour
         {
             hasLastTopologySignature = false;
             lastTopologySignature = string.Empty;
+            hasCachedFormulaTopologyHash = false;
         }
     }
 
