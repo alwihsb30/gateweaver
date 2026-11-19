@@ -74,3 +74,6 @@ crashlytics-build.properties
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treaming[Aa]ssets/aa.meta
 /[Aa]ssets/[Ss]treaming[Aa]ssets/aa/*
+
+# Local large MediaPipeUnityPlugin tarball (>100 MB GitHub limit; keep locally in Packages/ for Unity)
+Packages/com.github.homuler.mediapipe-*.tgz
