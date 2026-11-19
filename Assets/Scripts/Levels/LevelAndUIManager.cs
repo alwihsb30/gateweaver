@@ -160,6 +160,19 @@ public class LevelAndUIManager : MonoBehaviour
     private Outline[] levelSelectorItemOutlines;
     private TMP_Text[] levelSelectorItemStatusTexts;
 
+    // Tombol & Pengendali Mode Udara Air-Weaving (v6.0)
+    private AirWeavingController airWeavingController;
+    private Button airWeavingToggleButton;
+    private Image airWeavingToggleBg;
+    private Outline airWeavingToggleOutline;
+    private TMP_Text txtAirWeavingToggleLabel;
+    private bool hasSavedMissionDescLayout = false;
+    private Vector2 savedMissionDescAnchoredPos;
+    private Vector2 savedMissionDescSizeDelta;
+    private float savedMissionDescFontSize;
+    private float savedMissionDescLineSpacing;
+    private TextAlignmentOptions savedMissionDescAlignment;
+
     // Referensi Tombol HUD Bawaan Unity (Reskin Tema Sci-Fi v4.0)
     private Button btnInputA;
     private Image imgBtnInputA;
@@ -339,6 +352,7 @@ public class LevelAndUIManager : MonoBehaviour
     };
 
     public bool IsSandboxMode => isSandboxMode;
+    public bool IsVerifying => isVerifying;
 
     private void Awake()
     {
@@ -374,6 +388,7 @@ public class LevelAndUIManager : MonoBehaviour
     {
         ConfigureARStudioLighting();
         LoadLevel(currentLevelIndex);
+        EnsureAirWeavingControllerBootstrapped();
     }
 
     private void Update()
@@ -449,6 +464,18 @@ public class LevelAndUIManager : MonoBehaviour
         {
             levelSelectorOpenButton.onClick.RemoveListener(ToggleLevelSelector);
             levelSelectorOpenButton = null;
+        }
+
+        if (airWeavingToggleButton != null)
+        {
+            airWeavingToggleButton.onClick.RemoveListener(OnToggleAirWeavingClicked);
+            airWeavingToggleButton = null;
+        }
+
+        if (airWeavingController != null)
+        {
+            airWeavingController.OnAirWeavingModeChanged -= HandleAirWeavingModeChanged;
+            airWeavingController = null;
         }
 
         if (levelSelectorCloseButton != null)
@@ -2107,6 +2134,185 @@ public class LevelAndUIManager : MonoBehaviour
             out _,
             out _);
         levelSelectorOpenButton.onClick.AddListener(ToggleLevelSelector);
+
+        CreateAirWeavingModeToggleButton(canvasTransform, fontAsset);
+    }
+
+    private void CreateAirWeavingModeToggleButton(Transform canvasTransform, TMP_FontAsset fontAsset)
+    {
+        if (airWeavingToggleButton != null)
+        {
+            return;
+        }
+
+        Transform parentTransform = canvasTransform;
+        Vector2 anchorMin = new Vector2(0.5f, 0.5f);
+        Vector2 anchorMax = new Vector2(0.5f, 0.5f);
+        Vector2 pivot = new Vector2(0.5f, 0.5f);
+        Vector2 anchoredPosition = new Vector2(800f, 225f);
+        Vector2 sizeDelta = new Vector2(220f, 56f);
+
+        RectTransform levelBtnRect = levelSelectorOpenButton != null
+            ? levelSelectorOpenButton.GetComponent<RectTransform>()
+            : null;
+        if (levelBtnRect != null)
+        {
+            if (levelBtnRect.parent != null)
+            {
+                parentTransform = levelBtnRect.parent;
+            }
+
+            anchorMin = levelBtnRect.anchorMin;
+            anchorMax = levelBtnRect.anchorMax;
+            pivot = levelBtnRect.pivot;
+            float width = levelBtnRect.sizeDelta.x > 10f ? levelBtnRect.sizeDelta.x : 220f;
+            float height = 56f;
+            const float verticalGap = 14f;
+            float yBelowLevelBtn = levelBtnRect.anchoredPosition.y - (levelBtnRect.sizeDelta.y * 0.5f) - verticalGap - (height * 0.5f);
+            anchoredPosition = new Vector2(levelBtnRect.anchoredPosition.x, yBelowLevelBtn);
+            sizeDelta = new Vector2(width, height);
+        }
+
+        GameObject btnObj = new GameObject("Btn_ToggleAirWeaving", typeof(RectTransform), typeof(Image), typeof(Button));
+        btnObj.transform.SetParent(parentTransform, false);
+
+        RectTransform rect = btnObj.GetComponent<RectTransform>();
+        rect.anchorMin = anchorMin;
+        rect.anchorMax = anchorMax;
+        rect.pivot = pivot;
+        rect.anchoredPosition = anchoredPosition;
+        rect.sizeDelta = sizeDelta;
+
+        txtAirWeavingToggleLabel = CreateMatrixText("Txt_ToggleAirWeaving", rect, Vector2.zero, sizeDelta,
+            "Mode: Udara (v6)", 20f, TextAlignmentOptions.Center, Color.white, fontAsset);
+        txtAirWeavingToggleLabel.enableAutoSizing = true;
+        txtAirWeavingToggleLabel.fontSizeMin = 13f;
+        txtAirWeavingToggleLabel.fontSizeMax = 21f;
+        RectTransform labelRect = txtAirWeavingToggleLabel.rectTransform;
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.pivot = new Vector2(0.5f, 0.5f);
+        labelRect.offsetMin = new Vector2(8f, 0f);
+        labelRect.offsetMax = new Vector2(-8f, 0f);
+
+        airWeavingToggleButton = btnObj.GetComponent<Button>();
+        ApplySingleSciFiButtonStyle(
+            airWeavingToggleButton,
+            LevelSelectorOpenBgColor,
+            MatrixAccentCyanColor,
+            new Color(0.86f, 0.98f, 1.00f, 1f),
+            out airWeavingToggleBg,
+            out airWeavingToggleOutline);
+        airWeavingToggleButton.onClick.AddListener(OnToggleAirWeavingClicked);
+    }
+
+    private void EnsureAirWeavingControllerBootstrapped()
+    {
+        if (airWeavingController == null)
+        {
+            airWeavingController = FindAnyObjectByType<AirWeavingController>();
+        }
+
+        if (airWeavingController == null)
+        {
+            GameObject controllerObj = new GameObject("AirWeavingController");
+            airWeavingController = controllerObj.AddComponent<AirWeavingController>();
+        }
+
+        airWeavingController.Configure(this, circuitManager, inputANode, inputBNode, outputNode, txtFeedback);
+        airWeavingController.OnAirWeavingModeChanged -= HandleAirWeavingModeChanged;
+        airWeavingController.OnAirWeavingModeChanged += HandleAirWeavingModeChanged;
+        HandleAirWeavingModeChanged(airWeavingController.IsAirWeavingActive);
+    }
+
+    private void OnToggleAirWeavingClicked()
+    {
+        if (isVerifying)
+        {
+            PlaySfx(clipToggleInput);
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = "Tunggu hingga proses Uji Rangkaian selesai sebelum berganti mode kamera.";
+                txtFeedback.color = new Color(1.00f, 0.78f, 0.28f, 1f);
+            }
+            return;
+        }
+
+        EnsureAirWeavingControllerBootstrapped();
+        if (airWeavingController == null || airWeavingController.IsTransitioning)
+        {
+            return;
+        }
+
+        if (levelSelectorModalPanel != null && levelSelectorModalPanel.activeSelf)
+        {
+            CloseLevelSelector(playAudio: false);
+        }
+
+        if (competencyReportPanelObj != null && competencyReportPanelObj.activeSelf)
+        {
+            CloseCompetencyReport();
+        }
+
+        PlaySfx(clipToggleInput);
+        airWeavingController.ToggleAirWeavingMode();
+    }
+
+    private void HandleAirWeavingModeChanged(bool isAirWeavingActive)
+    {
+        if (txtAirWeavingToggleLabel != null)
+        {
+            txtAirWeavingToggleLabel.text = isAirWeavingActive ? "Mode: Kartu (v5)" : "Mode: Udara (v6)";
+            txtAirWeavingToggleLabel.color = isAirWeavingActive
+                ? new Color(0.88f, 1.00f, 0.90f, 1f)
+                : new Color(0.86f, 0.98f, 1.00f, 1f);
+        }
+
+        if (airWeavingToggleBg != null)
+        {
+            airWeavingToggleBg.color = isAirWeavingActive
+                ? new Color(0.08f, 0.34f, 0.28f, 0.94f)
+                : LevelSelectorOpenBgColor;
+        }
+
+        if (airWeavingToggleOutline != null)
+        {
+            airWeavingToggleOutline.effectColor = isAirWeavingActive
+                ? new Color(0.26f, 1.00f, 0.74f, 0.98f)
+                : MatrixAccentCyanColor;
+        }
+
+        // Padatkan teks misi atas menjadi pita horizontal ramping di Mode Udara agar bersih di atas label Rak Parkir (XOR)
+        if (txtMissionDesc != null)
+        {
+            RectTransform missionRect = txtMissionDesc.rectTransform;
+            if (!hasSavedMissionDescLayout)
+            {
+                savedMissionDescAnchoredPos = missionRect.anchoredPosition;
+                savedMissionDescSizeDelta = missionRect.sizeDelta;
+                savedMissionDescFontSize = txtMissionDesc.fontSize;
+                savedMissionDescLineSpacing = txtMissionDesc.lineSpacing;
+                savedMissionDescAlignment = txtMissionDesc.alignment;
+                hasSavedMissionDescLayout = true;
+            }
+
+            if (isAirWeavingActive)
+            {
+                missionRect.anchoredPosition = new Vector2(0f, -54f);
+                missionRect.sizeDelta = new Vector2(1160f, 52f);
+                txtMissionDesc.fontSize = Mathf.Min(savedMissionDescFontSize, 23f);
+                txtMissionDesc.lineSpacing = -6f;
+                txtMissionDesc.alignment = TextAlignmentOptions.Top;
+            }
+            else
+            {
+                missionRect.anchoredPosition = savedMissionDescAnchoredPos;
+                missionRect.sizeDelta = savedMissionDescSizeDelta;
+                txtMissionDesc.fontSize = savedMissionDescFontSize;
+                txtMissionDesc.lineSpacing = savedMissionDescLineSpacing;
+                txtMissionDesc.alignment = savedMissionDescAlignment;
+            }
+        }
     }
 
     public void ToggleLevelSelector()
@@ -4001,6 +4207,11 @@ public class LevelAndUIManager : MonoBehaviour
         UpdateStarMasteryUI();
         UpdateHintButtonUI();
         SyncAudioStateBaselines(true);
+
+        if (airWeavingController != null && airWeavingController.IsAirWeavingActive)
+        {
+            airWeavingController.ResetAirWeavingWorkbench();
+        }
     }
 
     /// <summary>
@@ -4077,6 +4288,11 @@ public class LevelAndUIManager : MonoBehaviour
         UpdateStarMasteryUI();
         UpdateHintButtonUI();
         SyncAudioStateBaselines(true);
+
+        if (airWeavingController != null && airWeavingController.IsAirWeavingActive)
+        {
+            airWeavingController.ResetAirWeavingWorkbench();
+        }
     }
 
     /// <summary>
