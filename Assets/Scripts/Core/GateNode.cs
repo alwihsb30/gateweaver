@@ -341,6 +341,8 @@ public class GateNode : MonoBehaviour
     private float portInBFlashTimer = 0f;
     private Camera cachedMainCamera;
     private int lastRenderedTelemetryKey = -1;
+    private bool externalParkedPreview = false;
+    private Renderer[] cachedExternalVisualRenderers;
     private GameObject labelBackdropObj;
     private Transform labelBackdropTransform;
     private Material labelBackdropMaterial;
@@ -431,7 +433,7 @@ public class GateNode : MonoBehaviour
 
     private void Update()
     {
-        if (nodeType == NodeType.InputSource && isTracked && enablePhysicalRotationInput && !isSimulationOverride)
+        if (nodeType == NodeType.InputSource && isTracked && enablePhysicalRotationInput && !isSimulationOverride && !useExternalSpatialPose)
         {
             CheckPhysicalRotationInput();
         }
@@ -439,7 +441,7 @@ public class GateNode : MonoBehaviour
         if (isTracked)
         {
             SetTouchHitboxEnabled(true);
-            SetGroundingAndPortsActive(true);
+            SetGroundingAndPortsActive(true, showPorts: true);
             UpdateLabelBillboard();
             AnimateTotemVisual();
             AnimateOutputDioramaVisual();
@@ -450,10 +452,23 @@ public class GateNode : MonoBehaviour
             UpdateSparkBurstPool();
             UpdatePortSnapFlashTimers();
         }
+        else if (useExternalSpatialPose && externalParkedPreview)
+        {
+            SetTouchHitboxEnabled(false);
+            SetGroundingAndPortsActive(true, showPorts: false);
+            SetTotemActive(true);
+            SetOutputDioramaActive(false);
+            SetInputPinsActive(false);
+            UpdateLabelBillboard();
+            UpdateTapBounceAnimation();
+            ResetShockwaveState();
+            ResetSparkBurstPool();
+            ResetConnectionSnapState();
+        }
         else
         {
             SetTouchHitboxEnabled(false);
-            SetGroundingAndPortsActive(false);
+            SetGroundingAndPortsActive(false, showPorts: false);
             SetTotemActive(false);
             SetOutputDioramaActive(false);
             SetInputPinsActive(false);
@@ -513,6 +528,7 @@ public class GateNode : MonoBehaviour
         conduitSheathRenderer = null;
         lastVisualConnectedTarget = null;
         cachedMainCamera = null;
+        cachedExternalVisualRenderers = null;
         labelBackdropObj = null;
         labelBackdropTransform = null;
         labelBackdropMaterial = null;
@@ -769,7 +785,7 @@ public class GateNode : MonoBehaviour
         }
 
         Vector2 preferred = statusLabel.GetPreferredValues(labelText);
-        float width = preferred.x > 0.01f ? Mathf.Clamp(preferred.x + 0.055f, 0.30f, 1.05f) : 0.58f;
+        float width = preferred.x > 0.01f ? Mathf.Clamp(preferred.x + 0.055f, 0.22f, 1.05f) : 0.58f;
         float height = preferred.y > 0.01f ? Mathf.Clamp(preferred.y + 0.026f, 0.078f, 0.20f) : 0.096f;
         labelBackdropTransform.localScale = new Vector3(width, height, 1f);
     }
@@ -2307,17 +2323,112 @@ public class GateNode : MonoBehaviour
         if (tracked)
         {
             bool wasTracked = isTracked;
+            bool wasParked = externalParkedPreview;
+            externalParkedPreview = false;
             isTracked = true;
-            if (!wasTracked)
+            RestoreExternalChildRenderers();
+            if (!wasTracked || wasParked)
             {
+                lastRenderedTelemetryKey = -1;
                 EvaluateGateLogic();
                 UpdateVisuals();
             }
         }
-        else if (isTracked)
+        else if (isTracked || externalParkedPreview)
         {
+            externalParkedPreview = false;
             ApplyTrackingLost();
         }
+    }
+
+    /// <summary>
+    /// Menampilkan pratinjau model 3D gerbang di Rak Parkir Mode Udara (v6) sambil menjaga isTracked == false
+    /// agar tidak masuk kuota gerbang dan tidak tersambung kabel CircuitManager sebelum ditarik ke zona rakit.
+    /// </summary>
+    public void SetExternalParkedPreview(bool parked, Vector3 worldPosition, Quaternion worldRotation, float uniformScale = 0.66f)
+    {
+        if (!useExternalSpatialPose)
+        {
+            return;
+        }
+
+        if (debounceCoroutine != null)
+        {
+            StopCoroutine(debounceCoroutine);
+            debounceCoroutine = null;
+        }
+
+        transform.SetPositionAndRotation(worldPosition, worldRotation);
+        transform.localScale = Vector3.one * uniformScale;
+
+        bool wasTracked = isTracked;
+        bool wasParked = externalParkedPreview;
+        externalParkedPreview = parked;
+
+        if (wasTracked)
+        {
+            ApplyTrackingLost();
+            externalParkedPreview = parked;
+        }
+
+        if (parked)
+        {
+            RestoreExternalChildRenderers();
+        }
+
+        if (wasParked != parked || wasTracked)
+        {
+            lastRenderedTelemetryKey = -1;
+            UpdateVisuals();
+        }
+    }
+
+    /// <summary>
+    /// Memulihkan Renderer visual anak (MeshRenderer, SkinnedMeshRenderer, TextMeshPro, AR_LabelBackdrop, dll.)
+    /// yang sebelumnya dimatikan oleh Vuforia DefaultObserverEventHandler.OnTrackingLost() secara zero-GC,
+    /// tanpa mengganggu LineRenderer saluran energi.
+    /// </summary>
+    private void RestoreExternalChildRenderers()
+    {
+        if (cachedExternalVisualRenderers == null)
+        {
+            cachedExternalVisualRenderers = GetComponentsInChildren<Renderer>(true);
+        }
+
+        for (int i = 0; i < cachedExternalVisualRenderers.Length; i++)
+        {
+            Renderer rend = cachedExternalVisualRenderers[i];
+            if (rend == null || rend == lineRenderer || rend == conduitSheathRenderer)
+            {
+                continue;
+            }
+
+            if (!rend.enabled)
+            {
+                rend.enabled = true;
+            }
+        }
+
+        if (statusLabel != null && !statusLabel.enabled)
+        {
+            statusLabel.enabled = true;
+        }
+    }
+
+    /// <summary>
+    /// Melepas seluruh kendali pose/skala eksternal v6 dan mengembalikan node ke Mode Kartu Vuforia v5.
+    /// </summary>
+    public void ClearExternalSpatialOverride()
+    {
+        externalParkedPreview = false;
+        useExternalSpatialPose = false;
+        transform.localScale = Vector3.one;
+        if (statusLabel != null)
+        {
+            statusLabel.transform.localScale = Vector3.one * LabelCompactScale;
+        }
+        lastRenderedTelemetryKey = -1;
+        ApplyTrackingLost();
     }
 
     private IEnumerator TrackingLossDebounceRoutine()
@@ -2515,9 +2626,11 @@ public class GateNode : MonoBehaviour
         RefreshConnectionVisuals(advanceFlowPhase: false);
 
         // 2. Perbarui grounding AR, port fisik, totem/model 3D, indikator pin mikro 3D, hitbox sentuh 3D, & diorama OutputActuator
+        bool showParkedVisual = !isTracked && useExternalSpatialPose && externalParkedPreview;
+        bool showModelVisual = isTracked || showParkedVisual;
         SetTouchHitboxEnabled(isTracked);
-        SetGroundingAndPortsActive(isTracked);
-        SetTotemActive(isTracked);
+        SetGroundingAndPortsActive(showModelVisual, showPorts: isTracked);
+        SetTotemActive(showModelVisual);
         SetOutputDioramaActive(isTracked);
         SetInputPinsActive(isTracked);
         if (isTracked)
@@ -2527,6 +2640,11 @@ public class GateNode : MonoBehaviour
             UpdateReactiveAccentMaterials();
             UpdatePortVisuals();
             UpdateInputPinsVisual();
+        }
+        else if (showParkedVisual)
+        {
+            UpdateTotemColors();
+            UpdateReactiveAccentMaterials();
         }
 
         // 3. Perbarui indikator tambahan opsional di Inspector (jika terpasang manual)
@@ -2546,14 +2664,14 @@ public class GateNode : MonoBehaviour
         // 4. Perbarui visibilitas, teks telemetri pin, warna, latar AR_LabelBackdrop, dan orientasi 3D TextMeshPro
         if (statusLabel != null)
         {
-            if (statusLabel.gameObject.activeSelf != isTracked)
+            if (statusLabel.gameObject.activeSelf != showModelVisual)
             {
-                statusLabel.gameObject.SetActive(isTracked);
+                statusLabel.gameObject.SetActive(showModelVisual);
             }
 
-            if (labelBackdropObj != null && labelBackdropObj.activeSelf != isTracked)
+            if (labelBackdropObj != null && labelBackdropObj.activeSelf != showModelVisual)
             {
-                labelBackdropObj.SetActive(isTracked);
+                labelBackdropObj.SetActive(showModelVisual);
             }
 
             if (isTracked)
@@ -2566,10 +2684,26 @@ public class GateNode : MonoBehaviour
                 if (telemetryKey != lastRenderedTelemetryKey)
                 {
                     lastRenderedTelemetryKey = telemetryKey;
+                    statusLabel.transform.localScale = Vector3.one * LabelCompactScale;
                     string telemetryText = BuildTelemetryStatusText();
                     statusLabel.text = telemetryText;
                     statusLabel.color = currentOutputValue ? BrightGreenTextColor : BrightRedOrangeTextColor;
                     UpdateLabelBackdropSize(telemetryText);
+                }
+                UpdateLabelBillboard();
+            }
+            else if (showParkedVisual)
+            {
+                const int ParkedTelemetryKey = -100;
+                if (lastRenderedTelemetryKey != ParkedTelemetryKey)
+                {
+                    lastRenderedTelemetryKey = ParkedTelemetryKey;
+                    // Kompensasi skala label saat model parkir (0.56x) agar nama gerbang AND/OR/XOR/NAND/NOT tetap tajam terbaca
+                    statusLabel.transform.localScale = Vector3.one * (LabelCompactScale * 1.35f);
+                    string parkedLabel = nodeType.ToString();
+                    statusLabel.text = parkedLabel;
+                    statusLabel.color = new Color(0.84f, 0.98f, 1.00f, 1f);
+                    UpdateLabelBackdropSize(parkedLabel);
                 }
                 UpdateLabelBillboard();
             }
@@ -3178,7 +3312,7 @@ public class GateNode : MonoBehaviour
         return portRoot;
     }
 
-    private void SetGroundingAndPortsActive(bool active)
+    private void SetGroundingAndPortsActive(bool active, bool showPorts = true)
     {
         if (contactShadowObj != null && contactShadowObj.activeSelf != active)
         {
@@ -3190,19 +3324,21 @@ public class GateNode : MonoBehaviour
             baseTileRootObj.SetActive(active);
         }
 
-        if (portInATransform != null && portInATransform.gameObject.activeSelf != active)
+        bool portsActive = active && showPorts;
+
+        if (portInATransform != null && portInATransform.gameObject.activeSelf != portsActive)
         {
-            portInATransform.gameObject.SetActive(active);
+            portInATransform.gameObject.SetActive(portsActive);
         }
 
-        if (portInBTransform != null && portInBTransform.gameObject.activeSelf != active)
+        if (portInBTransform != null && portInBTransform.gameObject.activeSelf != portsActive)
         {
-            portInBTransform.gameObject.SetActive(active);
+            portInBTransform.gameObject.SetActive(portsActive);
         }
 
-        if (portOutTransform != null && portOutTransform.gameObject.activeSelf != active)
+        if (portOutTransform != null && portOutTransform.gameObject.activeSelf != portsActive)
         {
-            portOutTransform.gameObject.SetActive(active);
+            portOutTransform.gameObject.SetActive(portsActive);
         }
     }
 
