@@ -120,7 +120,44 @@ public class LevelAndUIManager : MonoBehaviour
     private int attemptsOnCurrentLevel = 0;
     private int hintTierUsed = 0;
 
-    // Komponen Matrix UI Prosedural
+    // Komponen Matrix UI Prosedural & Kontrol Tab/Lipat (v4.0)
+    private const float ScannerPanelWidth = 460f;
+    private const float ScannerExpandedHeight = 416f;
+    private const float ScannerCollapsedHeight = 108f;
+
+    private RectTransform scannerPanelRect;
+    private RectTransform scannerBadgeRect;
+    private RectTransform audioToggleRect;
+    private GameObject scannerDividerObj;
+    private GameObject truthTableTabContentObj;
+    private GameObject waveformMonitorPanelObj;
+    private GameObject scannerFooterGroupObj;
+
+    private Button tabTruthTableButton;
+    private Image tabTruthTableBackground;
+    private TMP_Text txtTabTruthTableLabel;
+    private Button tabOscilloscopeButton;
+    private Image tabOscilloscopeBackground;
+    private TMP_Text txtTabOscilloscopeLabel;
+    private Button collapseHudButton;
+    private RectTransform collapseHudButtonRect;
+    private Image collapseHudBackground;
+    private TMP_Text txtCollapseHudLabel;
+    private bool isOscilloscopeTabActive = false;
+    private bool isScannerHudCollapsed = false;
+
+    // Referensi Tombol HUD Bawaan Unity (Reskin Tema Sci-Fi v4.0)
+    private Button btnInputA;
+    private Image imgBtnInputA;
+    private Outline outlineBtnInputA;
+    private Button btnInputB;
+    private Image imgBtnInputB;
+    private Outline outlineBtnInputB;
+    private Button btnVerify;
+    private Button btnNextLevel;
+    private Button btnResetLevel;
+    private bool hudButtonThemeApplied = false;
+
     private TMP_Text txtBooleanFormula;
     private TMP_Text txtCurrentOutputReadout;
     private TMP_Text txtStarMastery;
@@ -232,6 +269,41 @@ public class LevelAndUIManager : MonoBehaviour
     private static readonly Color WaveLowYColor = new Color(0.85f, 0.25f, 0.16f, 0.90f);
     private static readonly Color WaveUntrackedYColor = new Color(0.38f, 0.44f, 0.52f, 0.65f);
 
+    // Palet Tab, Lipat HUD, & Reskin Tombol Sci-Fi Gelap-Sian (v4.0)
+    private static readonly Color TabActiveBgColor = new Color(0.11f, 0.48f, 0.66f, 0.98f);
+    private static readonly Color TabActiveTextColor = new Color(0.95f, 1.00f, 1.00f, 1f);
+    private static readonly Color TabInactiveBgColor = new Color(0.07f, 0.14f, 0.24f, 0.88f);
+    private static readonly Color TabInactiveTextColor = new Color(0.62f, 0.78f, 0.88f, 1f);
+    private static readonly Color CollapseBtnExpandedBgColor = new Color(0.12f, 0.20f, 0.30f, 0.94f);
+    private static readonly Color CollapseBtnExpandedTextColor = new Color(0.82f, 0.92f, 1.00f, 1f);
+    private static readonly Color CollapseBtnCollapsedBgColor = new Color(0.10f, 0.50f, 0.64f, 0.98f);
+    private static readonly Color CollapseBtnCollapsedTextColor = new Color(0.96f, 1.00f, 1.00f, 1f);
+
+    private static readonly Color InputLowBgColor = new Color(0.09f, 0.16f, 0.26f, 0.96f);
+    private static readonly Color InputLowOutlineColor = new Color(0.28f, 0.56f, 0.76f, 0.88f);
+    private static readonly Color InputLowTextColor = new Color(0.86f, 0.94f, 1.00f, 1f);
+    private static readonly Color InputHighBgColor = new Color(0.14f, 0.82f, 0.68f, 0.98f);
+    private static readonly Color InputHighOutlineColor = new Color(0.45f, 1.00f, 0.88f, 1.00f);
+    private static readonly Color InputHighTextColor = new Color(0.03f, 0.12f, 0.16f, 1f);
+    private static readonly Color VerifyBtnBgColor = new Color(0.075f, 0.451f, 0.600f, 0.96f);
+    private static readonly Color VerifyBtnOutlineColor = new Color(0.28f, 0.90f, 1.00f, 0.96f);
+    private static readonly Color NextLevelBtnBgColor = new Color(0.078f, 0.431f, 0.294f, 0.96f);
+    private static readonly Color NextLevelBtnOutlineColor = new Color(0.28f, 0.95f, 0.65f, 0.96f);
+    private static readonly Color ResetBtnBgColor = new Color(0.14f, 0.16f, 0.22f, 0.96f);
+    private static readonly Color ResetBtnOutlineColor = new Color(0.92f, 0.44f, 0.28f, 0.94f);
+    private static readonly Color ResetBtnTextColor = new Color(1.00f, 0.64f, 0.48f, 1f);
+
+    private static readonly ColorBlock SciFiButtonColorBlock = new ColorBlock
+    {
+        normalColor = Color.white,
+        highlightedColor = new Color(0.90f, 0.97f, 1.00f, 1f),
+        pressedColor = new Color(0.70f, 0.80f, 0.88f, 1f),
+        selectedColor = Color.white,
+        disabledColor = new Color(0.45f, 0.48f, 0.52f, 0.60f),
+        colorMultiplier = 1f,
+        fadeDuration = 0.08f
+    };
+
     public bool IsSandboxMode => isSandboxMode;
 
     private void Awake()
@@ -258,6 +330,7 @@ public class LevelAndUIManager : MonoBehaviour
         AutoBindCoreNodesIfNeeded();
         AutoBindToggleButtonsTextIfNeeded();
         AutoBindActionButtonsIfNeeded();
+        ApplySciFiHudButtonTheme();
         InitializeProceduralAudio();
         InitializeTruthTableMatrixUI();
     }
@@ -315,6 +388,24 @@ public class LevelAndUIManager : MonoBehaviour
         {
             reportResetButton.onClick.RemoveListener(OnReportResetProgressClicked);
             reportResetButton = null;
+        }
+
+        if (tabTruthTableButton != null)
+        {
+            tabTruthTableButton.onClick.RemoveListener(SelectTruthTableTab);
+            tabTruthTableButton = null;
+        }
+
+        if (tabOscilloscopeButton != null)
+        {
+            tabOscilloscopeButton.onClick.RemoveListener(SelectOscilloscopeTab);
+            tabOscilloscopeButton = null;
+        }
+
+        if (collapseHudButton != null)
+        {
+            collapseHudButton.onClick.RemoveListener(ToggleCollapseScannerHud);
+            collapseHudButton = null;
         }
 
         uiRaycastResults.Clear();
@@ -444,6 +535,197 @@ public class LevelAndUIManager : MonoBehaviour
     }
 
     /// <summary>
+    /// Menyelaraskan gaya visual tombol HUD bawaan Unity (Input A/B, Uji Rangkaian, Level Berikutnya, Reset Level)
+    /// ke tema sci-fi gelap-sian seragam tanpa mengubah posisi anchor asli di Scene.
+    /// </summary>
+    private void ApplySciFiHudButtonTheme()
+    {
+        if (hudButtonThemeApplied)
+        {
+            return;
+        }
+
+        Canvas targetCanvas = FindTargetCanvas();
+
+        btnInputA = ResolveSceneHudButton("Btn_ToggleInputA", targetCanvas);
+        btnInputB = ResolveSceneHudButton("Btn_ToggleInputB", targetCanvas);
+        btnVerify = ResolveSceneHudButton("Btn_VerifyCircuit", targetCanvas);
+        btnNextLevel = nextLevelButtonObj != null
+            ? nextLevelButtonObj.GetComponent<Button>()
+            : ResolveSceneHudButton("Btn_NextLevel", targetCanvas);
+        btnResetLevel = resetLevelButtonObj != null
+            ? resetLevelButtonObj.GetComponent<Button>()
+            : ResolveSceneHudButton("Btn_ResetLevel", targetCanvas);
+
+        if (btnInputA != null)
+        {
+            if (txtBtnToggleA == null)
+            {
+                txtBtnToggleA = btnInputA.GetComponentInChildren<TMP_Text>(true);
+            }
+
+            ApplySingleSciFiButtonStyle(
+                btnInputA,
+                InputLowBgColor,
+                InputLowOutlineColor,
+                InputLowTextColor,
+                out imgBtnInputA,
+                out outlineBtnInputA);
+        }
+
+        if (btnInputB != null)
+        {
+            if (txtBtnToggleB == null)
+            {
+                txtBtnToggleB = btnInputB.GetComponentInChildren<TMP_Text>(true);
+            }
+
+            ApplySingleSciFiButtonStyle(
+                btnInputB,
+                InputLowBgColor,
+                InputLowOutlineColor,
+                InputLowTextColor,
+                out imgBtnInputB,
+                out outlineBtnInputB);
+        }
+
+        if (btnVerify != null)
+        {
+            ApplySingleSciFiButtonStyle(
+                btnVerify,
+                VerifyBtnBgColor,
+                VerifyBtnOutlineColor,
+                Color.white,
+                out _,
+                out _);
+        }
+
+        if (btnNextLevel != null)
+        {
+            ApplySingleSciFiButtonStyle(
+                btnNextLevel,
+                NextLevelBtnBgColor,
+                NextLevelBtnOutlineColor,
+                Color.white,
+                out _,
+                out _);
+        }
+
+        if (btnResetLevel != null)
+        {
+            ApplySingleSciFiButtonStyle(
+                btnResetLevel,
+                ResetBtnBgColor,
+                ResetBtnOutlineColor,
+                ResetBtnTextColor,
+                out _,
+                out _);
+        }
+
+        hudButtonThemeApplied = btnInputA != null
+                                || btnInputB != null
+                                || btnVerify != null
+                                || btnNextLevel != null
+                                || btnResetLevel != null;
+
+        // Paksa penyegaran tampilan status 0/1 pada tombol Input A & B segera setelah tema diterapkan
+        lastDisplayedInputA = -1;
+        lastDisplayedInputB = -1;
+    }
+
+    private static Button ResolveSceneHudButton(string buttonName, Canvas targetCanvas)
+    {
+        GameObject directObj = GameObject.Find(buttonName);
+        if (directObj != null)
+        {
+            Button directBtn = directObj.GetComponent<Button>();
+            if (directBtn != null)
+            {
+                return directBtn;
+            }
+        }
+
+        if (targetCanvas != null)
+        {
+            Button[] canvasButtons = targetCanvas.GetComponentsInChildren<Button>(true);
+            for (int i = 0; i < canvasButtons.Length; i++)
+            {
+                Button candidate = canvasButtons[i];
+                if (candidate != null && string.Equals(candidate.gameObject.name, buttonName, StringComparison.Ordinal))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static void ApplySingleSciFiButtonStyle(
+        Button button,
+        Color bgColor,
+        Color outlineColor,
+        Color textColor,
+        out Image buttonImage,
+        out Outline buttonOutline)
+    {
+        buttonImage = button.GetComponent<Image>();
+        if (buttonImage != null)
+        {
+            buttonImage.color = bgColor;
+            button.targetGraphic = buttonImage;
+
+            buttonOutline = buttonImage.GetComponent<Outline>();
+            if (buttonOutline == null)
+            {
+                buttonOutline = buttonImage.gameObject.AddComponent<Outline>();
+            }
+
+            buttonOutline.effectColor = outlineColor;
+            buttonOutline.effectDistance = new Vector2(1.8f, -1.8f);
+            buttonOutline.useGraphicAlpha = true;
+        }
+        else
+        {
+            buttonOutline = null;
+        }
+
+        button.transition = Selectable.Transition.ColorTint;
+        button.colors = SciFiButtonColorBlock;
+
+        TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
+        if (label != null)
+        {
+            float baseMaxSize = Mathf.Max(12f, label.fontSize);
+            label.color = textColor;
+            label.fontStyle = FontStyles.Bold;
+            label.enableAutoSizing = true;
+            label.fontSizeMin = 12f;
+            label.fontSizeMax = baseMaxSize;
+            label.margin = new Vector4(8f, 2f, 8f, 2f);
+            label.textWrappingMode = TextWrappingModes.NoWrap;
+        }
+    }
+
+    private static void ApplyInputToggleVisualState(Image bgImage, Outline borderOutline, TMP_Text labelText, bool isHigh)
+    {
+        if (bgImage != null)
+        {
+            bgImage.color = isHigh ? InputHighBgColor : InputLowBgColor;
+        }
+
+        if (borderOutline != null)
+        {
+            borderOutline.effectColor = isHigh ? InputHighOutlineColor : InputLowOutlineColor;
+        }
+
+        if (labelText != null)
+        {
+            labelText.color = isHigh ? InputHighTextColor : InputLowTextColor;
+        }
+    }
+
+    /// <summary>
     /// Membangun secara prosedural panel samping "Panel_TruthTableScanner" di Canvas (1920x1080)
     /// agar berada rapi di sisi kiri tanpa menabrak Panel_TopHud, Panel_BottomHUD, maupun area tengah kamera AR.
     /// </summary>
@@ -478,11 +760,12 @@ public class LevelAndUIManager : MonoBehaviour
         }
 
         RectTransform panelRect = truthTableScannerPanelObj.GetComponent<RectTransform>();
+        scannerPanelRect = panelRect;
         panelRect.anchorMin = new Vector2(0f, 1f);
         panelRect.anchorMax = new Vector2(0f, 1f);
         panelRect.pivot = new Vector2(0f, 1f);
         panelRect.anchoredPosition = new Vector2(22f, -176f);
-        panelRect.sizeDelta = new Vector2(460f, 536f);
+        panelRect.sizeDelta = new Vector2(ScannerPanelWidth, ScannerExpandedHeight);
 
         Image panelImage = truthTableScannerPanelObj.GetComponent<Image>();
         if (panelImage != null)
@@ -495,75 +778,104 @@ public class LevelAndUIManager : MonoBehaviour
         CreateMatrixPanelAccentBar(panelRect);
 
         // Header & Rumus Aljabar Boolean Aktif + Tombol Mute Audio
-        CreateMatrixText("Txt_ScannerBadge", panelRect, new Vector2(14f, -10f), new Vector2(308f, 22f),
+        TMP_Text scannerBadge = CreateMatrixText("Txt_ScannerBadge", panelRect, new Vector2(14f, -10f), new Vector2(308f, 22f),
             "MATRIX TABEL KEBENARAN & RUMUS", 13f, TextAlignmentOptions.Left, MatrixAccentCyanColor, safeFont);
+        scannerBadge.enableAutoSizing = true;
+        scannerBadge.fontSizeMin = 9.5f;
+        scannerBadge.fontSizeMax = 13f;
+        scannerBadgeRect = scannerBadge.rectTransform;
         CreateAudioToggleButton(panelRect, safeFont);
 
-        txtBooleanFormula = CreateMatrixText("Txt_BooleanFormula", panelRect, new Vector2(14f, -34f), new Vector2(432f, 38f),
+        txtBooleanFormula = CreateMatrixText("Txt_BooleanFormula", panelRect, new Vector2(14f, -34f), new Vector2(432f, 36f),
             "Rumus Rakitan: Y = (Belum Terhubung)", 17f, TextAlignmentOptions.Left, Color.white, safeFont);
         txtBooleanFormula.enableAutoSizing = true;
         txtBooleanFormula.fontSizeMin = 12f;
         txtBooleanFormula.fontSizeMax = 18f;
 
-        txtCurrentOutputReadout = CreateMatrixText("Txt_CurrentOutputReadout", panelRect, new Vector2(14f, -74f), new Vector2(432f, 24f),
+        txtCurrentOutputReadout = CreateMatrixText("Txt_CurrentOutputReadout", panelRect, new Vector2(14f, -72f), new Vector2(432f, 24f),
             "Output Y = - [BELUM TERLACAK]", 15f, TextAlignmentOptions.Left, new Color(1f, 0.72f, 0.25f, 1f), safeFont);
 
         // Garis pemisah horizontal
-        GameObject dividerObj = new GameObject("Divider_Scanner", typeof(RectTransform), typeof(Image));
-        dividerObj.transform.SetParent(panelRect, false);
-        RectTransform divRect = dividerObj.GetComponent<RectTransform>();
+        scannerDividerObj = new GameObject("Divider_Scanner", typeof(RectTransform), typeof(Image));
+        scannerDividerObj.transform.SetParent(panelRect, false);
+        RectTransform divRect = scannerDividerObj.GetComponent<RectTransform>();
         divRect.anchorMin = new Vector2(0f, 1f);
         divRect.anchorMax = new Vector2(0f, 1f);
         divRect.pivot = new Vector2(0f, 1f);
-        divRect.anchoredPosition = new Vector2(14f, -102f);
+        divRect.anchoredPosition = new Vector2(14f, -100f);
         divRect.sizeDelta = new Vector2(432f, 2f);
-        Image divImg = dividerObj.GetComponent<Image>();
+        Image divImg = scannerDividerObj.GetComponent<Image>();
         divImg.color = new Color(0.22f, 0.65f, 0.85f, 0.45f);
         divImg.raycastTarget = false;
 
+        // Bar Navigasi Tab & Lipat HUD: [Tabel] | [Osiloskop] | [Lipat/Buka]
+        CreateScannerTabBar(panelRect, safeFont);
+
+        // Kontainer Tab 0: Matriks 4 Baris Tabel Kebenaran (default aktif)
+        truthTableTabContentObj = new GameObject("Group_TruthTableTab", typeof(RectTransform));
+        truthTableTabContentObj.transform.SetParent(panelRect, false);
+        RectTransform truthTabRect = truthTableTabContentObj.GetComponent<RectTransform>();
+        truthTabRect.anchorMin = new Vector2(0f, 1f);
+        truthTabRect.anchorMax = new Vector2(0f, 1f);
+        truthTabRect.pivot = new Vector2(0f, 1f);
+        truthTabRect.anchoredPosition = Vector2.zero;
+        truthTabRect.sizeDelta = new Vector2(ScannerPanelWidth, ScannerExpandedHeight);
+
         // Baris header kolom: [A] [B] [Target] [Uji Y] [Status]
-        RectTransform headerRowRect = CreateMatrixRowContainer("Row_Header", panelRect, -110f, 32f, MatrixHeaderBgColor);
+        RectTransform headerRowRect = CreateMatrixRowContainer("Row_Header", truthTabRect, -141f, 28f, MatrixHeaderBgColor);
         Color headerTextColor = new Color(0.75f, 0.92f, 1f, 1f);
-        CreateMatrixColumnText("Hdr_A", headerRowRect, 0f, 46f, 32f, "[A]", 14f, headerTextColor, safeFont);
-        CreateMatrixColumnText("Hdr_B", headerRowRect, 46f, 46f, 32f, "[B]", 14f, headerTextColor, safeFont);
-        CreateMatrixColumnText("Hdr_Target", headerRowRect, 92f, 92f, 32f, "[Target]", 14f, headerTextColor, safeFont);
-        CreateMatrixColumnText("Hdr_Measured", headerRowRect, 184f, 86f, 32f, "[Uji Y]", 14f, headerTextColor, safeFont);
-        CreateMatrixColumnText("Hdr_Status", headerRowRect, 270f, 162f, 32f, "[Status]", 14f, headerTextColor, safeFont);
+        CreateMatrixColumnText("Hdr_A", headerRowRect, 0f, 46f, 28f, "[A]", 13.5f, headerTextColor, safeFont);
+        CreateMatrixColumnText("Hdr_B", headerRowRect, 46f, 46f, 28f, "[B]", 13.5f, headerTextColor, safeFont);
+        CreateMatrixColumnText("Hdr_Target", headerRowRect, 92f, 92f, 28f, "[Target]", 13.5f, headerTextColor, safeFont);
+        CreateMatrixColumnText("Hdr_Measured", headerRowRect, 184f, 86f, 28f, "[Uji Y]", 13.5f, headerTextColor, safeFont);
+        CreateMatrixColumnText("Hdr_Status", headerRowRect, 270f, 162f, 28f, "[Status]", 13.5f, headerTextColor, safeFont);
 
         // 4 Baris data kombinasi input AB: 00, 01, 10, 11
         for (int i = 0; i < TruthTableRowCount; i++)
         {
-            float rowY = -146f - (i * 48f);
-            RectTransform rowRect = CreateMatrixRowContainer($"Row_Data_{i}", panelRect, rowY, 44f, RowIdleBgColor);
+            float rowY = -173f - (i * 40f);
+            RectTransform rowRect = CreateMatrixRowContainer($"Row_Data_{i}", truthTabRect, rowY, 36f, RowIdleBgColor);
             matrixRowBackgrounds[i] = rowRect.GetComponent<Image>();
 
             string bitA = (i == 2 || i == 3) ? "1" : "0";
             string bitB = (i == 1 || i == 3) ? "1" : "0";
 
-            CreateMatrixColumnText($"Col_A_{i}", rowRect, 0f, 46f, 44f, bitA, 16f, Color.white, safeFont);
-            CreateMatrixColumnText($"Col_B_{i}", rowRect, 46f, 46f, 44f, bitB, 16f, Color.white, safeFont);
-            matrixRowTargetTexts[i] = CreateMatrixColumnText($"Col_Target_{i}", rowRect, 92f, 92f, 44f, "-", 15f, MatrixBrightCyanColor, safeFont);
-            matrixRowMeasuredTexts[i] = CreateMatrixColumnText($"Col_Measured_{i}", rowRect, 184f, 86f, 44f, "-", 16f, Color.white, safeFont);
-            matrixRowStatusTexts[i] = CreateMatrixColumnText($"Col_Status_{i}", rowRect, 270f, 162f, 44f, "-", 14f, Color.white, safeFont);
+            CreateMatrixColumnText($"Col_A_{i}", rowRect, 0f, 46f, 36f, bitA, 15.5f, Color.white, safeFont);
+            CreateMatrixColumnText($"Col_B_{i}", rowRect, 46f, 46f, 36f, bitB, 15.5f, Color.white, safeFont);
+            matrixRowTargetTexts[i] = CreateMatrixColumnText($"Col_Target_{i}", rowRect, 92f, 92f, 36f, "-", 14.5f, MatrixBrightCyanColor, safeFont);
+            matrixRowMeasuredTexts[i] = CreateMatrixColumnText($"Col_Measured_{i}", rowRect, 184f, 86f, 36f, "-", 15.5f, Color.white, safeFont);
+            matrixRowStatusTexts[i] = CreateMatrixColumnText($"Col_Status_{i}", rowRect, 270f, 162f, 36f, "-", 13.5f, Color.white, safeFont);
         }
 
-        // Baris footer rating bintang efisiensi & jumlah uji
-        RectTransform starRowRect = CreateMatrixRowContainer("Row_StarMastery", panelRect, -342f, 32f, MatrixHeaderBgColor);
-        txtStarMastery = CreateMatrixText("Txt_StarMastery", starRowRect, new Vector2(10f, -2f), new Vector2(412f, 28f),
+        // Kontainer Tab 1: Osiloskop Sinyal Digital Real-Time [A(t) | B(t) | Y(t)] pada slot konten yang sama
+        CreateWaveformMonitorUI(panelRect, safeFont);
+
+        // Kontainer Footer: Rating Bintang + Tombol Petunjuk 3 Tingkat + Tombol Rapor CP
+        scannerFooterGroupObj = new GameObject("Group_ScannerFooter", typeof(RectTransform));
+        scannerFooterGroupObj.transform.SetParent(panelRect, false);
+        RectTransform footerGroupRect = scannerFooterGroupObj.GetComponent<RectTransform>();
+        footerGroupRect.anchorMin = new Vector2(0f, 1f);
+        footerGroupRect.anchorMax = new Vector2(0f, 1f);
+        footerGroupRect.pivot = new Vector2(0f, 1f);
+        footerGroupRect.anchoredPosition = Vector2.zero;
+        footerGroupRect.sizeDelta = new Vector2(ScannerPanelWidth, ScannerExpandedHeight);
+
+        RectTransform starRowRect = CreateMatrixRowContainer("Row_StarMastery", footerGroupRect, -336f, 30f, MatrixHeaderBgColor);
+        txtStarMastery = CreateMatrixText("Txt_StarMastery", starRowRect, new Vector2(10f, -2f), new Vector2(412f, 26f),
             "Bintang Level: [...] | Total: 0/21 | Uji ke-0", 13f, TextAlignmentOptions.Left, Color.white, safeFont);
         txtStarMastery.enableAutoSizing = true;
         txtStarMastery.fontSizeMin = 10f;
         txtStarMastery.fontSizeMax = 13.5f;
 
-        // Tombol Petunjuk Pedagogis 3 Tingkat (Tier 1..3) & Tombol Rapor CP
-        CreateScaffoldingHintButton(panelRect, safeFont);
-        CreateCompetencyReportButton(panelRect, safeFont);
-
-        // Osiloskop Sinyal Digital Real-Time [A(t) | B(t) | Y(t)]
-        CreateWaveformMonitorUI(panelRect, safeFont);
+        CreateScaffoldingHintButton(footerGroupRect, safeFont);
+        CreateCompetencyReportButton(footerGroupRect, safeFont);
 
         // Modal Rapor Kompetensi Informatika Fase E (default tersembunyi)
         InitializeCompetencyReportUI(targetCanvas.transform, safeFont);
+
+        isOscilloscopeTabActive = false;
+        isScannerHudCollapsed = false;
+        ApplyScannerHudLayoutState();
 
         RefreshTruthTableTargets();
         ResetTruthTableScanResults();
@@ -573,6 +885,225 @@ public class LevelAndUIManager : MonoBehaviour
         UpdateHintButtonUI();
     }
 
+    private void CreateScannerTabBar(RectTransform panelRect, TMP_FontAsset fontAsset)
+    {
+        tabTruthTableButton = CreateScannerTabButton(
+            "Btn_TabTruthTable", panelRect, new Vector2(14f, -107f), new Vector2(160f, 28f),
+            "Tabel", fontAsset, SelectTruthTableTab, out tabTruthTableBackground, out txtTabTruthTableLabel);
+
+        tabOscilloscopeButton = CreateScannerTabButton(
+            "Btn_TabOscilloscope", panelRect, new Vector2(180f, -107f), new Vector2(160f, 28f),
+            "Osiloskop", fontAsset, SelectOscilloscopeTab, out tabOscilloscopeBackground, out txtTabOscilloscopeLabel);
+
+        collapseHudButton = CreateScannerTabButton(
+            "Btn_ToggleCollapseHUD", panelRect, new Vector2(346f, -107f), new Vector2(100f, 28f),
+            "Lipat", fontAsset, ToggleCollapseScannerHud, out collapseHudBackground, out txtCollapseHudLabel);
+        collapseHudButtonRect = collapseHudButton.GetComponent<RectTransform>();
+    }
+
+    private static Button CreateScannerTabButton(
+        string objName,
+        RectTransform parent,
+        Vector2 anchoredPos,
+        Vector2 size,
+        string labelText,
+        TMP_FontAsset fontAsset,
+        UnityEngine.Events.UnityAction onClickHandler,
+        out Image bgImage,
+        out TMP_Text labelTmp)
+    {
+        GameObject btnObj = new GameObject(objName, typeof(RectTransform), typeof(Image), typeof(Button));
+        btnObj.transform.SetParent(parent, false);
+
+        RectTransform rect = btnObj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = anchoredPos;
+        rect.sizeDelta = size;
+
+        bgImage = btnObj.GetComponent<Image>();
+        bgImage.color = TabInactiveBgColor;
+        bgImage.raycastTarget = true;
+
+        Button btn = btnObj.GetComponent<Button>();
+        btn.targetGraphic = bgImage;
+        btn.colors = SciFiButtonColorBlock;
+        btn.onClick.AddListener(onClickHandler);
+
+        labelTmp = CreateMatrixText($"Txt_{objName}", rect, Vector2.zero, size,
+            labelText, 12.5f, TextAlignmentOptions.Center, TabInactiveTextColor, fontAsset);
+        labelTmp.enableAutoSizing = true;
+        labelTmp.fontSizeMin = 10f;
+        labelTmp.fontSizeMax = 13f;
+        RectTransform labelRect = labelTmp.rectTransform;
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.pivot = new Vector2(0.5f, 0.5f);
+        labelRect.offsetMin = new Vector2(4f, 0f);
+        labelRect.offsetMax = new Vector2(-4f, 0f);
+
+        return btn;
+    }
+
+    private void SelectTruthTableTab()
+    {
+        if (!isOscilloscopeTabActive && !isScannerHudCollapsed)
+        {
+            return;
+        }
+
+        isOscilloscopeTabActive = false;
+        isScannerHudCollapsed = false;
+        PlaySfx(clipToggleInput);
+        ApplyScannerHudLayoutState();
+    }
+
+    private void SelectOscilloscopeTab()
+    {
+        if (isOscilloscopeTabActive && !isScannerHudCollapsed)
+        {
+            return;
+        }
+
+        isOscilloscopeTabActive = true;
+        isScannerHudCollapsed = false;
+        PlaySfx(clipToggleInput);
+        ApplyScannerHudLayoutState();
+        RefreshWaveformVisuals();
+        UpdateWaveformChannelLabels(lastSampledWaveA, lastSampledWaveB, lastSampledWaveY);
+    }
+
+    private void ToggleCollapseScannerHud()
+    {
+        isScannerHudCollapsed = !isScannerHudCollapsed;
+        PlaySfx(clipToggleInput);
+        ApplyScannerHudLayoutState();
+        if (!isScannerHudCollapsed && isOscilloscopeTabActive)
+        {
+            RefreshWaveformVisuals();
+            UpdateWaveformChannelLabels(lastSampledWaveA, lastSampledWaveB, lastSampledWaveY);
+        }
+    }
+
+    /// <summary>
+    /// Membuka otomatis panel yang sedang terlipat dan memindahkannya ke tab Tabel Kebenaran
+    /// saat proses verifikasi 4 baris dimulai agar animasi pemindaian selalu terlihat jelas.
+    /// </summary>
+    private void EnsureTruthTableVisibleForVerification()
+    {
+        if (!isScannerHudCollapsed && !isOscilloscopeTabActive)
+        {
+            return;
+        }
+
+        isScannerHudCollapsed = false;
+        isOscilloscopeTabActive = false;
+        ApplyScannerHudLayoutState();
+    }
+
+    private void ApplyScannerHudLayoutState()
+    {
+        if (scannerPanelRect != null)
+        {
+            scannerPanelRect.sizeDelta = new Vector2(
+                ScannerPanelWidth,
+                isScannerHudCollapsed ? ScannerCollapsedHeight : ScannerExpandedHeight);
+        }
+
+        if (scannerDividerObj != null)
+        {
+            scannerDividerObj.SetActive(!isScannerHudCollapsed);
+        }
+
+        if (tabTruthTableButton != null)
+        {
+            tabTruthTableButton.gameObject.SetActive(!isScannerHudCollapsed);
+        }
+
+        if (tabOscilloscopeButton != null)
+        {
+            tabOscilloscopeButton.gameObject.SetActive(!isScannerHudCollapsed);
+        }
+
+        if (truthTableTabContentObj != null)
+        {
+            truthTableTabContentObj.SetActive(!isScannerHudCollapsed && !isOscilloscopeTabActive);
+        }
+
+        if (waveformMonitorPanelObj != null)
+        {
+            waveformMonitorPanelObj.SetActive(!isScannerHudCollapsed && isOscilloscopeTabActive);
+        }
+
+        if (scannerFooterGroupObj != null)
+        {
+            scannerFooterGroupObj.SetActive(!isScannerHudCollapsed);
+        }
+
+        if (scannerBadgeRect != null)
+        {
+            scannerBadgeRect.sizeDelta = isScannerHudCollapsed
+                ? new Vector2(236f, 22f)
+                : new Vector2(308f, 22f);
+        }
+
+        if (audioToggleRect != null)
+        {
+            audioToggleRect.anchoredPosition = isScannerHudCollapsed
+                ? new Vector2(254f, -8f)
+                : new Vector2(328f, -8f);
+            audioToggleRect.sizeDelta = isScannerHudCollapsed
+                ? new Vector2(104f, 24f)
+                : new Vector2(118f, 24f);
+        }
+
+        if (collapseHudButtonRect != null)
+        {
+            collapseHudButtonRect.anchoredPosition = isScannerHudCollapsed
+                ? new Vector2(364f, -8f)
+                : new Vector2(346f, -107f);
+            collapseHudButtonRect.sizeDelta = isScannerHudCollapsed
+                ? new Vector2(82f, 24f)
+                : new Vector2(100f, 28f);
+        }
+
+        if (txtCollapseHudLabel != null)
+        {
+            txtCollapseHudLabel.text = isScannerHudCollapsed ? "Buka" : "Lipat";
+            txtCollapseHudLabel.color = isScannerHudCollapsed
+                ? CollapseBtnCollapsedTextColor
+                : CollapseBtnExpandedTextColor;
+        }
+
+        if (collapseHudBackground != null)
+        {
+            collapseHudBackground.color = isScannerHudCollapsed
+                ? CollapseBtnCollapsedBgColor
+                : CollapseBtnExpandedBgColor;
+        }
+
+        if (tabTruthTableBackground != null)
+        {
+            tabTruthTableBackground.color = !isOscilloscopeTabActive ? TabActiveBgColor : TabInactiveBgColor;
+        }
+
+        if (txtTabTruthTableLabel != null)
+        {
+            txtTabTruthTableLabel.color = !isOscilloscopeTabActive ? TabActiveTextColor : TabInactiveTextColor;
+        }
+
+        if (tabOscilloscopeBackground != null)
+        {
+            tabOscilloscopeBackground.color = isOscilloscopeTabActive ? TabActiveBgColor : TabInactiveBgColor;
+        }
+
+        if (txtTabOscilloscopeLabel != null)
+        {
+            txtTabOscilloscopeLabel.color = isOscilloscopeTabActive ? TabActiveTextColor : TabInactiveTextColor;
+        }
+    }
+
     private void CreateWaveformMonitorUI(RectTransform panelRect, TMP_FontAsset fontAsset)
     {
         for (int i = 0; i < WaveformSampleCount; i++)
@@ -580,28 +1111,17 @@ public class LevelAndUIManager : MonoBehaviour
             waveformBarXPositions[i] = 2f + (i * 21f);
         }
 
-        GameObject dividerObj = new GameObject("Divider_Waveform", typeof(RectTransform), typeof(Image));
-        dividerObj.transform.SetParent(panelRect, false);
-        RectTransform divRect = dividerObj.GetComponent<RectTransform>();
-        divRect.anchorMin = new Vector2(0f, 1f);
-        divRect.anchorMax = new Vector2(0f, 1f);
-        divRect.pivot = new Vector2(0f, 1f);
-        divRect.anchoredPosition = new Vector2(14f, -420f);
-        divRect.sizeDelta = new Vector2(432f, 2f);
-        Image divImg = dividerObj.GetComponent<Image>();
-        divImg.color = new Color(0.22f, 0.65f, 0.85f, 0.45f);
-        divImg.raycastTarget = false;
+        RectTransform wavePanelRect = CreateMatrixRowContainer("Panel_WaveformMonitor", panelRect, -141f, 188f, MatrixHeaderBgColor);
+        waveformMonitorPanelObj = wavePanelRect.gameObject;
 
-        RectTransform wavePanelRect = CreateMatrixRowContainer("Panel_WaveformMonitor", panelRect, -426f, 100f, MatrixHeaderBgColor);
+        CreateMatrixText("Txt_WaveformHeader", wavePanelRect, new Vector2(8f, -6f), new Vector2(416f, 20f),
+            "OSILOSKOP SINYAL DIGITAL [A(t) | B(t) | Y(t)]", 12.5f, TextAlignmentOptions.Left, MatrixAccentCyanColor, fontAsset);
 
-        CreateMatrixText("Txt_WaveformHeader", wavePanelRect, new Vector2(8f, -3f), new Vector2(416f, 18f),
-            "OSILOSKOP SINYAL DIGITAL [A(t) | B(t) | Y(t)]", 11.5f, TextAlignmentOptions.Left, MatrixAccentCyanColor, fontAsset);
-
-        CreateWaveformChannelRow("Wave_Channel_A", wavePanelRect, -24f, "A(t): 0", WaveHighAColor, fontAsset,
+        CreateWaveformChannelRow("Wave_Channel_A", wavePanelRect, -32f, "A(t): 0", WaveHighAColor, fontAsset,
             out txtWaveformLabelA, out waveBarRectsA, out waveBarImagesA);
-        CreateWaveformChannelRow("Wave_Channel_B", wavePanelRect, -49f, "B(t): 0", WaveHighBColor, fontAsset,
+        CreateWaveformChannelRow("Wave_Channel_B", wavePanelRect, -82f, "B(t): 0", WaveHighBColor, fontAsset,
             out txtWaveformLabelB, out waveBarRectsB, out waveBarImagesB);
-        CreateWaveformChannelRow("Wave_Channel_Y", wavePanelRect, -74f, "Y(t): -", MatrixBrightGreenColor, fontAsset,
+        CreateWaveformChannelRow("Wave_Channel_Y", wavePanelRect, -132f, "Y(t): -", MatrixBrightGreenColor, fontAsset,
             out txtWaveformLabelY, out waveBarRectsY, out waveBarImagesY);
     }
 
@@ -624,10 +1144,10 @@ public class LevelAndUIManager : MonoBehaviour
         rowRect.anchorMax = new Vector2(0f, 1f);
         rowRect.pivot = new Vector2(0f, 1f);
         rowRect.anchoredPosition = new Vector2(0f, topY);
-        rowRect.sizeDelta = new Vector2(432f, 22f);
+        rowRect.sizeDelta = new Vector2(432f, 44f);
 
-        labelText = CreateMatrixText($"{rowName}_Label", rowRect, new Vector2(8f, -1f), new Vector2(76f, 20f),
-            initialLabel, 12.5f, TextAlignmentOptions.Left, labelColor, fontAsset);
+        labelText = CreateMatrixText($"{rowName}_Label", rowRect, new Vector2(8f, -11f), new Vector2(76f, 22f),
+            initialLabel, 13.5f, TextAlignmentOptions.Left, labelColor, fontAsset);
 
         GameObject trackObj = new GameObject($"{rowName}_Track", typeof(RectTransform), typeof(Image));
         trackObj.transform.SetParent(rowRect, false);
@@ -636,8 +1156,8 @@ public class LevelAndUIManager : MonoBehaviour
         trackRect.anchorMin = new Vector2(0f, 1f);
         trackRect.anchorMax = new Vector2(0f, 1f);
         trackRect.pivot = new Vector2(0f, 1f);
-        trackRect.anchoredPosition = new Vector2(88f, -1f);
-        trackRect.sizeDelta = new Vector2(336f, 20f);
+        trackRect.anchoredPosition = new Vector2(88f, -4f);
+        trackRect.sizeDelta = new Vector2(336f, 36f);
 
         Image trackImg = trackObj.GetComponent<Image>();
         trackImg.color = WaveTrackBgColor;
@@ -655,7 +1175,7 @@ public class LevelAndUIManager : MonoBehaviour
             barRect.anchorMin = Vector2.zero;
             barRect.anchorMax = Vector2.zero;
             barRect.pivot = Vector2.zero;
-            barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 2f);
+            barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 4f);
             barRect.sizeDelta = new Vector2(17f, 3.5f);
 
             Image barImg = barObj.GetComponent<Image>();
@@ -775,20 +1295,20 @@ public class LevelAndUIManager : MonoBehaviour
             int val = samples[i];
             if (val > 0)
             {
-                barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 6f);
-                barRect.sizeDelta = new Vector2(17f, 12f);
+                barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 12f);
+                barRect.sizeDelta = new Vector2(17f, 20f);
                 barImg.color = highColor;
             }
             else if (val == 0)
             {
-                barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 2f);
-                barRect.sizeDelta = new Vector2(17f, 3.5f);
+                barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 4f);
+                barRect.sizeDelta = new Vector2(17f, 5f);
                 barImg.color = lowColor;
             }
             else
             {
-                barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 8.5f);
-                barRect.sizeDelta = new Vector2(17f, 3f);
+                barRect.anchoredPosition = new Vector2(waveformBarXPositions[i], 16f);
+                barRect.sizeDelta = new Vector2(17f, 4f);
                 barImg.color = WaveUntrackedYColor;
             }
         }
@@ -840,7 +1360,7 @@ public class LevelAndUIManager : MonoBehaviour
         rect.anchorMin = new Vector2(0f, 1f);
         rect.anchorMax = new Vector2(0f, 1f);
         rect.pivot = new Vector2(0f, 1f);
-        rect.anchoredPosition = new Vector2(14f, -380f);
+        rect.anchoredPosition = new Vector2(14f, -372f);
         rect.sizeDelta = new Vector2(292f, 34f);
 
         hintButtonBackground = btnObj.GetComponent<Image>();
@@ -872,7 +1392,7 @@ public class LevelAndUIManager : MonoBehaviour
         rect.anchorMin = new Vector2(0f, 1f);
         rect.anchorMax = new Vector2(0f, 1f);
         rect.pivot = new Vector2(0f, 1f);
-        rect.anchoredPosition = new Vector2(314f, -380f);
+        rect.anchoredPosition = new Vector2(314f, -372f);
         rect.sizeDelta = new Vector2(132f, 34f);
 
         Image btnBg = btnObj.GetComponent<Image>();
@@ -1423,6 +1943,7 @@ public class LevelAndUIManager : MonoBehaviour
         btnObj.transform.SetParent(parent, false);
 
         RectTransform rect = btnObj.GetComponent<RectTransform>();
+        audioToggleRect = rect;
         rect.anchorMin = new Vector2(0f, 1f);
         rect.anchorMax = new Vector2(0f, 1f);
         rect.pivot = new Vector2(0f, 1f);
@@ -2472,7 +2993,7 @@ public class LevelAndUIManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Memperbarui teks tombol Toggle Input A dan Input B secara real-time sesuai nilai output saat ini.
+    /// Memperbarui teks dan gaya sci-fi tombol Toggle Input A dan Input B secara real-time sesuai nilai 0/1 saat ini.
     /// </summary>
     private void UpdateInputToggleButtonsUI()
     {
@@ -2483,6 +3004,7 @@ public class LevelAndUIManager : MonoBehaviour
             {
                 lastDisplayedInputA = stateA;
                 txtBtnToggleA.text = $"Input A: {stateA}";
+                ApplyInputToggleVisualState(imgBtnInputA, outlineBtnInputA, txtBtnToggleA, stateA > 0);
             }
         }
 
@@ -2493,6 +3015,7 @@ public class LevelAndUIManager : MonoBehaviour
             {
                 lastDisplayedInputB = stateB;
                 txtBtnToggleB.text = $"Input B: {stateB}";
+                ApplyInputToggleVisualState(imgBtnInputB, outlineBtnInputB, txtBtnToggleB, stateB > 0);
             }
         }
     }
@@ -2898,6 +3421,7 @@ public class LevelAndUIManager : MonoBehaviour
     private IEnumerator VerifyTruthTableRoutine()
     {
         isVerifying = true;
+        EnsureTruthTableVisibleForVerification();
 
         if (levels == null || levels.Count == 0)
         {
@@ -3454,4 +3978,3 @@ public class LevelAndUIManager : MonoBehaviour
         return isOverUI;
     }
 }
-
