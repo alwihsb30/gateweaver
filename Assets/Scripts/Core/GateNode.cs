@@ -19,7 +19,7 @@ public enum NodeType
 public class GateNode : MonoBehaviour
 {
     private const int ArcSegmentCount = 20;
-    private const int DataPacketCount = 3;
+    private const int DataPacketCount = 4;
     private const int OutputDioramaVariantCount = 5;
 
     [Header("1. Identitas & Konfigurasi Kartu")]
@@ -325,6 +325,18 @@ public class GateNode : MonoBehaviour
     private float sparkBurstDuration = 0.38f;
     private Color sparkBurstBaseColor = Color.white;
 
+    // v5.0 Tahap 3: Dual-Layer Physical Energy Conduits, Tangent Bolts, & Connection Snap VFX (Zero-GC)
+    private const float SnapSurgeDuration = 0.36f;
+    private readonly Vector3[] bezierPointsCache = new Vector3[ArcSegmentCount];
+    private LineRenderer conduitSheathRenderer;
+    private Material conduitSheathMat;
+    private GateNode lastVisualConnectedTarget;
+    private int lastVisualTargetSlotIndex = -1;
+    private float snapSurgeTimer = 0f;
+    private float portOutFlashTimer = 0f;
+    private float portInAFlashTimer = 0f;
+    private float portInBFlashTimer = 0f;
+
     private static int activeGateNodeCount = 0;
     private static Mesh sharedTorusMesh;
     private static Mesh sharedDiamondSpireMesh;
@@ -342,13 +354,19 @@ public class GateNode : MonoBehaviour
     private static readonly Color StairStepActiveColor = new Color(1.00f, 0.94f, 0.32f, 1f);
     private static readonly Color StairStepTrailColor = new Color(0.18f, 0.92f, 0.85f, 1f);
     private static readonly Color StairStepIdleColor = new Color(0.26f, 0.32f, 0.42f, 1f);
+    private static readonly Color ConduitCoreHighColor = new Color(0.28f, 1.00f, 0.86f, 1f);
+    private static readonly Color ConduitCoreLowColor = new Color(0.84f, 0.30f, 0.14f, 0.95f);
+    private static readonly Color ConduitSheathHighColor = new Color(0.16f, 0.98f, 0.82f, 0.32f);
+    private static readonly Color ConduitSheathLowColor = new Color(0.72f, 0.28f, 0.14f, 0.14f);
+    private static readonly Color SnapSurgeFlashColor = new Color(0.86f, 1.00f, 1.00f, 1f);
+    private static readonly Color SnapSurgeSheathColor = new Color(0.72f, 1.00f, 1.00f, 0.54f);
+    private static readonly Color EnergyBoltHighColor = new Color(0.82f, 1.00f, 0.98f, 1f);
+    private static readonly Color EnergyBoltLowColor = new Color(0.78f, 0.40f, 0.22f, 0.86f);
 
-    private static readonly float[] PacketPhaseOffsets = { 0f, 0.33f, 0.66f };
+    private static readonly float[] PacketPhaseOffsets = { 0f, 0.25f, 0.50f, 0.75f };
 
     private static readonly Color BrightGreenTextColor = new Color(0.2f, 1f, 0.3f, 1f);
     private static readonly Color BrightRedOrangeTextColor = new Color(1f, 0.35f, 0.15f, 1f);
-    private static readonly Color HighPacketColor = new Color(0.15f, 1f, 0.85f, 1f);
-    private static readonly Color LowPacketColor = new Color(0.75f, 0.24f, 0.08f, 1f);
     private static readonly Color HighSocketColor = new Color(0.15f, 1f, 0.65f, 1f);
     private static readonly Color LowSocketColor = new Color(0.65f, 0.18f, 0.1f, 1f);
     private static readonly Color HighTotemCoreColor = new Color(0.10f, 1.00f, 0.82f, 1f);
@@ -417,6 +435,7 @@ public class GateNode : MonoBehaviour
             DetectRisingEdgeAndAnimateShockwave();
             UpdateTapBounceAnimation();
             UpdateSparkBurstPool();
+            UpdatePortSnapFlashTimers();
         }
         else
         {
@@ -428,6 +447,7 @@ public class GateNode : MonoBehaviour
             ResetShockwaveState();
             ResetTapBounceState();
             ResetSparkBurstPool();
+            ResetConnectionSnapState();
         }
 
         RefreshConnectionVisuals(advanceFlowPhase: true);
@@ -476,6 +496,9 @@ public class GateNode : MonoBehaviour
         v5SirenBeamMaterial = null;
         v5StairStepMaterials = null;
         sparkBurstMaterial = null;
+        conduitSheathMat = null;
+        conduitSheathRenderer = null;
+        lastVisualConnectedTarget = null;
         touchHitboxCollider = null;
 
         activeGateNodeCount = Mathf.Max(0, activeGateNodeCount - 1);
@@ -510,13 +533,48 @@ public class GateNode : MonoBehaviour
         lineRenderer.useWorldSpace = true;
         lineRenderer.numCapVertices = 4;
         lineRenderer.numCornerVertices = 4;
-        lineRenderer.widthMultiplier = laserWidth;
+        lineRenderer.widthMultiplier = 0.012f;
         lineRenderer.widthCurve = new AnimationCurve(
-            new Keyframe(0f, 0.5f),
-            new Keyframe(0.5f, 1.8f),
-            new Keyframe(1f, 0.5f)
+            new Keyframe(0f, 0.82f),
+            new Keyframe(0.5f, 1.12f),
+            new Keyframe(1f, 0.82f)
         );
         lineRenderer.enabled = false;
+
+        // Lapisan selubung energi luar transparan (AR_ConduitOuterSheath)
+        if (nodeType != NodeType.OutputActuator)
+        {
+            Transform existingSheath = transform.Find("AR_ConduitOuterSheath");
+            GameObject sheathObj = existingSheath != null
+                ? existingSheath.gameObject
+                : CreateEmptyChild("AR_ConduitOuterSheath", transform, Vector3.zero).gameObject;
+
+            conduitSheathRenderer = sheathObj.GetComponent<LineRenderer>();
+            if (conduitSheathRenderer == null)
+            {
+                conduitSheathRenderer = sheathObj.AddComponent<LineRenderer>();
+            }
+
+            conduitSheathMat = CreateSafeOpenGLMaterial();
+            if (conduitSheathMat != null)
+            {
+                conduitSheathMat.color = Color.white;
+                managedMaterials.Add(conduitSheathMat);
+                conduitSheathRenderer.material = conduitSheathMat;
+            }
+
+            conduitSheathRenderer.positionCount = ArcSegmentCount;
+            conduitSheathRenderer.useWorldSpace = true;
+            conduitSheathRenderer.numCapVertices = 4;
+            conduitSheathRenderer.numCornerVertices = 4;
+            conduitSheathRenderer.widthMultiplier = 0.032f;
+            conduitSheathRenderer.widthCurve = new AnimationCurve(
+                new Keyframe(0f, 0.76f),
+                new Keyframe(0.5f, 1.16f),
+                new Keyframe(1f, 0.76f)
+            );
+            conduitSheathRenderer.enabled = false;
+        }
     }
 
     /// <summary>
@@ -1668,7 +1726,7 @@ public class GateNode : MonoBehaviour
     }
 
     /// <summary>
-    /// Membuat 3 bola paket data 3D dan 2 cincin/node terminal soket 3D secara prosedural
+    /// Membuat 4 paket pulsa energi kristal terarah (zero-GC) dan 2 cincin terminal soket 3D secara prosedural
     /// tanpa komponen Collider agar tidak membebani sistem fisika di perangkat Android.
     /// </summary>
     private void InitializeArcAndTerminalVisuals()
@@ -1681,23 +1739,25 @@ public class GateNode : MonoBehaviour
         dataPacketMaterial = CreateSafeOpenGLMaterial();
         socketMaterial = CreateSafeOpenGLMaterial();
 
+        Mesh boltMesh = GetSharedDiamondSpireMesh();
         dataPacketObjs = new GameObject[DataPacketCount];
         for (int i = 0; i < DataPacketCount; i++)
         {
-            GameObject packet = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            packet.name = $"DataPacket_{i}";
-            packet.transform.SetParent(transform, false);
-            packet.transform.localScale = Vector3.one * packetLowScale;
-            RemoveCollider(packet);
+            GameObject boltRoot = CreateEmptyChild($"EnergyBolt_{i}", transform, Vector3.zero).gameObject;
+            boltRoot.transform.localScale = Vector3.one * packetLowScale;
 
-            Renderer packetRenderer = packet.GetComponent<Renderer>();
-            if (packetRenderer != null && dataPacketMaterial != null)
-            {
-                packetRenderer.sharedMaterial = dataPacketMaterial;
-            }
+            // Putar kristal 90 derajat pada sumbu X agar ujung tajam (+Y mesh) mengarah persis ke +Z (tangen kurva)
+            CreateProceduralMeshPart(
+                "BoltCrystal",
+                boltMesh,
+                boltRoot.transform,
+                Vector3.zero,
+                new Vector3(90f, 0f, 0f),
+                new Vector3(0.46f, 1.65f, 0.46f),
+                dataPacketMaterial);
 
-            packet.SetActive(false);
-            dataPacketObjs[i] = packet;
+            boltRoot.SetActive(false);
+            dataPacketObjs[i] = boltRoot;
         }
 
         sourceSocketObj = CreateSocketRingObject("TerminalSocket_Start");
@@ -1732,10 +1792,17 @@ public class GateNode : MonoBehaviour
     }
 
     /// <summary>
-    /// Menghitung titik pangkal P0, titik kontrol puncak P1 sepanjang normal rata-rata kartu,
-    /// dan titik ujung P2 untuk kurva Quadratic Bezier 3D.
+    /// Menghitung titik pangkal P0, titik kontrol puncak P1 adaptif di atas model Quaternius,
+    /// titik ujung P2 pada port fisik, indeks slot tujuan, dan normal permukaan.
     /// </summary>
-    private bool TryGetBezierControlPoints(out Vector3 p0, out Vector3 p1, out Vector3 p2, out Vector3 sourceNormal, out Vector3 targetNormal)
+    private bool TryGetBezierControlPoints(
+        out Vector3 p0,
+        out Vector3 p1,
+        out Vector3 p2,
+        out Vector3 sourceNormal,
+        out Vector3 targetNormal,
+        out Vector3 avgNormal,
+        out int targetSlotIndex)
     {
         bool canDraw = isTracked
                        && nodeType != NodeType.OutputActuator
@@ -1749,6 +1816,8 @@ public class GateNode : MonoBehaviour
             p2 = Vector3.zero;
             sourceNormal = Vector3.up;
             targetNormal = Vector3.up;
+            avgNormal = Vector3.up;
+            targetSlotIndex = -1;
             return false;
         }
 
@@ -1756,7 +1825,7 @@ public class GateNode : MonoBehaviour
         targetNormal = connectedTarget.transform.up.sqrMagnitude > 0.0001f ? connectedTarget.transform.up.normalized : Vector3.up;
 
         // Tentukan indeks slot port tujuan (0 atau 1) secara konsisten sesuai urutan input pada targetNode
-        int targetSlotIndex = connectedTarget.connectedInputs != null ? connectedTarget.connectedInputs.IndexOf(this) : 0;
+        targetSlotIndex = connectedTarget.connectedInputs != null ? connectedTarget.connectedInputs.IndexOf(this) : 0;
         if (targetSlotIndex < 0)
         {
             targetSlotIndex = 0;
@@ -1766,11 +1835,12 @@ public class GateNode : MonoBehaviour
         p2 = connectedTarget.GetInputPortWorldPosition(targetSlotIndex);
 
         Vector3 combinedNormal = sourceNormal + targetNormal;
-        Vector3 avgNormal = combinedNormal.sqrMagnitude > 0.0001f ? combinedNormal.normalized : sourceNormal;
+        avgNormal = combinedNormal.sqrMagnitude > 0.0001f ? combinedNormal.normalized : sourceNormal;
 
+        // Ketinggian puncak lengkungan kurva adaptif 0.22f..0.34f di atas port agar melengkung anggun di atas mesin 3D
         float distance = Vector3.Distance(p0, p2);
-        float arcHeight = Mathf.Clamp(distance * arcHeightDistanceFactor, minArcHeight, maxArcHeight);
-        p1 = ((p0 + p2) * 0.5f) + (avgNormal * arcHeight);
+        float targetApexHeight = Mathf.Lerp(0.22f, 0.34f, Mathf.Clamp01((distance - 0.35f) / 1.45f));
+        p1 = ((p0 + p2) * 0.5f) + (avgNormal * (targetApexHeight * 2f));
 
         return true;
     }
@@ -1783,74 +1853,136 @@ public class GateNode : MonoBehaviour
                + (t * t * p2);
     }
 
+    private static Vector3 EvaluateQuadraticBezierTangent(Vector3 p0, Vector3 p1, Vector3 p2, float t)
+    {
+        return (2f * (1f - t) * (p1 - p0)) + (2f * t * (p2 - p1));
+    }
+
     /// <summary>
-    /// Menggambar kurva Quadratic Bezier 20 segmen pada LineRenderer, menyinkronkan posisi 3 bola paket data,
-    /// dan memosisikan kedua cincin soket terminal di P0 & P2.
+    /// Menggambar saluran energi berlapis (Inti Plasma + Selubung Transparan) memakai buffer Bezier 20 titik zero-GC,
+    /// menggerakkan 4 energy bolt terarah sepanjang tangen kurva, serta memicu efek snap lock VFX saat koneksi baru terbentuk.
     /// </summary>
     private void RefreshConnectionVisuals(bool advanceFlowPhase)
     {
-        if (!TryGetBezierControlPoints(out Vector3 p0, out Vector3 p1, out Vector3 p2, out Vector3 sourceNormal, out Vector3 targetNormal))
+        if (!TryGetBezierControlPoints(
+                out Vector3 p0,
+                out Vector3 p1,
+                out Vector3 p2,
+                out Vector3 sourceNormal,
+                out Vector3 targetNormal,
+                out Vector3 avgNormal,
+                out int targetSlotIndex))
         {
+            ResetConnectionSnapState();
             SetConnectionVisualsActive(false);
             return;
         }
 
-        Color activeLaserColor = currentOutputValue ? highSignalColor : lowSignalColor;
+        // 0. Deteksi koneksi baru / pergantian port (edge-triggered) untuk efek Connection Snap Lock VFX
+        if (connectedTarget != lastVisualConnectedTarget || targetSlotIndex != lastVisualTargetSlotIndex)
+        {
+            lastVisualConnectedTarget = connectedTarget;
+            lastVisualTargetSlotIndex = targetSlotIndex;
+            snapSurgeTimer = SnapSurgeDuration;
+            portOutFlashTimer = SnapSurgeDuration;
+            lastPortOutVisualState = -2;
 
-        // 1. Update kurva Quadratic Bezier 20 titik pada LineRenderer
+            TriggerEnergyBurstAtWorldPoint(p0, SnapSurgeFlashColor, 0.85f);
+            connectedTarget.TriggerInputPortSnapFlash(targetSlotIndex, p2);
+        }
+
+        if (advanceFlowPhase && snapSurgeTimer > 0f)
+        {
+            snapSurgeTimer = Mathf.Max(0f, snapSurgeTimer - Time.deltaTime);
+        }
+
+        float surgeT = snapSurgeTimer > 0f ? Mathf.Clamp01(snapSurgeTimer / SnapSurgeDuration) : 0f;
+        float surgeWidthMultiplier = 1f + (0.65f * surgeT * surgeT);
+        float highCorePulse = currentOutputValue ? (1f + (0.10f * Mathf.Sin(Time.time * 9f))) : 1f;
+
+        // 1. Hitung 20 titik kurva Quadratic Bezier SEKALI ke buffer pra-alokasi zero-GC
+        for (int i = 0; i < ArcSegmentCount; i++)
+        {
+            float t = i / (float)(ArcSegmentCount - 1);
+            bezierPointsCache[i] = EvaluateQuadraticBezier(p0, p1, p2, t);
+        }
+
+        // 1A. Lapisan Inti Plasma (LineRenderer eksisting)
+        Color baseCoreColor = currentOutputValue ? ConduitCoreHighColor : ConduitCoreLowColor;
+        Color activeCoreColor = surgeT > 0f ? Color.Lerp(baseCoreColor, SnapSurgeFlashColor, surgeT * 0.85f) : baseCoreColor;
+        float coreWidth = (currentOutputValue ? (0.015f * highCorePulse) : 0.008f) * surgeWidthMultiplier;
+
         if (lineRenderer != null)
         {
             lineRenderer.enabled = true;
             lineRenderer.positionCount = ArcSegmentCount;
-            lineRenderer.widthMultiplier = laserWidth;
-            lineRenderer.startColor = activeLaserColor;
-            lineRenderer.endColor = activeLaserColor;
-
-            for (int i = 0; i < ArcSegmentCount; i++)
-            {
-                float t = i / (float)(ArcSegmentCount - 1);
-                lineRenderer.SetPosition(i, EvaluateQuadraticBezier(p0, p1, p2, t));
-            }
+            lineRenderer.widthMultiplier = coreWidth;
+            lineRenderer.startColor = activeCoreColor;
+            lineRenderer.endColor = activeCoreColor;
+            lineRenderer.SetPositions(bezierPointsCache);
         }
 
-        // 2. Update aliran 3 bola paket data sepanjang kurva P0 -> P1 -> P2
+        // 1B. Lapisan Selubung Energi Transparan (AR_ConduitOuterSheath ~2.7x lebih tebal)
+        Color baseSheathColor = currentOutputValue ? ConduitSheathHighColor : ConduitSheathLowColor;
+        Color activeSheathColor = surgeT > 0f ? Color.Lerp(baseSheathColor, SnapSurgeSheathColor, surgeT * 0.90f) : baseSheathColor;
+        float sheathWidth = (currentOutputValue ? (0.042f * highCorePulse) : 0.022f) * surgeWidthMultiplier;
+
+        if (conduitSheathRenderer != null)
+        {
+            conduitSheathRenderer.enabled = true;
+            conduitSheathRenderer.positionCount = ArcSegmentCount;
+            conduitSheathRenderer.widthMultiplier = sheathWidth;
+            conduitSheathRenderer.startColor = activeSheathColor;
+            conduitSheathRenderer.endColor = activeSheathColor;
+            conduitSheathRenderer.SetPositions(bezierPointsCache);
+        }
+
+        // 2. Update aliran 4 paket pulsa energi kristal yang sejajar dengan tangen kurva Bezier
         if (advanceFlowPhase)
         {
-            float flowSpeed = currentOutputValue ? packetHighSpeed : packetLowSpeed;
-            packetFlowPhase = Mathf.Repeat(packetFlowPhase + flowSpeed * Time.deltaTime, 1f);
+            float flowSpeed = currentOutputValue ? Mathf.Max(1.45f, packetHighSpeed) : Mathf.Min(0.35f, packetLowSpeed);
+            packetFlowPhase = Mathf.Repeat(packetFlowPhase + (flowSpeed * Time.deltaTime), 1f);
         }
 
-        float packetScale = currentOutputValue ? packetHighScale : packetLowScale;
-        Color packetColor = currentOutputValue ? HighPacketColor : LowPacketColor;
+        float boltScale = (currentOutputValue ? 0.048f : 0.030f) * (1f + (0.28f * surgeT));
+        Color baseBoltColor = currentOutputValue ? EnergyBoltHighColor : EnergyBoltLowColor;
+        Color boltColor = surgeT > 0f ? Color.Lerp(baseBoltColor, SnapSurgeFlashColor, surgeT) : baseBoltColor;
 
         if (dataPacketMaterial != null)
         {
-            dataPacketMaterial.color = packetColor;
+            dataPacketMaterial.color = boltColor;
         }
 
         if (dataPacketObjs != null)
         {
             for (int i = 0; i < dataPacketObjs.Length; i++)
             {
-                GameObject packet = dataPacketObjs[i];
-                if (packet == null)
+                GameObject bolt = dataPacketObjs[i];
+                if (bolt == null)
                 {
                     continue;
                 }
 
-                if (!packet.activeSelf)
+                if (!bolt.activeSelf)
                 {
-                    packet.SetActive(true);
+                    bolt.SetActive(true);
                 }
 
                 float phase = Mathf.Repeat(packetFlowPhase + PacketPhaseOffsets[i], 1f);
-                packet.transform.position = EvaluateQuadraticBezier(p0, p1, p2, phase);
-                packet.transform.localScale = Vector3.one * packetScale;
+                bolt.transform.position = EvaluateQuadraticBezier(p0, p1, p2, phase);
+
+                Vector3 tangent = EvaluateQuadraticBezierTangent(p0, p1, p2, phase);
+                if (tangent.sqrMagnitude > 0.00001f)
+                {
+                    bolt.transform.rotation = Quaternion.LookRotation(tangent, avgNormal);
+                }
+
+                bolt.transform.localScale = Vector3.one * boltScale;
             }
         }
 
-        // 3. Update cincin/node terminal soket 3D di titik P0 dan P2 dengan efek pulsing saat HIGH (1)
-        float pulseMultiplier = currentOutputValue ? (1f + 0.18f * Mathf.Sin(Time.time * 6f)) : 1f;
+        // 3. Update cincin/node terminal soket 3D di titik P0 dan P2 dengan kilatan surge saat snap
+        float pulseMultiplier = (currentOutputValue ? (1f + 0.18f * Mathf.Sin(Time.time * 6f)) : 1f) * (1f + (0.35f * surgeT));
         Vector3 socketScale = new Vector3(
             socketRingDiameter * pulseMultiplier,
             socketRingThickness,
@@ -1859,7 +1991,8 @@ public class GateNode : MonoBehaviour
 
         if (socketMaterial != null)
         {
-            socketMaterial.color = currentOutputValue ? HighSocketColor : LowSocketColor;
+            Color baseSocket = currentOutputValue ? HighSocketColor : LowSocketColor;
+            socketMaterial.color = surgeT > 0f ? Color.Lerp(baseSocket, SnapSurgeFlashColor, surgeT) : baseSocket;
         }
 
         if (sourceSocketObj != null)
@@ -1892,6 +2025,11 @@ public class GateNode : MonoBehaviour
         if (lineRenderer != null && lineRenderer.enabled != active)
         {
             lineRenderer.enabled = active;
+        }
+
+        if (conduitSheathRenderer != null && conduitSheathRenderer.enabled != active)
+        {
+            conduitSheathRenderer.enabled = active;
         }
 
         if (dataPacketObjs != null)
@@ -2070,6 +2208,7 @@ public class GateNode : MonoBehaviour
         ResetShockwaveState();
         ResetTapBounceState();
         ResetSparkBurstPool();
+        ResetConnectionSnapState();
         UpdateVisuals();
     }
 
@@ -2916,7 +3055,7 @@ public class GateNode : MonoBehaviour
 
     private void UpdatePortVisuals()
     {
-        if (portInAMaterial != null)
+        if (portInAMaterial != null && portInAFlashTimer <= 0f)
         {
             int stateInA = isInputAConnected ? (inputAValue ? 1 : 0) : -1;
             if (stateInA != lastPortInAVisualState)
@@ -2926,7 +3065,7 @@ public class GateNode : MonoBehaviour
             }
         }
 
-        if (portInBMaterial != null)
+        if (portInBMaterial != null && portInBFlashTimer <= 0f)
         {
             int stateInB = isInputBConnected ? (inputBValue ? 1 : 0) : -1;
             if (stateInB != lastPortInBVisualState)
@@ -2936,7 +3075,7 @@ public class GateNode : MonoBehaviour
             }
         }
 
-        if (portOutMaterial != null)
+        if (portOutMaterial != null && portOutFlashTimer <= 0f)
         {
             int stateOut = currentOutputValue ? 1 : 0;
             if (stateOut != lastPortOutVisualState)
@@ -2945,6 +3084,78 @@ public class GateNode : MonoBehaviour
                 portOutMaterial.color = stateOut > 0 ? HighSocketColor : LowSocketColor;
             }
         }
+    }
+
+    /// <summary>
+    /// Memicu kilatan sesaat dan percikan 3D pada port input (Port_InA/Port_InB) kartu tujuan saat kabel menancap (snap).
+    /// </summary>
+    public void TriggerInputPortSnapFlash(int slotIndex, Vector3 worldPortPos)
+    {
+        if (!isTracked)
+        {
+            return;
+        }
+
+        if (slotIndex == 1)
+        {
+            portInBFlashTimer = SnapSurgeDuration;
+            lastPortInBVisualState = -2;
+        }
+        else
+        {
+            portInAFlashTimer = SnapSurgeDuration;
+            lastPortInAVisualState = -2;
+        }
+
+        TriggerEnergyBurstAtWorldPoint(worldPortPos, SnapSurgeFlashColor, 0.85f);
+    }
+
+    private void UpdatePortSnapFlashTimers()
+    {
+        float dt = Time.deltaTime;
+
+        if (portOutFlashTimer > 0f)
+        {
+            portOutFlashTimer = Mathf.Max(0f, portOutFlashTimer - dt);
+            if (portOutMaterial != null)
+            {
+                float t = portOutFlashTimer / SnapSurgeDuration;
+                Color baseCol = currentOutputValue ? HighSocketColor : LowSocketColor;
+                portOutMaterial.color = Color.Lerp(baseCol, SnapSurgeFlashColor, t);
+            }
+        }
+
+        if (portInAFlashTimer > 0f)
+        {
+            portInAFlashTimer = Mathf.Max(0f, portInAFlashTimer - dt);
+            if (portInAMaterial != null)
+            {
+                float t = portInAFlashTimer / SnapSurgeDuration;
+                Color baseCol = isInputAConnected ? (inputAValue ? PinHighColor : PinLowColor) : PinUnconnectedColor;
+                portInAMaterial.color = Color.Lerp(baseCol, SnapSurgeFlashColor, t);
+            }
+        }
+
+        if (portInBFlashTimer > 0f)
+        {
+            portInBFlashTimer = Mathf.Max(0f, portInBFlashTimer - dt);
+            if (portInBMaterial != null)
+            {
+                float t = portInBFlashTimer / SnapSurgeDuration;
+                Color baseCol = isInputBConnected ? (inputBValue ? PinHighColor : PinLowColor) : PinUnconnectedColor;
+                portInBMaterial.color = Color.Lerp(baseCol, SnapSurgeFlashColor, t);
+            }
+        }
+    }
+
+    private void ResetConnectionSnapState()
+    {
+        lastVisualConnectedTarget = null;
+        lastVisualTargetSlotIndex = -1;
+        snapSurgeTimer = 0f;
+        portOutFlashTimer = 0f;
+        portInAFlashTimer = 0f;
+        portInBFlashTimer = 0f;
     }
 
     private static GameObject LoadV5ModelPrefab(string modelName)
@@ -3916,12 +4127,32 @@ public class GateNode : MonoBehaviour
         }
 
         LaunchSparkBurstInternal(
+            new Vector3(0f, 0.22f, 0f),
             burstColor,
             isCelebration: false,
             duration: 0.38f,
-            originY: 0.22f,
             speedScale: Mathf.Max(0.25f, speedScale),
             baseFragScale: 0.032f);
+    }
+
+    /// <summary>
+    /// Melontarkan percikan energi 3D langsung dari koordinat world space tertentu (mis. titik port tancap p0/p2 saat snap) secara zero-GC.
+    /// </summary>
+    public void TriggerEnergyBurstAtWorldPoint(Vector3 worldPos, Color burstColor, float speedScale = 1f)
+    {
+        if (!isTracked || sparkPoolRootObj == null || sparkTransforms == null)
+        {
+            return;
+        }
+
+        Vector3 localOrigin = transform.InverseTransformPoint(worldPos);
+        LaunchSparkBurstInternal(
+            localOrigin,
+            burstColor,
+            isCelebration: false,
+            duration: 0.34f,
+            speedScale: Mathf.Max(0.25f, speedScale),
+            baseFragScale: 0.028f);
     }
 
     /// <summary>
@@ -3935,19 +4166,19 @@ public class GateNode : MonoBehaviour
         }
 
         LaunchSparkBurstInternal(
+            new Vector3(0f, 0.30f, 0f),
             VictoryBurstGoldColor,
             isCelebration: true,
             duration: 0.62f,
-            originY: 0.30f,
             speedScale: 1.65f,
             baseFragScale: 0.048f);
     }
 
     private void LaunchSparkBurstInternal(
+        Vector3 localOrigin,
         Color baseColor,
         bool isCelebration,
         float duration,
-        float originY,
         float speedScale,
         float baseFragScale)
     {
@@ -3966,7 +4197,7 @@ public class GateNode : MonoBehaviour
             float radialSpeed = (0.48f + ((i % 3) * 0.16f)) * speedScale;
             float upwardSpeed = ((isCelebration ? 0.85f : 0.56f) + ((i % 4) * 0.12f)) * speedScale;
 
-            sparkLocalPositions[i] = new Vector3(0f, originY, 0f);
+            sparkLocalPositions[i] = localOrigin;
             sparkVelocities[i] = new Vector3(
                 Mathf.Cos(angle) * radialSpeed,
                 upwardSpeed,
