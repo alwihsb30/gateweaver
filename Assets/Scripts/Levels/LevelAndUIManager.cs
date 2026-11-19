@@ -2,8 +2,12 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using TMPro;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 [Serializable]
 public class LevelScenario
@@ -184,6 +188,13 @@ public class LevelAndUIManager : MonoBehaviour
     private int lastQuotaMaxCount = -1;
     private int lastQuotaSandboxMode = -1;
 
+    // Interaksi Sentuh 3D AR Raycast (New Input System + Zero-GC, v4.0)
+    private const float TouchRaycastMaxDistance = 100f;
+    private Camera cachedMainCamera;
+    private readonly RaycastHit[] touchRaycastHits = new RaycastHit[8];
+    private readonly List<RaycastResult> uiRaycastResults = new List<RaycastResult>(8);
+    private PointerEventData cachedPointerEventData;
+
     // Synthesizer Audio Prosedural & Pelacak Event Audio/Haptik
     private AudioSource sfxAudioSource;
     private AudioClip clipToggleInput;
@@ -258,6 +269,7 @@ public class LevelAndUIManager : MonoBehaviour
 
     private void Update()
     {
+        Handle3DCardTouchRaycast();
         UpdateQuotaStatusUI();
         UpdateInputToggleButtonsUI();
         UpdateTruthTableMatrixLive();
@@ -304,6 +316,10 @@ public class LevelAndUIManager : MonoBehaviour
             reportResetButton.onClick.RemoveListener(OnReportResetProgressClicked);
             reportResetButton = null;
         }
+
+        uiRaycastResults.Clear();
+        cachedPointerEventData = null;
+        cachedMainCamera = null;
 
         PlayerPrefs.Save();
         DestroyProceduralAudioClips();
@@ -3240,4 +3256,202 @@ public class LevelAndUIManager : MonoBehaviour
             inputBNode.ToggleInputState();
         }
     }
+
+    /// <summary>
+    /// Mendeteksi sentuhan layar Android maupun klik mouse Editor langsung pada hologram kartu 3D AR
+    /// menggunakan New Input System, proteksi raycast UI 2D, dan Physics.RaycastNonAlloc tanpa alokasi GC.
+    /// </summary>
+    private void Handle3DCardTouchRaycast()
+    {
+        if (!TryGetTapScreenPosition(out Vector2 screenPosition))
+        {
+            return;
+        }
+
+        if (competencyReportPanelObj != null && competencyReportPanelObj.activeSelf)
+        {
+            return;
+        }
+
+        if (IsScreenPointOverUI(screenPosition))
+        {
+            return;
+        }
+
+        Camera mainCam = ResolveMainCamera();
+        if (mainCam == null)
+        {
+            return;
+        }
+
+        Ray touchRay = mainCam.ScreenPointToRay(screenPosition);
+        int hitCount = Physics.RaycastNonAlloc(
+            touchRay,
+            touchRaycastHits,
+            TouchRaycastMaxDistance,
+            ~0,
+            QueryTriggerInteraction.Collide);
+
+        if (hitCount <= 0)
+        {
+            return;
+        }
+
+        GateNode nearestNode = null;
+        float nearestDistance = float.MaxValue;
+
+        for (int i = 0; i < hitCount; i++)
+        {
+            Collider hitCollider = touchRaycastHits[i].collider;
+            if (hitCollider == null)
+            {
+                continue;
+            }
+
+            GateNode candidate = hitCollider.GetComponentInParent<GateNode>();
+            if (candidate != null && candidate.isTracked && touchRaycastHits[i].distance < nearestDistance)
+            {
+                nearestDistance = touchRaycastHits[i].distance;
+                nearestNode = candidate;
+            }
+        }
+
+        if (nearestNode == null)
+        {
+            return;
+        }
+
+        Dispatch3DCardTouchInteraction(nearestNode);
+    }
+
+    private void Dispatch3DCardTouchInteraction(GateNode touchedNode)
+    {
+        if (touchedNode.nodeType == NodeType.InputSource)
+        {
+            if (isVerifying)
+            {
+                return;
+            }
+
+            bool isInputB = touchedNode == inputBNode
+                            || (touchedNode != inputANode && touchedNode.gameObject.name.ToUpperInvariant().Contains("B"));
+
+            if (isInputB)
+            {
+                if (inputBNode != null)
+                {
+                    OnToggleInputBClicked();
+                }
+                else
+                {
+                    touchedNode.ToggleInputState();
+                }
+            }
+            else
+            {
+                if (inputANode != null)
+                {
+                    OnToggleInputAClicked();
+                }
+                else
+                {
+                    touchedNode.ToggleInputState();
+                }
+            }
+
+            touchedNode.TriggerTapFeedback();
+            return;
+        }
+
+        if (touchedNode.nodeType == NodeType.OutputActuator)
+        {
+            touchedNode.TriggerTapFeedback();
+            if (isVerifying)
+            {
+                return;
+            }
+
+            if (!isSandboxMode)
+            {
+                OnVerifyButtonClicked();
+            }
+            else
+            {
+                PlaySfx(clipToggleInput);
+                if (txtFeedback != null)
+                {
+                    string formula = circuitManager != null
+                        ? circuitManager.GetCircuitBooleanExpression(outputNode)
+                        : "Y = (Belum Terhubung)";
+                    string outState = touchedNode.currentOutputValue ? "1 [AKTIF]" : "0 [MATI]";
+                    txtFeedback.text = $"[Sentuh 3D Sandbox] {formula} | Output Y = {outState}";
+                    txtFeedback.color = new Color(0.35f, 0.96f, 1.00f, 1f);
+                }
+            }
+            return;
+        }
+
+        // Kartu Gerbang Logika (AND, OR, XOR, NAND, NOT)
+        touchedNode.TriggerTapFeedback();
+        if (!isVerifying)
+        {
+            PlaySfx(clipToggleInput);
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = touchedNode.GetTouchInspectionSummary();
+                txtFeedback.color = new Color(0.35f, 0.96f, 1.00f, 1f);
+            }
+        }
+    }
+
+    private static bool TryGetTapScreenPosition(out Vector2 screenPosition)
+    {
+#if ENABLE_INPUT_SYSTEM
+        Touchscreen touchscreen = Touchscreen.current;
+        if (touchscreen != null && touchscreen.primaryTouch.press.wasPressedThisFrame)
+        {
+            screenPosition = touchscreen.primaryTouch.position.ReadValue();
+            return true;
+        }
+        else if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+        {
+            screenPosition = Mouse.current.position.ReadValue();
+            return true;
+        }
+#endif
+        screenPosition = Vector2.zero;
+        return false;
+    }
+
+    private Camera ResolveMainCamera()
+    {
+        if (cachedMainCamera == null || !cachedMainCamera.isActiveAndEnabled)
+        {
+            cachedMainCamera = Camera.main;
+        }
+
+        return cachedMainCamera;
+    }
+
+    private bool IsScreenPointOverUI(Vector2 screenPosition)
+    {
+        EventSystem eventSystem = EventSystem.current;
+        if (eventSystem == null)
+        {
+            return false;
+        }
+
+        if (cachedPointerEventData == null)
+        {
+            cachedPointerEventData = new PointerEventData(eventSystem);
+        }
+
+        cachedPointerEventData.position = screenPosition;
+        uiRaycastResults.Clear();
+        eventSystem.RaycastAll(cachedPointerEventData, uiRaycastResults);
+        bool isOverUI = uiRaycastResults.Count > 0;
+        uiRaycastResults.Clear();
+        return isOverUI;
+    }
 }
+

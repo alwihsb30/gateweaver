@@ -148,6 +148,13 @@ public class GateNode : MonoBehaviour
     [Range(0.1f, 1f)]
     public float shockwaveStartAlpha = 0.85f;
 
+    [Header("10. Interaksi Sentuh 3D AR (v4.0)")]
+    [Tooltip("Durasi animasi pantulan skala elastis (detik) saat hologram kartu disentuh langsung")]
+    public float tapBounceDuration = 0.18f;
+
+    [Tooltip("Puncak pengali skala pantulan elastis saat hologram kartu disentuh")]
+    public float tapBouncePeakScale = 1.18f;
+
     [HideInInspector]
     public LineRenderer lineRenderer;
 
@@ -233,6 +240,10 @@ public class GateNode : MonoBehaviour
     private bool isShockwavePlaying = false;
     private float shockwaveElapsed = 0f;
 
+    private SphereCollider touchHitboxCollider;
+    private bool isTapBouncePlaying = false;
+    private float tapBounceElapsed = 0f;
+
     private static int activeGateNodeCount = 0;
     private static Mesh sharedTorusMesh;
     private static Mesh sharedDiamondSpireMesh;
@@ -273,6 +284,7 @@ public class GateNode : MonoBehaviour
         InitializeOutputDioramaVisual();
         InitializeInputPinsVisual();
         InitializeShockwaveVisual();
+        InitializeTouchHitbox();
     }
 
     private void Start()
@@ -295,17 +307,21 @@ public class GateNode : MonoBehaviour
 
         if (isTracked)
         {
+            SetTouchHitboxEnabled(true);
             UpdateLabelBillboard();
             AnimateTotemVisual();
             AnimateOutputDioramaVisual();
             DetectRisingEdgeAndAnimateShockwave();
+            UpdateTapBounceAnimation();
         }
         else
         {
+            SetTouchHitboxEnabled(false);
             SetTotemActive(false);
             SetOutputDioramaActive(false);
             SetInputPinsActive(false);
             ResetShockwaveState();
+            ResetTapBounceState();
         }
 
         RefreshConnectionVisuals(advanceFlowPhase: true);
@@ -1789,10 +1805,12 @@ public class GateNode : MonoBehaviour
         UpdateInputPinTelemetry();
 
         SetConnectionVisualsActive(false);
+        SetTouchHitboxEnabled(false);
         SetTotemActive(false);
         SetOutputDioramaActive(false);
         SetInputPinsActive(false);
         ResetShockwaveState();
+        ResetTapBounceState();
         UpdateVisuals();
     }
 
@@ -1961,7 +1979,8 @@ public class GateNode : MonoBehaviour
         // 1. Perbarui busur energi Quadratic Bezier, bola paket data, & cincin soket terminal
         RefreshConnectionVisuals(advanceFlowPhase: false);
 
-        // 2. Perbarui totem reaktor hologram 3D, indikator pin mikro 3D, & diorama OutputActuator
+        // 2. Perbarui totem reaktor hologram 3D, indikator pin mikro 3D, hitbox sentuh 3D, & diorama OutputActuator
+        SetTouchHitboxEnabled(isTracked);
         SetTotemActive(isTracked);
         SetOutputDioramaActive(isTracked);
         SetInputPinsActive(isTracked);
@@ -2256,5 +2275,152 @@ public class GateNode : MonoBehaviour
         {
             shockwaveRingObj.SetActive(false);
         }
+    }
+
+    /// <summary>
+    /// Membangun satu hitbox trigger ringan "AR_TouchHitbox3D" di bawah kartu agar hologram
+    /// dapat disentuh langsung di ruang 3D AR tanpa membebani simulasi fisika.
+    /// </summary>
+    private void InitializeTouchHitbox()
+    {
+        Transform existingHitbox = transform.Find("AR_TouchHitbox3D");
+        GameObject hitboxObj;
+        if (existingHitbox != null)
+        {
+            hitboxObj = existingHitbox.gameObject;
+        }
+        else
+        {
+            hitboxObj = new GameObject("AR_TouchHitbox3D");
+            hitboxObj.transform.SetParent(transform, false);
+        }
+
+        hitboxObj.transform.localPosition = new Vector3(0f, 0.08f, 0f);
+        hitboxObj.transform.localRotation = Quaternion.identity;
+        hitboxObj.transform.localScale = Vector3.one;
+
+        touchHitboxCollider = hitboxObj.GetComponent<SphereCollider>();
+        if (touchHitboxCollider == null)
+        {
+            touchHitboxCollider = hitboxObj.AddComponent<SphereCollider>();
+        }
+
+        touchHitboxCollider.isTrigger = true;
+        touchHitboxCollider.center = Vector3.zero;
+        touchHitboxCollider.radius = 0.26f;
+        touchHitboxCollider.enabled = isTracked;
+    }
+
+    private void SetTouchHitboxEnabled(bool enabledState)
+    {
+        if (touchHitboxCollider != null && touchHitboxCollider.enabled != enabledState)
+        {
+            touchHitboxCollider.enabled = enabledState;
+        }
+    }
+
+    /// <summary>
+    /// Memicu animasi pantulan skala elastis singkat (~0.18 detik hingga puncak ~1.18x)
+    /// pada kontainer visual 3D tanpa alokasi Coroutine dan tanpa drift skala permanen.
+    /// </summary>
+    public void TriggerTapFeedback()
+    {
+        if (!isTracked)
+        {
+            return;
+        }
+
+        isTapBouncePlaying = true;
+        tapBounceElapsed = 0f;
+        ApplyTapBounceScale(1f);
+    }
+
+    /// <summary>
+    /// Mengembalikan ringkasan fungsi singkat kartu beserta status pin terkini (100% ASCII aman LiberationSans SDF)
+    /// saat hologram gerbang disentuh langsung di ruang 3D AR.
+    /// </summary>
+    public string GetTouchInspectionSummary()
+    {
+        UpdateInputPinTelemetry();
+        string pinA = FormatPinBit(isInputAConnected, inputAValue);
+        string pinB = FormatPinBit(isInputBConnected, inputBValue);
+        string outBit = currentOutputValue ? "1" : "0";
+
+        switch (nodeType)
+        {
+            case NodeType.AND:
+                return $"[Sentuh 3D] AND [{pinA},{pinB}]->{outBit} | Output 1 hanya jika kedua input bernilai 1.";
+            case NodeType.OR:
+                return $"[Sentuh 3D] OR [{pinA},{pinB}]->{outBit} | Output 1 jika minimal satu input bernilai 1.";
+            case NodeType.XOR:
+                return $"[Sentuh 3D] XOR [{pinA},{pinB}]->{outBit} | Output 1 hanya jika input A dan B berbeda.";
+            case NodeType.NAND:
+                return $"[Sentuh 3D] NAND [{pinA},{pinB}]->{outBit} | Kebalikan AND: Output 0 hanya jika keduanya 1.";
+            case NodeType.NOT:
+                return $"[Sentuh 3D] NOT [{pinA}]->{outBit} | Inverter: membalik nilai sinyal 0 <-> 1.";
+            case NodeType.InputSource:
+                string inputName = gameObject.name.ToUpperInvariant().Contains("B") ? "B" : "A";
+                return $"[Sentuh 3D] INPUT {inputName} = {outBit} | Sumber sinyal biner (sentuh hologram atau putar ~90 derajat).";
+            case NodeType.OutputActuator:
+                return $"[Sentuh 3D] OUTPUT [{pinA}]->{outBit} | Aktuator 3D akhir penerima hasil evaluasi rangkaian.";
+            default:
+                return $"[Sentuh 3D] {nodeType} -> {outBit} | Komponen logika digital aktif.";
+        }
+    }
+
+    private Transform GetTapBounceTargetTransform()
+    {
+        if (nodeType == NodeType.OutputActuator)
+        {
+            return outputDioramaRootObj != null ? outputDioramaRootObj.transform : null;
+        }
+
+        return totemRootObj != null ? totemRootObj.transform : null;
+    }
+
+    private void UpdateTapBounceAnimation()
+    {
+        if (!isTapBouncePlaying)
+        {
+            return;
+        }
+
+        tapBounceElapsed += Time.deltaTime;
+        float duration = Mathf.Max(0.05f, tapBounceDuration);
+        float normalized = Mathf.Clamp01(tapBounceElapsed / duration);
+
+        if (normalized >= 1f)
+        {
+            isTapBouncePlaying = false;
+            tapBounceElapsed = 0f;
+            ApplyTapBounceScale(1f);
+            return;
+        }
+
+        // Kurva pantulan elastis responsif: naik cepat menuju puncak (~1.18x) lalu kembali mulus ke 1.0x
+        float peakDelta = Mathf.Max(0f, tapBouncePeakScale - 1f);
+        float shapedPulse = Mathf.Sin(Mathf.Pow(normalized, 0.72f) * Mathf.PI);
+        float scaleMultiplier = 1f + (peakDelta * shapedPulse);
+        ApplyTapBounceScale(scaleMultiplier);
+    }
+
+    private void ApplyTapBounceScale(float scaleMultiplier)
+    {
+        Transform target = GetTapBounceTargetTransform();
+        if (target != null)
+        {
+            target.localScale = Vector3.one * scaleMultiplier;
+        }
+    }
+
+    private void ResetTapBounceState()
+    {
+        if (isTapBouncePlaying || tapBounceElapsed > 0f)
+        {
+            isTapBouncePlaying = false;
+            tapBounceElapsed = 0f;
+        }
+
+        ApplyTapBounceScale(1f);
     }
 }
