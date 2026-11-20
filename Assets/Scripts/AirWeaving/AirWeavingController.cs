@@ -56,27 +56,28 @@ public class AirWeavingController : MonoBehaviour
     private const float OneEuroMaxDtSeconds = 0.200f;
     private const float TwoPi = 6.283185307f;
 
-    // Skala mesin 3D pada papan roti virtual & rak parkir (dikalibrasi Tahap 3)
-    private const float TerminalScale = 0.90f;
-    private const float OutputTerminalScale = 0.92f;
-    private const float ActiveGateScale = 0.90f;
-    private const float GrabbedGateScale = 0.95f;
-    private const float ParkedGateScale = 0.56f;
+    // Skala hologram melayang Mode Udara v7.0 Fase 3 (~22% lebih ramping agar kamera lega)
+    private const float TerminalScale = 0.70f;
+    private const float OutputTerminalScale = 0.72f;
+    private const float ActiveGateScale = 0.70f;
+    private const float GrabbedGateScale = 0.75f;
+    private const float ParkedGateScale = 0.44f;
 
-    // Scale-Invariant Pinch Ratio (dist(#4,#8) / max(0.06, dist(#0,#9))) + Hysteresis + Occlusion Grace
+    // Parameter kompatibilitas Pinch lama (disimpan untuk fallback/referensi)
     private const float MinPalmScaleClamp = 0.06f;
     private const float PinchRatioActivateThreshold = 0.34f;
     private const float PinchRatioReleaseThreshold = 0.46f;
-    private const float GrabOcclusionGraceSeconds = 0.16f;
 
-    // Radius interaksi Air-Pinch / Air-Tap (dalam satuan lokal bidang meja kerja z = WorkbenchDepth)
-    private const float GateHoverGrabRadius = 0.36f;
-    private const float ParkedGateHoverRadius = 0.26f;
-    private const float InputAirTapRadius = 0.40f;
-    private const float InputAirTapRearmRadius = 0.50f;
-    private const float InputAirTapCooldownSeconds = 0.55f;
+    // Radius interaksi Badan Gerbang vs Input (bebas tumpang tindih dengan PortOutHitRadius = 0.165 pada AirWeavingCableRouter)
+    private const float GateHoverGrabRadius = 0.135f;
+    private const float ParkedGateHoverRadius = 0.210f;
+    private const float InputAirTapRadius = 0.145f;
+    private const float InputAirTapCooldownSeconds = 0.35f;
     private const float ParkReturnThresholdY = 0.28f;
-    private const float ParkSlotSnapRadius = 0.34f;
+    private const float ParkSlotSnapRadius = 0.30f;
+
+    // Flag pencadangan Air-Draw lama (nonaktif di Fase 3; UnistrokeGestureRecognizer.cs tetap utuh untuk Fase 4)
+    private static readonly bool EnableLegacyAirDraw = false;
 
     // Parameter $1 Unistroke Air-Draw Spawner (Tahap 3)
     private const int MaxAirDrawPoints = 128;
@@ -89,15 +90,15 @@ public class AirWeavingController : MonoBehaviour
     private const float AirDrawFadeDurationSeconds = 0.35f;
     private const float AirDrawPostSpawnCooldownSeconds = 0.55f;
 
-    // Koordinat meja kerja terkalibrasi v7.0 (bebas bilah atas 72 px & aman FOV 38-60° pada rasio 16:9 / 20:9)
-    private const float InputTerminalBaseX = -1.24f;
+    // Koordinat meja kerja terkalibrasi v7.0 Fase 3 (bebas bilah atas 72 px & beri jarak bersih antar orb port ±0.255)
+    private const float InputTerminalBaseX = -1.26f;
     private const float InputATerminalY = -0.06f;
     private const float InputBTerminalY = -0.68f;
     private const float OutputTerminalBaseX = 1.28f;
     private const float OutputTerminalY = -0.30f;
     private const float ParkingRackY = 0.52f;
-    private const float AssemblyMinBaseX = -0.74f;
-    private const float AssemblyMaxBaseX = 0.76f;
+    private const float AssemblyMinBaseX = -0.62f;
+    private const float AssemblyMaxBaseX = 0.66f;
     private const float AssemblyMinY = -0.74f;
     private const float AssemblyMaxY = 0.16f;
 
@@ -115,7 +116,7 @@ public class AirWeavingController : MonoBehaviour
     private static readonly Quaternion WorkbenchTiltRotation = Quaternion.Euler(-38f, 0f, 0f);
 
     private const float PostDropOutputLockoutSeconds = 0.65f;
-    private const float OutputZonePriorityRadius = 0.42f;
+    private const float OutputZonePriorityRadius = 0.30f;
     private const float NoHandPromptDelaySeconds = 5.0f;
     private const int PinchRingSegments = 20;
     private const int HoverRingSegments = 28;
@@ -131,9 +132,9 @@ public class AirWeavingController : MonoBehaviour
         { 5, 9 }, { 9, 13 }, { 13, 17 }
     };
 
-    private static readonly Color NeonCyanBoneColor = new Color(0.14f, 0.96f, 1.00f, 0.92f);
-    private static readonly Color NeonJointBaseColor = new Color(0.24f, 0.92f, 1.00f, 1.00f);
-    private static readonly Color NeonJointTipColor = new Color(0.86f, 1.00f, 0.98f, 1.00f);
+    private static readonly Color NeonCyanBoneColor = new Color(0.14f, 0.96f, 1.00f, 0.42f);
+    private static readonly Color NeonJointBaseColor = new Color(0.24f, 0.92f, 1.00f, 0.52f);
+    private static readonly Color NeonJointTipColor = new Color(0.86f, 1.00f, 0.98f, 0.62f);
     private static readonly Color PinchActiveColor = new Color(0.76f, 1.00f, 0.28f, 1.00f);
     private static readonly Color PinchIdleColor = new Color(0.20f, 0.92f, 1.00f, 0.85f);
     private static readonly Color HoverGateRingColor = new Color(0.28f, 0.98f, 1.00f, 0.92f);
@@ -244,11 +245,8 @@ public class AirWeavingController : MonoBehaviour
     private bool mirrorHorizontalDisplay = true;
 
     private float currentPinchRatio = 1f;
-    private float grabOcclusionGraceTimer = 0f;
     private float inputATapCooldown = 0f;
     private float inputBTapCooldown = 0f;
-    private bool indexWasInsideInputA = false;
-    private bool indexWasInsideInputB = false;
 
     private Vector3 pinchWorldPosition = Vector3.zero;
     private Vector3 indexTipWorldPosition = Vector3.zero;
@@ -330,6 +328,10 @@ public class AirWeavingController : MonoBehaviour
     private Material airDrawStrokeMat;
 
     private AirWeavingOutputTrigger outputTrigger;
+    private AirWeavingHologramVisual hologramVisual;
+    private AirWeavingCableRouter cableRouter;
+    private readonly AirWeavingHandGestureDetector handGestureDetector = new AirWeavingHandGestureDetector();
+    private readonly List<GateNode> activePlacedGatesBuffer = new List<GateNode>(5);
     private float fpsTimer = 0f;
     private int inferenceFramesInWindow = 0;
     private int displayedInferenceFps = 0;
@@ -399,9 +401,10 @@ public class AirWeavingController : MonoBehaviour
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
         hoveredInputNode = null;
-        grabOcclusionGraceTimer = 0f;
         postDropLockoutTimer = 0f;
         CancelAirDrawStrokeImmediate();
+        handGestureDetector.Reset();
+        cableRouter?.ClearAllWires(circuitManager);
         outputTrigger?.HideImmediate();
 
         if (!isAirWeavingActive)
@@ -467,9 +470,13 @@ public class AirWeavingController : MonoBehaviour
             ProcessCurrentWebCamFrame(mainCam);
         }
 
+        bool isStickyDrag = (cableRouter != null && cableRouter.IsDraggingCable) || grabbedGateSlotIndex >= 0;
+        handGestureDetector.TickTemporalState(dt, isHandDetected, isStickyDrag);
+        UpdateCableRouterInteraction(mainCam);
         UpdateWorkbenchInteractions(mainCam, dt);
         UpdateAirDrawStrokeFade(mainCam, dt);
         SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: false);
+        UpdateHologramVisuals(mainCam);
         UpdateOutputSpatialTrigger(mainCam, dt);
         UpdateAirWeavingStatusFeedback();
     }
@@ -492,11 +499,13 @@ public class AirWeavingController : MonoBehaviour
             outputTrigger.OnVerifyRequested -= HandleOutputTriggerVerify;
             outputTrigger.OnNextLevelRequested -= HandleOutputTriggerNextLevel;
         }
+        circuitManager?.SetManualRoutingMode(false);
         ShutdownNativeAndCameraImmediate();
         DestroyVisualRigAndMaterials();
         cachedGateNodes.Clear();
         pausedObserverHandlers.Clear();
         gateSlots.Clear();
+        activePlacedGatesBuffer.Clear();
         airDrawPointsLocal.Clear();
         cachedMainCamera = null;
         cachedVuforiaBehaviour = null;
@@ -651,6 +660,8 @@ public class AirWeavingController : MonoBehaviour
         SetHandRigVisible(false);
         SetHoverRingVisible(false);
         outputTrigger?.HideImmediate();
+        hologramVisual?.HideImmediate();
+        cableRouter?.HideImmediate();
 
         // 8. Tata seluruh 8 GateNode (Input A, Input B, Output terkunci di papan roti; 5 gerbang di Rak Parkir Atas)
         InitializeWorkbenchSlots(mainCam);
@@ -663,11 +674,8 @@ public class AirWeavingController : MonoBehaviour
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
         hoveredInputNode = null;
-        grabOcclusionGraceTimer = 0f;
         inputATapCooldown = 0f;
         inputBTapCooldown = 0f;
-        indexWasInsideInputA = false;
-        indexWasInsideInputB = false;
         isIndexOnlyWandPose = false;
         airDrawPostSpawnCooldown = 0f;
         postDropLockoutTimer = 0f;
@@ -684,9 +692,14 @@ public class AirWeavingController : MonoBehaviour
         isTransitioning = false;
         transitionCoroutine = null;
 
+        handGestureDetector.Reset();
+        circuitManager?.SetManualRoutingMode(true);
+        cableRouter?.ClearAllWires(circuitManager);
+        hologramVisual?.SetRootVisible(true);
+
         SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: true);
 
-        SetFeedbackImmediate("Mode Udara aktif — cubit gerbang atau tahan di Output untuk uji.", FeedbackActiveColor, 2.6f);
+        SetFeedbackImmediate("Mode Udara aktif — arahkan telapak, Kepal untuk pegang/tarik kabel, Buka untuk lepas.", FeedbackActiveColor, 2.8f);
         OnAirWeavingModeChanged?.Invoke(true);
     }
 
@@ -697,6 +710,8 @@ public class AirWeavingController : MonoBehaviour
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
         hoveredInputNode = null;
+        cableRouter?.ClearAllWires(circuitManager);
+        circuitManager?.SetManualRoutingMode(false);
         SetFeedbackImmediate("[Air-Weaving v6] Mengembalikan kamera ke Mode Kartu (v5)...", FeedbackWaitingColor);
 
         ShutdownNativeAndCameraImmediate();
@@ -719,6 +734,8 @@ public class AirWeavingController : MonoBehaviour
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
         hoveredInputNode = null;
+        cableRouter?.ClearAllWires(circuitManager);
+        circuitManager?.SetManualRoutingMode(false);
         ShutdownNativeAndCameraImmediate();
         HideAllAirWeavingVisuals();
 
@@ -947,7 +964,12 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // 1. Kelola Occlusion Grace (0.16s) saat sedang memegang gerbang (prioritas #1: batalkan Air-Draw bila aktif)
+        // 1. Kelola seret badan gerbang memakai status Kepal (Fist) ter-debounce + Occlusion Grace 180 ms
+        bool fistActive = handGestureDetector.IsFistActive;
+        bool fistJustStarted = handGestureDetector.FistJustStarted;
+        Vector2 palmXY = handGestureDetector.PalmCursorLocalXY;
+        Vector2 aimXY = fistJustStarted ? handGestureDetector.StabilizedCursorLocalXY : palmXY;
+
         if (grabbedGateSlotIndex >= 0 && grabbedGateSlotIndex < gateSlots.Count)
         {
             if (isRecordingAirDraw)
@@ -956,44 +978,36 @@ public class AirWeavingController : MonoBehaviour
             }
 
             WorkbenchGateSlot grabbed = gateSlots[grabbedGateSlotIndex];
-            if (isHandDetected && rawPinching)
+            if (fistActive)
             {
-                grabOcclusionGraceTimer = GrabOcclusionGraceSeconds;
                 isPinching = true;
 
-                Vector2 clampedTarget = ClampDraggedGateLocalXY(pinchWorkbenchLocalXY, aspectScale);
-                float dragAlpha = 1f - Mathf.Exp(-GateDragSmoothingSpeed * dt);
-                grabbed.currentLocalXY = Vector2.Lerp(grabbed.currentLocalXY, clampedTarget, dragAlpha);
-                grabbed.currentLocalZ = Mathf.Lerp(grabbed.currentLocalZ, WorkbenchDepth + GrabLiftOffsetZ, dragAlpha);
-                grabbed.currentScale = Mathf.Lerp(grabbed.currentScale, GrabbedGateScale, dragAlpha);
+                if (isHandDetected)
+                {
+                    Vector2 clampedTarget = ClampDraggedGateLocalXY(palmXY, aspectScale);
+                    float dragAlpha = 1f - Mathf.Exp(-GateDragSmoothingSpeed * dt);
+                    grabbed.currentLocalXY = Vector2.Lerp(grabbed.currentLocalXY, clampedTarget, dragAlpha);
+                }
+                grabbed.currentLocalZ = Mathf.Lerp(grabbed.currentLocalZ, WorkbenchDepth + GrabLiftOffsetZ, 1f - Mathf.Exp(-GateDragSmoothingSpeed * dt));
+                grabbed.currentScale = Mathf.Lerp(grabbed.currentScale, GrabbedGateScale, 1f - Mathf.Exp(-GateDragSmoothingSpeed * dt));
                 grabbed.isPlacedOnWorkbench = true;
             }
             else
             {
-                grabOcclusionGraceTimer -= dt;
-                if (grabOcclusionGraceTimer > 0f)
-                {
-                    // Masa tenggang oklusi aktif: tahan mesin dengan tenang di posisi terakhir
-                    isPinching = true;
-                }
-                else
-                {
-                    isPinching = false;
-                    ReleaseGrabbedGate(grabbed, aspectScale);
-                    grabbedGateSlotIndex = -1;
-                }
+                isPinching = false;
+                ReleaseGrabbedGate(grabbed, aspectScale);
+                grabbedGateSlotIndex = -1;
             }
 
             hoveredGateSlotIndex = grabbedGateSlotIndex;
             hoveredInputNode = null;
             wasPinching = isPinching;
-            UpdateHoverHighlightVisual(mainCam, aspectScale);
+            SetHoverRingVisible(false);
             return;
         }
 
-        // 2. Tidak sedang memegang mesin: sinkronkan isPinching langsung dengan rawPinching
-        isPinching = isHandDetected && rawPinching;
-        bool pinchJustStarted = isPinching && !wasPinching;
+        // 2. Tidak sedang memegang gerbang: sinkronkan status Kepal
+        isPinching = fistActive;
 
         if (!isHandDetected)
         {
@@ -1003,16 +1017,27 @@ public class AirWeavingController : MonoBehaviour
             }
             hoveredGateSlotIndex = -1;
             hoveredInputNode = null;
-            indexWasInsideInputA = false;
-            indexWasInsideInputB = false;
             wasPinching = false;
             SetHoverRingVisible(false);
             return;
         }
 
-        // 3. Zona Output menang prioritas penuh atas Air-Draw & hover gerbang di dekatnya saat tidak sedang menggenggam
-        Vector2 cursorXY = isPinching ? pinchWorkbenchLocalXY : indexWorkbenchLocalXY;
-        bool cursorInOutputZone = IsCursorInsideOutputPriorityZone(cursorXY, aspectScale);
+        // 2B. Prioritas #1 Port Kabel: bila kursor sedang membidik atau menyeret port kabel, badan gerbang & Input A/B wajib mengalah penuh
+        if (cableRouter != null && (cableRouter.IsDraggingCable || cableRouter.IsHoveringPort))
+        {
+            if (isRecordingAirDraw)
+            {
+                CancelAirDrawStrokeImmediate();
+            }
+            hoveredGateSlotIndex = -1;
+            hoveredInputNode = null;
+            wasPinching = isPinching;
+            SetHoverRingVisible(false);
+            return;
+        }
+
+        // 3. Zona badan Output menang prioritas atas hover gerbang di dekatnya saat tidak sedang menggenggam
+        bool cursorInOutputZone = IsCursorInsideOutputPriorityZone(aimXY, aspectScale);
         if (cursorInOutputZone)
         {
             if (isRecordingAirDraw)
@@ -1023,29 +1048,21 @@ public class AirWeavingController : MonoBehaviour
         }
         else
         {
-            hoveredGateSlotIndex = (!isRecordingAirDraw || pinchJustStarted || isPinching)
-                ? FindNearestGateSlotIndex(cursorXY, GateHoverGrabRadius, ParkedGateHoverRadius)
-                : -1;
+            hoveredGateSlotIndex = FindNearestGateSlotIndex(aimXY, GateHoverGrabRadius, ParkedGateHoverRadius);
         }
 
-        // 4. Cek Air-Tap / Pinch singkat pada terminal tetap Input A & Input B (hanya bila tidak membidik gerbang)
+        // 4. Cek Kepal singkat (edge Open -> Fist) pada badan Input A & Input B (hanya bila tidak membidik gerbang/port)
         hoveredInputNode = null;
         if (hoveredGateSlotIndex < 0)
         {
-            HandleInputAirTap(aspectScale, pinchJustStarted);
-        }
-        else
-        {
-            indexWasInsideInputA = false;
-            indexWasInsideInputB = false;
+            HandleInputAirTap(aspectScale, fistJustStarted);
         }
 
-        // 5. Mulai genggam gerbang pada rising-edge Pinch
-        if (pinchJustStarted && hoveredGateSlotIndex >= 0 && hoveredGateSlotIndex < gateSlots.Count)
+        // 5. Mulai genggam badan gerbang pada rising-edge Open -> Fist
+        if (fistJustStarted && hoveredGateSlotIndex >= 0 && hoveredGateSlotIndex < gateSlots.Count)
         {
             CancelAirDrawStrokeImmediate();
             grabbedGateSlotIndex = hoveredGateSlotIndex;
-            grabOcclusionGraceTimer = GrabOcclusionGraceSeconds;
 
             WorkbenchGateSlot grabbed = gateSlots[grabbedGateSlotIndex];
             grabbed.isPlacedOnWorkbench = true;
@@ -1062,14 +1079,14 @@ public class AirWeavingController : MonoBehaviour
                 grabbed.node.TriggerTapFeedback();
             }
         }
-        else
+        else if (EnableLegacyAirDraw)
         {
-            // 6. Prioritas #3: Air-Draw Spawner (pose Tongkat Telunjuk saat bebas dari Pinch, hover gerbang, & Input A/B)
+            // Air-Draw lama dicadangkan nonaktif di Fase 3 (siap dikembangkan ulang di Fase 4)
             UpdateAirDrawInteraction(mainCam, aspectScale, dt);
         }
 
         wasPinching = isPinching;
-        UpdateHoverHighlightVisual(mainCam, aspectScale);
+        SetHoverRingVisible(false);
     }
 
     private bool IsCursorInsideOutputPriorityZone(Vector2 cursorXY, float aspectScale)
@@ -1078,14 +1095,17 @@ public class AirWeavingController : MonoBehaviour
         {
             return false;
         }
+        if (cableRouter != null && (cableRouter.IsDraggingCable || cableRouter.IsHoveringOutputNodePort))
+        {
+            return false;
+        }
         if (levelManager != null && (levelManager.IsSandboxMode || levelManager.IsVerifying || levelManager.IsUiOverlayOpen))
         {
             return false;
         }
 
-        Vector2 outputCenterXY = new Vector2(OutputTerminalBaseX * aspectScale, OutputTerminalY + 0.12f);
-        return Vector2.Distance(cursorXY, outputCenterXY) <= OutputZonePriorityRadius
-               || Vector2.Distance(indexWorkbenchLocalXY, outputCenterXY) <= OutputZonePriorityRadius;
+        Vector2 outputCenterXY = new Vector2((OutputTerminalBaseX * aspectScale) + 0.03f, OutputTerminalY + 0.10f);
+        return Vector2.Distance(cursorXY, outputCenterXY) <= OutputZonePriorityRadius;
     }
 
     private void UpdateAirDrawInteraction(Camera mainCam, float aspectScale, float dt)
@@ -1353,6 +1373,7 @@ public class AirWeavingController : MonoBehaviour
             slot.currentLocalXY = homeXY;
             slot.currentLocalZ = WorkbenchDepth;
             slot.currentScale = ParkedGateScale;
+            cableRouter?.RemoveWiresForNode(slot.node, circuitManager);
         }
         else
         {
@@ -1366,59 +1387,42 @@ public class AirWeavingController : MonoBehaviour
         }
     }
 
-    private void HandleInputAirTap(float aspectScale, bool pinchJustStarted)
+    private void HandleInputAirTap(float aspectScale, bool fistJustStarted)
     {
         if (levelManager != null && levelManager.IsVerifying)
         {
             return;
         }
 
-        Vector2 inputAXY = new Vector2(InputTerminalBaseX * aspectScale, InputATerminalY);
-        Vector2 inputBXY = new Vector2(InputTerminalBaseX * aspectScale, InputBTerminalY);
+        Vector2 cursorXY = fistJustStarted ? handGestureDetector.StabilizedCursorLocalXY : handGestureDetector.PalmCursorLocalXY;
+        // Geser pusat badan sakelar sedikit ke kiri (-0.04) agar jarak aman terhadap Port_Out (+0.275, R=0.165) nol tumpang tindih
+        Vector2 inputAXY = new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputATerminalY);
+        Vector2 inputBXY = new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputBTerminalY);
 
-        float distIndexA = Vector2.Distance(indexWorkbenchLocalXY, inputAXY);
-        float distPinchA = Vector2.Distance(pinchWorkbenchLocalXY, inputAXY);
-        float distIndexB = Vector2.Distance(indexWorkbenchLocalXY, inputBXY);
-        float distPinchB = Vector2.Distance(pinchWorkbenchLocalXY, inputBXY);
+        float distA = Vector2.Distance(cursorXY, inputAXY);
+        float distB = Vector2.Distance(cursorXY, inputBXY);
 
-        bool nearA = distIndexA <= InputAirTapRadius || distPinchA <= InputAirTapRadius;
-        bool nearB = distIndexB <= InputAirTapRadius || distPinchB <= InputAirTapRadius;
-
-        if (nearA && inputANode != null)
+        if (distA <= InputAirTapRadius && inputANode != null)
         {
             hoveredInputNode = inputANode;
-            bool indexEnteredA = distIndexA <= InputAirTapRadius && !indexWasInsideInputA;
-            bool pinchTapA = pinchJustStarted && distPinchA <= InputAirTapRadius;
-            if ((indexEnteredA || pinchTapA) && inputATapCooldown <= 0f)
+            if (fistJustStarted && inputATapCooldown <= 0f)
             {
                 inputATapCooldown = InputAirTapCooldownSeconds;
                 ToggleInputTerminalNode(isInputB: false);
             }
-            indexWasInsideInputA = distIndexA <= InputAirTapRadius;
-        }
-        else if (distIndexA > InputAirTapRearmRadius)
-        {
-            indexWasInsideInputA = false;
         }
 
-        if (nearB && inputBNode != null)
+        if (distB <= InputAirTapRadius && inputBNode != null)
         {
-            if (hoveredInputNode == null || distIndexB < distIndexA)
+            if (hoveredInputNode == null || distB < distA)
             {
                 hoveredInputNode = inputBNode;
             }
-            bool indexEnteredB = distIndexB <= InputAirTapRadius && !indexWasInsideInputB;
-            bool pinchTapB = pinchJustStarted && distPinchB <= InputAirTapRadius;
-            if ((indexEnteredB || pinchTapB) && inputBTapCooldown <= 0f)
+            if (fistJustStarted && inputBTapCooldown <= 0f && hoveredInputNode == inputBNode)
             {
                 inputBTapCooldown = InputAirTapCooldownSeconds;
                 ToggleInputTerminalNode(isInputB: true);
             }
-            indexWasInsideInputB = distIndexB <= InputAirTapRadius;
-        }
-        else if (distIndexB > InputAirTapRearmRadius)
-        {
-            indexWasInsideInputB = false;
         }
     }
 
@@ -1819,16 +1823,27 @@ public class AirWeavingController : MonoBehaviour
         // Deteksi pose "Tongkat Telunjuk" (Index-Only Wand): telunjuk terentang & minimal 2 dari 3 jari lain tertekuk
         isIndexOnlyWandPose = EvaluateIndexOnlyWandPose(landmarks);
 
-        indexTipWorldPosition = smoothedLandmarksWorld[8];
-        pinchWorldPosition = (smoothedLandmarksWorld[4] + smoothedLandmarksWorld[8]) * 0.5f;
+        // Perbarui detektor Kepal/Buka & Kursor Telapak Anti-Lompat (v7.0 Fase 3)
+        handGestureDetector.UpdateFromLandmarks(landmarks, smoothedLandmarksWorld, camTransform);
 
-        // Simpan koordinat XY lokal di bidang meja kerja untuk deteksi hover/grab/air-tap 1:1
+        indexTipWorldPosition = smoothedLandmarksWorld[8];
+        pinchWorldPosition = handGestureDetector.PalmCursorWorldPosition;
+
+        // Simpan koordinat XY lokal di bidang meja kerja
         Vector3 indexLocal = camTransform.InverseTransformPoint(indexTipWorldPosition);
-        Vector3 pinchLocal = camTransform.InverseTransformPoint(pinchWorldPosition);
         indexWorkbenchLocalXY = new Vector2(indexLocal.x, indexLocal.y);
-        pinchWorkbenchLocalXY = new Vector2(pinchLocal.x, pinchLocal.y);
+        pinchWorkbenchLocalXY = handGestureDetector.PalmCursorLocalXY;
 
         SetHandRigVisible(true);
+        if (pinchCursorRingRenderer != null && pinchCursorRingRenderer.enabled)
+        {
+            pinchCursorRingRenderer.enabled = false;
+        }
+        if (indexTrailRenderer != null && indexTrailRenderer.emitting)
+        {
+            indexTrailRenderer.emitting = false;
+            indexTrailRenderer.Clear();
+        }
 
         if (jointSphereObjs != null)
         {
@@ -2008,6 +2023,93 @@ public class AirWeavingController : MonoBehaviour
     private void HandleOutputTriggerVerify() => OnOutputVerifyRequested?.Invoke();
     private void HandleOutputTriggerNextLevel() => OnOutputNextLevelRequested?.Invoke();
 
+    private void UpdateCableRouterInteraction(Camera mainCam)
+    {
+        if (cableRouter == null) return;
+
+        activePlacedGatesBuffer.Clear();
+        for (int i = 0; i < gateSlots.Count; i++)
+        {
+            WorkbenchGateSlot slot = gateSlots[i];
+            if (slot != null && slot.isPlacedOnWorkbench && slot.node != null && slot.node.isTracked)
+            {
+                activePlacedGatesBuffer.Add(slot.node);
+            }
+        }
+
+        cableRouter.Tick(
+            mainCam,
+            circuitManager,
+            inputANode,
+            inputBNode,
+            outputNode,
+            activePlacedGatesBuffer,
+            WorkbenchDepth,
+            isAirWeavingActive,
+            levelManager != null && levelManager.IsUiOverlayOpen,
+            levelManager != null && levelManager.IsVerifying,
+            grabbedGateSlotIndex >= 0,
+            isHandDetected,
+            handGestureDetector.IsFistActive,
+            handGestureDetector.FistJustStarted,
+            handGestureDetector.FistJustEnded,
+            handGestureDetector.StabilizedCursorLocalXY,
+            handGestureDetector.PalmCursorLocalXY,
+            handGestureDetector.PalmCursorWorldPosition);
+    }
+
+    private void UpdateHologramVisuals(Camera mainCam)
+    {
+        if (hologramVisual == null || mainCam == null) return;
+        bool overlayOpen = levelManager != null && levelManager.IsUiOverlayOpen;
+        hologramVisual.SetRootVisible(isAirWeavingActive);
+
+        GateNode portFocusedNode = cableRouter != null ? cableRouter.HoveredPortNode : null;
+        hologramVisual.UpdateNodeFrame(0, inputANode, true, false, false,
+            hoveredInputNode == inputANode ? AirWeavingHologramVisual.NodeHoloState.BodyHovered : AirWeavingHologramVisual.NodeHoloState.Idle);
+        hologramVisual.UpdateNodeFrame(1, inputBNode, false, true, false,
+            hoveredInputNode == inputBNode ? AirWeavingHologramVisual.NodeHoloState.BodyHovered : AirWeavingHologramVisual.NodeHoloState.Idle);
+        hologramVisual.UpdateNodeFrame(2, outputNode, false, false, true, AirWeavingHologramVisual.NodeHoloState.Idle);
+
+        float aspectScale = ComputeHorizontalAspectScale(mainCam);
+        for (int i = 0; i < gateSlots.Count && i < 5; i++)
+        {
+            WorkbenchGateSlot slot = gateSlots[i];
+            if (slot == null || slot.node == null) continue;
+
+            AirWeavingHologramVisual.NodeHoloState state;
+            if (grabbedGateSlotIndex == i)
+            {
+                Vector2 homeXY = GetParkingSlotLocalXY(slot.slotIndex, aspectScale);
+                bool returning = slot.currentLocalXY.y > ParkReturnThresholdY || Vector2.Distance(slot.currentLocalXY, homeXY) <= ParkSlotSnapRadius;
+                state = returning ? AirWeavingHologramVisual.NodeHoloState.ReturningToRack : AirWeavingHologramVisual.NodeHoloState.Grabbed;
+            }
+            else if (portFocusedNode == slot.node)
+            {
+                state = AirWeavingHologramVisual.NodeHoloState.PortFocused;
+            }
+            else if (hoveredGateSlotIndex == i)
+            {
+                state = AirWeavingHologramVisual.NodeHoloState.BodyHovered;
+            }
+            else
+            {
+                state = slot.isPlacedOnWorkbench ? AirWeavingHologramVisual.NodeHoloState.Idle : AirWeavingHologramVisual.NodeHoloState.Parked;
+            }
+
+            hologramVisual.UpdateNodeFrame(3 + i, slot.node, false, false, false, state);
+        }
+
+        hologramVisual.UpdatePalmReticle(
+            mainCam.transform,
+            isHandDetected,
+            overlayOpen,
+            handGestureDetector.PalmCursorWorldPosition,
+            handGestureDetector.IsFistActive,
+            cableRouter != null && (cableRouter.IsHoveringPort || cableRouter.IsDraggingCable),
+            handGestureDetector.MeanCurlRatio);
+    }
+
     private void UpdateOutputSpatialTrigger(Camera mainCam, float dt)
     {
         if (outputTrigger == null) return;
@@ -2023,9 +2125,12 @@ public class AirWeavingController : MonoBehaviour
             levelManager != null && levelManager.IsReadyForNextLevel,
             levelManager != null && levelManager.IsAwaitingSandboxTransition,
             levelManager != null && levelManager.IsUiOverlayOpen,
-            isHandDetected, isPinching, indexWorkbenchLocalXY, pinchWorkbenchLocalXY,
+            isHandDetected, handGestureDetector.IsFistActive, handGestureDetector.PalmCursorLocalXY,
             outputLocalXY, outputWorldPos,
-            grabbedGateSlotIndex >= 0, hoveredGateSlotIndex >= 0, isRecordingAirDraw, postDropLockoutTimer);
+            grabbedGateSlotIndex >= 0, hoveredGateSlotIndex >= 0,
+            cableRouter != null && cableRouter.IsHoveringPort,
+            cableRouter != null && cableRouter.IsDraggingCable,
+            isRecordingAirDraw, postDropLockoutTimer);
     }
 
     private void UpdateAirWeavingStatusFeedback()
@@ -2229,6 +2334,16 @@ public class AirWeavingController : MonoBehaviour
             outputTrigger.OnNextLevelRequested += HandleOutputTriggerNextLevel;
         }
         outputTrigger.EnsureVisualsCreated();
+        if (hologramVisual == null)
+        {
+            hologramVisual = GetComponent<AirWeavingHologramVisual>() ?? gameObject.AddComponent<AirWeavingHologramVisual>();
+        }
+        hologramVisual.EnsureVisualsCreated();
+        if (cableRouter == null)
+        {
+            cableRouter = GetComponent<AirWeavingCableRouter>() ?? gameObject.AddComponent<AirWeavingCableRouter>();
+        }
+        cableRouter.EnsureVisualsCreated();
 
         workbenchVisualRootObj.SetActive(false);
     }
@@ -2444,6 +2559,8 @@ public class AirWeavingController : MonoBehaviour
         SetHandRigVisible(false);
         SetHoverRingVisible(false);
         outputTrigger?.HideImmediate();
+        hologramVisual?.HideImmediate();
+        cableRouter?.HideImmediate();
 
         if (workbenchVisualRootObj != null && workbenchVisualRootObj.activeSelf)
         {

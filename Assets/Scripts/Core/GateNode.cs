@@ -343,6 +343,7 @@ public class GateNode : MonoBehaviour
     private int lastRenderedTelemetryKey = -1;
     private bool externalParkedPreview = false;
     private Renderer[] cachedExternalVisualRenderers;
+    private Renderer[] cachedGroundHideRenderers;
     private GameObject labelBackdropObj;
     private Transform labelBackdropTransform;
     private Material labelBackdropMaterial;
@@ -2485,6 +2486,14 @@ public class GateNode : MonoBehaviour
             {
                 continue;
             }
+            if (useExternalSpatialPose && IsGroundHideRenderer(rend))
+            {
+                if (rend.enabled)
+                {
+                    rend.enabled = false;
+                }
+                continue;
+            }
 
             if (!rend.enabled)
             {
@@ -2501,6 +2510,7 @@ public class GateNode : MonoBehaviour
     public void InvalidateExternalRendererCache()
     {
         cachedExternalVisualRenderers = null;
+        cachedGroundHideRenderers = null;
     }
 
     /// <summary>
@@ -2574,6 +2584,7 @@ public class GateNode : MonoBehaviour
     {
         externalParkedPreview = false;
         useExternalSpatialPose = false;
+        SetGroundRenderersEnabled(true);
         transform.localScale = Vector3.one;
         if (statusLabel != null)
         {
@@ -2846,7 +2857,7 @@ public class GateNode : MonoBehaviour
                 if (telemetryKey != lastRenderedTelemetryKey)
                 {
                     lastRenderedTelemetryKey = telemetryKey;
-                    statusLabel.transform.localScale = Vector3.one * LabelCompactScale;
+                    statusLabel.transform.localScale = Vector3.one * (useExternalSpatialPose ? LabelCompactScale * 1.15f : LabelCompactScale);
                     string telemetryText = BuildTelemetryStatusText();
                     statusLabel.text = telemetryText;
                     statusLabel.color = currentOutputValue ? BrightGreenTextColor : BrightRedOrangeTextColor;
@@ -3538,6 +3549,9 @@ public class GateNode : MonoBehaviour
             baseTileRootObj.SetActive(active);
         }
 
+        // v7.0 Fase 3: Di Mode Udara (hologram melayang), matikan komponen Renderer pada AR_BaseTile3D & AR_ContactShadow tanpa mengubah hierarki SetActive
+        SetGroundRenderersEnabled(!useExternalSpatialPose);
+
         bool portsActive = active && showPorts;
 
         if (portInATransform != null && portInATransform.gameObject.activeSelf != portsActive)
@@ -3553,6 +3567,59 @@ public class GateNode : MonoBehaviour
         if (portOutTransform != null && portOutTransform.gameObject.activeSelf != portsActive)
         {
             portOutTransform.gameObject.SetActive(portsActive);
+        }
+    }
+
+    private void EnsureGroundHideRenderersCached()
+    {
+        if (cachedGroundHideRenderers != null)
+        {
+            return;
+        }
+
+        Renderer[] tileRends = baseTileRootObj != null ? baseTileRootObj.GetComponentsInChildren<Renderer>(true) : null;
+        Renderer[] shadowRends = contactShadowObj != null ? contactShadowObj.GetComponentsInChildren<Renderer>(true) : null;
+        int tileLen = tileRends != null ? tileRends.Length : 0;
+        int shadowLen = shadowRends != null ? shadowRends.Length : 0;
+        cachedGroundHideRenderers = new Renderer[tileLen + shadowLen];
+        for (int i = 0; i < tileLen; i++)
+        {
+            cachedGroundHideRenderers[i] = tileRends[i];
+        }
+        for (int i = 0; i < shadowLen; i++)
+        {
+            cachedGroundHideRenderers[tileLen + i] = shadowRends[i];
+        }
+    }
+
+    private bool IsGroundHideRenderer(Renderer candidate)
+    {
+        if (candidate == null)
+        {
+            return false;
+        }
+
+        EnsureGroundHideRenderersCached();
+        for (int i = 0; i < cachedGroundHideRenderers.Length; i++)
+        {
+            if (cachedGroundHideRenderers[i] == candidate)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void SetGroundRenderersEnabled(bool enabled)
+    {
+        EnsureGroundHideRenderersCached();
+        for (int i = 0; i < cachedGroundHideRenderers.Length; i++)
+        {
+            Renderer r = cachedGroundHideRenderers[i];
+            if (r != null && r.enabled != enabled)
+            {
+                r.enabled = enabled;
+            }
         }
     }
 

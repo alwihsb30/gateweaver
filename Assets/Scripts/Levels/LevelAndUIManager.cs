@@ -367,6 +367,8 @@ public class LevelAndUIManager : MonoBehaviour
     private CompactHudMenuController compactHudMenu;
     private bool isReadyForNextLevel = false;
     private bool isCircuitCompleteLive = false;
+    private int manualPassedRowMask = 0;
+    private bool hasShownManualOverQuotaToast = false;
 
     public bool IsSandboxMode => isSandboxMode;
     public bool IsVerifying => isVerifying;
@@ -2339,6 +2341,8 @@ public class LevelAndUIManager : MonoBehaviour
 
         isReadyForNextLevel = false;
         awaitingPostVictoryChoice = false;
+        manualPassedRowMask = 0;
+        hasShownManualOverQuotaToast = false;
         if (compactHudMenu != null) { compactHudMenu.SetAirWeavingMode(isAirWeavingActive); return; }
 
         // Padatkan teks misi atas menjadi pita horizontal ramping di Mode Udara agar bersih di atas label Rak Parkir (XOR)
@@ -3039,6 +3043,8 @@ public class LevelAndUIManager : MonoBehaviour
     private void ResetTruthTableScanResults()
     {
         scanningRowIndex = -1;
+        manualPassedRowMask = 0;
+        hasShownManualOverQuotaToast = false;
 
         bool panelActive = truthTableScannerPanelObj != null && truthTableScannerPanelObj.activeInHierarchy;
         for (int i = 0; i < TruthTableRowCount; i++)
@@ -3257,11 +3263,16 @@ public class LevelAndUIManager : MonoBehaviour
 
         if (!isVerifying)
         {
-            if (isReadyForNextLevel && ((hasLastTopologySignature && topologyChanged) || !hasValidLiveCircuit))
+            if ((hasLastTopologySignature && topologyChanged) || !hasValidLiveCircuit)
             {
-                isReadyForNextLevel = false;
-                awaitingPostVictoryChoice = false;
-                compactHudMenu?.RefreshAllVisualStates();
+                manualPassedRowMask = 0;
+                hasShownManualOverQuotaToast = false;
+                if (isReadyForNextLevel)
+                {
+                    isReadyForNextLevel = false;
+                    awaitingPostVictoryChoice = false;
+                    compactHudMenu?.RefreshAllVisualStates();
+                }
             }
 
             if (hasLastTopologySignature && topologyChanged)
@@ -3355,6 +3366,7 @@ public class LevelAndUIManager : MonoBehaviour
                 if (!isSandboxMode && hasValidLiveCircuit && activeManualRow >= 0 && outputNode.isTracked)
                 {
                     outputNode.OutputTruthPod.RecordLiveDiscovery(activeManualRow, outputNode.currentOutputValue);
+                    TryEvaluateManualAutoWin(activeManualRow, outputNode.currentOutputValue, activeGates);
                 }
             }
         }
@@ -4881,82 +4893,7 @@ public class LevelAndUIManager : MonoBehaviour
             yield break;
         }
 
-        EnsureLevelProgressArraysInitialized();
-        bool wasAlreadyCleared = (currentLevelIndex >= 0 && currentLevelIndex < levelCompletedFlags.Length)
-                                 && levelCompletedFlags[currentLevelIndex];
-        if (currentLevelIndex >= 0 && currentLevelIndex < levelCompletedFlags.Length)
-        {
-            levelCompletedFlags[currentLevelIndex] = true;
-        }
-
-        bool withinQuota = circuitManager == null || circuitManager.activeGateCardsCount <= currentLevel.maxGateCardsQuota;
-        bool applyTier3HintCap = !wasAlreadyCleared && hintTierUsed >= 3;
-        int earnedStars = CalculateEarnedStars(attemptsOnCurrentLevel, withinQuota, applyTier3HintCap);
-        if (currentLevelIndex >= 0 && currentLevelIndex < levelBestStars.Length && earnedStars > levelBestStars[currentLevelIndex])
-        {
-            levelBestStars[currentLevelIndex] = earnedStars;
-        }
-        SavePersistentProgress();
-        UpdateStarMasteryUI();
-        RefreshCompetencyReportUI();
-
-        bool isLastLevel = (levels != null && levels.Count > 0 && currentLevelIndex == levels.Count - 1);
-        bool isGameCleared = AreAllLevelsCompleted() || isLastLevel;
-
-        AutoBindActionButtonsIfNeeded();
-
-        isReadyForNextLevel = true;
-        if (isGameCleared)
-        {
-            awaitingPostVictoryChoice = true;
-
-            if (txtFeedback != null)
-            {
-                txtFeedback.text = $"SELAMAT! Seluruh {levels.Count} Misi Selesai! Rating: {FormatStarsAscii(earnedStars)} (Total: {GetTotalStars()}/{GetMaxTotalStars()})";
-                txtFeedback.color = Color.green;
-            }
-
-            if (txtNextLevelButtonLabel != null)
-            {
-                txtNextLevelButtonLabel.text = "Mode Sandbox Bebas";
-            }
-
-            if (compactHudMenu == null && nextLevelButtonObj != null)
-            {
-                nextLevelButtonObj.SetActive(true);
-            }
-
-            if (txtResetLevelButtonLabel != null)
-            {
-                txtResetLevelButtonLabel.text = "Main Ulang (Level 1)";
-            }
-
-            if (compactHudMenu == null && resetLevelButtonObj != null)
-            {
-                resetLevelButtonObj.SetActive(true);
-            }
-        }
-        else
-        {
-            awaitingPostVictoryChoice = false;
-
-            if (txtFeedback != null)
-            {
-                txtFeedback.text = $"BERHASIL! Lolos 4 baris & raih {FormatStarsAscii(earnedStars)} (Uji ke-{attemptsOnCurrentLevel}).";
-                txtFeedback.color = Color.green;
-            }
-
-            if (txtNextLevelButtonLabel != null)
-            {
-                txtNextLevelButtonLabel.text = "Level Berikutnya";
-            }
-
-            if (compactHudMenu == null && nextLevelButtonObj != null)
-            {
-                nextLevelButtonObj.SetActive(true);
-            }
-        }
-        compactHudMenu?.RefreshAllVisualStates();
+        FinalizeLevelVictoryState(currentLevel, isManualDiscovery: false, out bool isLastLevel, out bool wasAlreadyCleared);
 
         yield return new WaitForSeconds(0.10f);
         PlaySfx(clipVictoryFanfare);
@@ -4973,6 +4910,136 @@ public class LevelAndUIManager : MonoBehaviour
         }
 
         isVerifying = false;
+    }
+
+    /// <summary>
+    /// Jalur Dual-Path Mode Udara (v7.0 Fase 3): jika pemain menguji sendiri seluruh 4 kombinasi tuas hingga
+    /// ke-4 sel Pod LED 2x2 menyala hijau pada rangkaian valid dalam batas kuota, level otomatis LULUS.
+    /// </summary>
+    private void TryEvaluateManualAutoWin(int rowIndex, bool measuredOutput, int activeGates)
+    {
+        if (isSandboxMode || isVerifying || isReadyForNextLevel || levels == null || levels.Count == 0)
+        {
+            return;
+        }
+
+        bool isAirMode = airWeavingController != null && airWeavingController.IsAirWeavingActive;
+        if (!isAirMode)
+        {
+            return;
+        }
+
+        LevelScenario currentLevel = levels[Mathf.Clamp(currentLevelIndex, 0, levels.Count - 1)];
+        if (currentLevel == null || currentLevel.expectedTruthTable == null || rowIndex < 0 || rowIndex >= currentLevel.expectedTruthTable.Length)
+        {
+            return;
+        }
+
+        if (measuredOutput == currentLevel.expectedTruthTable[rowIndex])
+        {
+            manualPassedRowMask |= (1 << rowIndex);
+        }
+        else
+        {
+            manualPassedRowMask &= ~(1 << rowIndex);
+            return;
+        }
+
+        if (manualPassedRowMask != 0b1111)
+        {
+            return;
+        }
+
+        if (activeGates > currentLevel.maxGateCardsQuota)
+        {
+            if (!hasShownManualOverQuotaToast)
+            {
+                hasShownManualOverQuotaToast = true;
+                PlaySfx(clipRowFail);
+                if (txtFeedback != null)
+                {
+                    txtFeedback.text = $"Gagal! Semua 4 kasus benar, tetapi melebihi kuota maksimal gerbang ({activeGates}/{currentLevel.maxGateCardsQuota}).";
+                    txtFeedback.color = new Color(1.00f, 0.96f, 0.93f, 1f);
+                }
+            }
+            return;
+        }
+
+        StartCoroutine(CompleteManualAutoWinRoutine(currentLevel));
+    }
+
+    private IEnumerator CompleteManualAutoWinRoutine(LevelScenario currentLevel)
+    {
+        isVerifying = true;
+        attemptsOnCurrentLevel++;
+        UpdateStarMasteryUI();
+        FinalizeLevelVictoryState(currentLevel, isManualDiscovery: true, out _, out _);
+
+        yield return new WaitForSeconds(0.10f);
+        PlaySfx(clipVictoryFanfare);
+        TriggerHapticPulse();
+        if (outputNode != null)
+        {
+            outputNode.TriggerVictoryCelebration();
+        }
+
+        isVerifying = false;
+    }
+
+    private void FinalizeLevelVictoryState(LevelScenario currentLevel, bool isManualDiscovery, out bool isLastLevel, out bool wasAlreadyCleared)
+    {
+        EnsureLevelProgressArraysInitialized();
+        wasAlreadyCleared = (currentLevelIndex >= 0 && currentLevelIndex < levelCompletedFlags.Length)
+                            && levelCompletedFlags[currentLevelIndex];
+        if (currentLevelIndex >= 0 && currentLevelIndex < levelCompletedFlags.Length)
+        {
+            levelCompletedFlags[currentLevelIndex] = true;
+        }
+
+        bool withinQuota = circuitManager == null || circuitManager.activeGateCardsCount <= currentLevel.maxGateCardsQuota;
+        bool applyTier3HintCap = !wasAlreadyCleared && hintTierUsed >= 3;
+        int earnedStars = CalculateEarnedStars(attemptsOnCurrentLevel, withinQuota, applyTier3HintCap);
+        if (currentLevelIndex >= 0 && currentLevelIndex < levelBestStars.Length && earnedStars > levelBestStars[currentLevelIndex])
+        {
+            levelBestStars[currentLevelIndex] = earnedStars;
+        }
+        SavePersistentProgress();
+        UpdateStarMasteryUI();
+        RefreshCompetencyReportUI();
+
+        isLastLevel = (levels != null && levels.Count > 0 && currentLevelIndex == levels.Count - 1);
+        bool isGameCleared = AreAllLevelsCompleted() || isLastLevel;
+
+        AutoBindActionButtonsIfNeeded();
+
+        isReadyForNextLevel = true;
+        if (isGameCleared)
+        {
+            awaitingPostVictoryChoice = true;
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = $"SELAMAT! Seluruh {levels.Count} Misi Selesai! Rating: {FormatStarsAscii(earnedStars)} (Total: {GetTotalStars()}/{GetMaxTotalStars()})";
+                txtFeedback.color = Color.green;
+            }
+            if (txtNextLevelButtonLabel != null) txtNextLevelButtonLabel.text = "Mode Sandbox Bebas";
+            if (compactHudMenu == null && nextLevelButtonObj != null) nextLevelButtonObj.SetActive(true);
+            if (txtResetLevelButtonLabel != null) txtResetLevelButtonLabel.text = "Main Ulang (Level 1)";
+            if (compactHudMenu == null && resetLevelButtonObj != null) resetLevelButtonObj.SetActive(true);
+        }
+        else
+        {
+            awaitingPostVictoryChoice = false;
+            if (txtFeedback != null)
+            {
+                txtFeedback.text = isManualDiscovery
+                    ? $"BERHASIL! Semua 4 kasus teruji manual & raih {FormatStarsAscii(earnedStars)}!"
+                    : $"BERHASIL! Lolos 4 baris & raih {FormatStarsAscii(earnedStars)} (Uji ke-{attemptsOnCurrentLevel}).";
+                txtFeedback.color = Color.green;
+            }
+            if (txtNextLevelButtonLabel != null) txtNextLevelButtonLabel.text = "Level Berikutnya";
+            if (compactHudMenu == null && nextLevelButtonObj != null) nextLevelButtonObj.SetActive(true);
+        }
+        compactHudMenu?.RefreshAllVisualStates();
     }
 
     private void RestoreInitialInputStates(bool stateA, bool stateB)

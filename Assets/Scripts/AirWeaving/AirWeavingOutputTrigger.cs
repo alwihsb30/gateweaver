@@ -16,20 +16,18 @@ using TMPro;
 public sealed class AirWeavingOutputTrigger : MonoBehaviour
 {
     private const int RingSegments = 28;
-    private const float OutputInteractRadius = 0.36f;
-    private const float OutputRearmRadius = 0.48f;
-    private const float DwellDurationSeconds = 1.00f;
-    private const float PinchHoldDurationSeconds = 0.75f;
-    private const float LockedWarnDurationSeconds = 0.55f;
-    private const float DwellMoveTolerance = 0.13f;
-    private const float RearmCooldownSeconds = 1.00f;
-    private const float HaloCenterUpOffset = 0.185f;
-    private const float HaloRadius = 0.188f;
-    private const float BadgeBelowOffset = -0.31f;
+    private const float OutputInteractRadius = 0.28f;
+    private const float OutputRearmRadius = 0.38f;
+    private const float FistHoldDurationSeconds = 0.45f;
+    private const float LockedWarnDurationSeconds = 0.40f;
+    private const float RearmCooldownSeconds = 0.85f;
+    private const float HaloCenterUpOffset = 0.145f;
+    private const float HaloRadius = 0.155f;
+    private const float BadgeBelowOffset = -0.255f;
 
-    private const string BadgeTextVerify = "[ TAHAN: UJI ]";
-    private const string BadgeTextNext = "[ TAHAN: LANJUT >> ]";
-    private const string BadgeTextSandbox = "[ TAHAN: SANDBOX >> ]";
+    private const string BadgeTextVerify = "[ KEPAL: UJI ]";
+    private const string BadgeTextNext = "[ KEPAL: LANJUT >> ]";
+    private const string BadgeTextSandbox = "[ KEPAL: SANDBOX >> ]";
 
     private static readonly Color ReadyHaloCyanColor = new Color(0.22f, 0.94f, 1.00f, 0.78f);
     private static readonly Color ReadyHaloGoldColor = new Color(1.00f, 0.86f, 0.28f, 0.88f);
@@ -64,8 +62,6 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     private bool requiresRearm = false;
     private float rearmCooldownTimer = 0f;
     private float chargeProgress = 0f;
-    private bool hasDwellAnchor = false;
-    private Vector2 dwellAnchorLocalXY = Vector2.zero;
     private bool wasReadyForNext = false;
     private string lastBadgeText = string.Empty;
 
@@ -135,7 +131,6 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     public void HideImmediate()
     {
         chargeProgress = 0f;
-        hasDwellAnchor = false;
         requiresRearm = false;
         rearmCooldownTimer = 0f;
         wasReadyForNext = false;
@@ -154,7 +149,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     }
 
     /// <summary>
-    /// Memperbarui deteksi tahan/cubit pada Card_Output serta visual halo & cincin progres. Zero-GC.
+    /// Memperbarui deteksi Kepal (Fist) pada badan Card_Output serta visual halo & cincin progres. Zero-GC.
     /// </summary>
     public void Tick(
         Camera mainCam,
@@ -167,13 +162,14 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         bool isAwaitingSandboxTransition,
         bool isUiOverlayOpen,
         bool isHandDetected,
-        bool isPinching,
-        Vector2 indexLocalXY,
-        Vector2 pinchLocalXY,
+        bool isFistActive,
+        Vector2 cursorLocalXY,
         Vector2 outputLocalXY,
         Vector3 outputWorldPos,
         bool isGrabbingGate,
         bool isHoveringGate,
+        bool isTargetingPort,
+        bool isDraggingCable,
         bool isRecordingAirDraw,
         float postDropLockoutTimer)
     {
@@ -190,7 +186,6 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
                 visualRootObj.SetActive(false);
             }
             chargeProgress = 0f;
-            hasDwellAnchor = false;
             if (!isAirWeavingActive || isSandboxMode)
             {
                 wasReadyForNext = false;
@@ -210,7 +205,6 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             requiresRearm = true;
             rearmCooldownTimer = RearmCooldownSeconds;
             chargeProgress = 0f;
-            hasDwellAnchor = false;
         }
         wasReadyForNext = effectiveReadyForNext;
 
@@ -219,50 +213,37 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             rearmCooldownTimer = Mathf.Max(0f, rearmCooldownTimer - dt);
         }
 
-        // Pusat interaksi sedikit naik ke badan diorama (bebas Pod LED di bawah)
-        Vector2 targetCenterLocalXY = new Vector2(outputLocalXY.x, outputLocalXY.y + 0.12f);
-        Vector2 cursorXY = isPinching ? pinchLocalXY : indexLocalXY;
-        float distToOutput = isHandDetected ? Vector2.Distance(cursorXY, targetCenterLocalXY) : float.MaxValue;
+        // Pusat interaksi sedikit bergeser ke kanan-atas badan diorama (bebas Port_In di kiri & Pod LED di bawah)
+        Vector2 targetCenterLocalXY = new Vector2(outputLocalXY.x + 0.03f, outputLocalXY.y + 0.10f);
+        float distToOutput = isHandDetected ? Vector2.Distance(cursorLocalXY, targetCenterLocalXY) : float.MaxValue;
 
-        if (requiresRearm && rearmCooldownTimer <= 0f && (!isHandDetected || (distToOutput > OutputRearmRadius && !isPinching)))
+        // Re-arm terpenuhi setelah jeda selesai dan tangan dibuka (Open) atau keluar radius
+        if (requiresRearm && rearmCooldownTimer <= 0f && (!isHandDetected || !isFistActive || distToOutput > OutputRearmRadius))
         {
             requiresRearm = false;
         }
 
-        // 2. Kontrak Mutual Exclusion ketat
+        // 2. Kontrak Mutual Exclusion ketat (yield penuh bila membidik Port_In / menarik kabel / memegang gerbang)
         bool blockedByMutualExclusion = isUiOverlayOpen
                                         || isGrabbingGate
                                         || isHoveringGate
+                                        || isTargetingPort
+                                        || isDraggingCable
                                         || isRecordingAirDraw
                                         || postDropLockoutTimer > 0f;
 
         bool canInteractAction = effectiveReadyForNext || isCircuitComplete;
         bool insideZone = isHandDetected && !blockedByMutualExclusion && distToOutput <= OutputInteractRadius;
 
-        // 3. Logika pengisian progres tahan stabil / cubit-tahan (termasuk peringatan amber saat rangkaian belum lengkap)
-        if (insideZone && !requiresRearm)
+        // 3. Aksi tunggal Skema 2: Buka = arahkan kursor santai, Kepal (Fist) di atas Output = isi cincin progres & picu aksi
+        if (insideZone && isFistActive && !requiresRearm)
         {
-            if (!hasDwellAnchor)
-            {
-                dwellAnchorLocalXY = cursorXY;
-                hasDwellAnchor = true;
-            }
-            else if (!isPinching && Vector2.Distance(cursorXY, dwellAnchorLocalXY) > DwellMoveTolerance)
-            {
-                // Gerak melintas terlalu cepat -> geser jangkar & reset progres (anti false-trigger)
-                dwellAnchorLocalXY = cursorXY;
-                chargeProgress = 0f;
-            }
-
-            float requiredDuration = canInteractAction
-                ? (isPinching ? PinchHoldDurationSeconds : DwellDurationSeconds)
-                : LockedWarnDurationSeconds;
+            float requiredDuration = canInteractAction ? FistHoldDurationSeconds : LockedWarnDurationSeconds;
             chargeProgress = Mathf.Clamp01(chargeProgress + (dt / requiredDuration));
 
             if (chargeProgress >= 1f)
             {
                 chargeProgress = 0f;
-                hasDwellAnchor = false;
                 requiresRearm = true;
                 rearmCooldownTimer = RearmCooldownSeconds;
 
@@ -278,8 +259,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         }
         else
         {
-            hasDwellAnchor = false;
-            chargeProgress = Mathf.Max(0f, chargeProgress - (dt * 3.5f));
+            chargeProgress = Mathf.Max(0f, chargeProgress - (dt * 4.0f));
         }
 
         // 4. Perbarui visual Halo Diegetik, Cincin Progres, & Lencana Mikro
@@ -289,7 +269,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             effectiveReadyForNext,
             isAwaitingSandboxTransition,
             isCircuitComplete,
-            insideZone && !canInteractAction,
+            insideZone && !canInteractAction && isFistActive,
             isUiOverlayOpen);
     }
 

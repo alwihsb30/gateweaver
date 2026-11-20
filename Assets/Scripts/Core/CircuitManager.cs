@@ -1,6 +1,13 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+public struct ManualConnectionEdge
+{
+    public GateNode source;
+    public GateNode target;
+    public int targetSlotIndex;
+}
+
 public class CircuitManager : MonoBehaviour
 {
     [Header("1. Daftar Node & Parameter Spasial")]
@@ -17,8 +24,14 @@ public class CircuitManager : MonoBehaviour
     [Tooltip("Jumlah kartu gerbang logika (AND, OR, NOT, XOR, NAND) yang sedang aktif terdeteksi kamera")]
     public int activeGateCardsCount = 0;
 
+    [HideInInspector]
+    public bool useManualRouting = false;
+
     private readonly List<GateNode> trackedNodes = new List<GateNode>();
     private readonly List<GateNode> expressionActivePath = new List<GateNode>();
+    private readonly List<ManualConnectionEdge> manualConnections = new List<ManualConnectionEdge>(16);
+    private readonly List<GateNode> cycleQueue = new List<GateNode>(16);
+    private readonly List<GateNode> cycleVisited = new List<GateNode>(16);
     private Camera cachedMainCamera;
     private Transform currentSortCameraTransform;
     private System.Comparison<GateNode> cachedNodeSortComparison;
@@ -106,16 +119,24 @@ public class CircuitManager : MonoBehaviour
             currentSortCameraTransform = null;
         }
 
-        // 3A. Hubungkan seluruh kartu InputSource ke kartu Gerbang Logika terdekat (Greedy Closest-Pair).
-        // Selama masih ada kartu gerbang logika aktif di rangkaian (activeGateCardsCount > 0),
-        // InputSource TIDAK PERNAH menyambung langsung ke OutputActuator.
-        float maxInputReach = maxSnapDistance * Mathf.Max(1f, inputSourceRangeMultiplier);
-        RouteInputSources(camTransform, maxInputReach);
+        // 3. Routing koneksi: Mode Udara manual (port-ke-port + fan-out) vs Mode Kartu v5 auto-routing spasial (dibekukan)
+        if (useManualRouting)
+        {
+            ApplyManualConnections();
+        }
+        else
+        {
+            // 3A. Hubungkan seluruh kartu InputSource ke kartu Gerbang Logika terdekat (Greedy Closest-Pair).
+            // Selama masih ada kartu gerbang logika aktif di rangkaian (activeGateCardsCount > 0),
+            // InputSource TIDAK PERNAH menyambung langsung ke OutputActuator.
+            float maxInputReach = maxSnapDistance * Mathf.Max(1f, inputSourceRangeMultiplier);
+            RouteInputSources(camTransform, maxInputReach);
 
-        // 3B. Hubungkan antar-kartu Gerbang Logika (Gate -> Gate) dan terakhir menuju OutputActuator (Gate -> Output).
-        // Dipisahkan menjadi dua tahap agar gerbang yang masih membutuhkan input (misal AND setelah NOT pada Level 3)
-        // selalu diprioritaskan daripada melompat langsung ke OutputActuator.
-        RouteLogicGates(camTransform);
+            // 3B. Hubungkan antar-kartu Gerbang Logika (Gate -> Gate) dan terakhir menuju OutputActuator (Gate -> Output).
+            // Dipisahkan menjadi dua tahap agar gerbang yang masih membutuhkan input (misal AND setelah NOT pada Level 3)
+            // selalu diprioritaskan daripada melompat langsung ke OutputActuator.
+            RouteLogicGates(camTransform);
+        }
 
         // 4. Evaluasi logika gerbang secara berurutan dari kiri ke kanan hingga nilai sinyal stabil
         int maxPasses = Mathf.Max(1, trackedNodes.Count);
@@ -341,6 +362,163 @@ public class CircuitManager : MonoBehaviour
 
             current = current.connectedTarget;
             safetyCounter--;
+        }
+
+        return false;
+    }
+
+    public void SetManualRoutingMode(bool enabled)
+    {
+        useManualRouting = enabled;
+        if (!enabled)
+        {
+            manualConnections.Clear();
+        }
+    }
+
+    public void SetManualConnections(List<ManualConnectionEdge> edges)
+    {
+        manualConnections.Clear();
+        if (edges == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < edges.Count; i++)
+        {
+            manualConnections.Add(edges[i]);
+        }
+    }
+
+    /// <summary>
+    /// Mengecek apakah penambahan kabel manual source -> target membentuk siklus pada DAG fan-out (zero-GC).
+    /// </summary>
+    public bool WouldManualConnectionCreateCycle(GateNode candidateSource, GateNode candidateTarget)
+    {
+        if (candidateSource == null || candidateTarget == null)
+        {
+            return true;
+        }
+        if (candidateSource == candidateTarget)
+        {
+            return true;
+        }
+
+        cycleQueue.Clear();
+        cycleVisited.Clear();
+        cycleQueue.Add(candidateTarget);
+        cycleVisited.Add(candidateTarget);
+
+        int head = 0;
+        while (head < cycleQueue.Count)
+        {
+            GateNode current = cycleQueue[head++];
+            for (int i = 0; i < manualConnections.Count; i++)
+            {
+                ManualConnectionEdge edge = manualConnections[i];
+                if (edge.source != current || edge.target == null)
+                {
+                    continue;
+                }
+                if (edge.target == candidateSource)
+                {
+                    return true;
+                }
+                if (!cycleVisited.Contains(edge.target))
+                {
+                    cycleVisited.Add(edge.target);
+                    cycleQueue.Add(edge.target);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void ApplyManualConnections()
+    {
+        for (int slotPass = 0; slotPass < 2; slotPass++)
+        {
+            for (int i = 0; i < manualConnections.Count; i++)
+            {
+                ManualConnectionEdge edge = manualConnections[i];
+                int normalizedSlot = edge.targetSlotIndex == 1 ? 1 : 0;
+                if (normalizedSlot != slotPass)
+                {
+                    continue;
+                }
+
+                GateNode src = edge.source;
+                GateNode dst = edge.target;
+                if (src == null || dst == null || src == dst || !src.isTracked || !dst.isTracked)
+                {
+                    continue;
+                }
+                if (src.nodeType == NodeType.OutputActuator || dst.nodeType == NodeType.InputSource)
+                {
+                    continue;
+                }
+                if (dst.connectedInputs.Count >= dst.GetMaxInputCount())
+                {
+                    continue;
+                }
+                // Pengaman lapis kedua anti parallel duplicate edge: tolak pasangan (source, target) identik di slot kedua (zero-GC)
+                bool duplicateOnTarget = false;
+                for (int k = 0; k < dst.connectedInputs.Count; k++)
+                {
+                    if (dst.connectedInputs[k] == src)
+                    {
+                        duplicateOnTarget = true;
+                        break;
+                    }
+                }
+                if (duplicateOnTarget)
+                {
+                    continue;
+                }
+                if (WouldAppliedInputsCreateCycle(src, dst))
+                {
+                    continue;
+                }
+
+                if (src.connectedTarget == null)
+                {
+                    src.connectedTarget = dst;
+                }
+                dst.connectedInputs.Add(src);
+            }
+        }
+    }
+
+    private bool WouldAppliedInputsCreateCycle(GateNode source, GateNode target)
+    {
+        cycleQueue.Clear();
+        cycleVisited.Clear();
+        cycleQueue.Add(source);
+        cycleVisited.Add(source);
+
+        int head = 0;
+        while (head < cycleQueue.Count)
+        {
+            GateNode current = cycleQueue[head++];
+            List<GateNode> inputs = current.connectedInputs;
+            for (int i = 0; i < inputs.Count; i++)
+            {
+                GateNode prev = inputs[i];
+                if (prev == null)
+                {
+                    continue;
+                }
+                if (prev == target)
+                {
+                    return true;
+                }
+                if (!cycleVisited.Contains(prev))
+                {
+                    cycleVisited.Add(prev);
+                    cycleQueue.Add(prev);
+                }
+            }
         }
 
         return false;
