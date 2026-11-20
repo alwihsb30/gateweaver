@@ -2,15 +2,26 @@ using System;
 using UnityEngine;
 using TMPro;
 
+public enum OutputDebugGuidanceState
+{
+    ConnectToOutput = 0,
+    ReduceGates = 1,
+    CheckRedCells = 2,
+    TestSwitches = 3,
+    PassedAllFour = 4
+}
+
 /// <summary>
-/// Pengendali interaksi spasial Zero-Touch pada diorama 3D Output (GateWeaver AR v7.0 Fase 2).
-/// - 100% terisolasi di Mode Udara (disembunyikan penuh di Mode Kartu & di Mode Sandbox).
-/// - Menampilkan affordance diegetik zero-tutorial pada Card_Output:
-///   * Belum lengkap: tersembunyi (atau cincin amber terkunci singkat bila disentuh paksa).
-///   * Siap diuji: Halo denyut sian-emas mengelilingi diorama + lencana mikro [ TAHAN: UJI ] di bawah Pod LED 2x2.
-///   * Level lulus: Halo ganda hijau zamrud + lencana mikro [ TAHAN: LANJUT >> ] / [ TAHAN: SANDBOX >> ].
-/// - Melindungi pemicu dengan kontrak Mutual Exclusion ketat (grab, 0.65s post-drop lockout, hover gerbang, Air-Draw,
-///   verifikasi, & UI overlay terbuka) serta Re-Arm Guard (wajib keluar radius + jeda 1.0 dtk pasca-aksi).
+/// Pemandu debugging mandiri live pada diorama 3D Output khusus Mode Udara (GateWeaver AR v7.0 Polishing Final).
+/// - 100% terisolasi di Mode Udara (disembunyikan penuh di Mode Kartu & Mode Sandbox).
+/// - Menonaktifkan jalan pintas tahan-kepal [ KEPAL: UJI ] agar pemain melakukan debugging mandiri lewat sakelar Input A/B
+///   hingga 4/4 sel Pod LED menyala hijau (Auto-Win). Setelah lulus, tahan-kepal tetap aktif untuk lanjut level Zero-Touch.
+/// - Menampilkan lencana pemandu live tepat di bawah Pod LED 2x2:
+///   * Belum terhubung valid: "SAMBUNG KE OUTPUT"
+///   * Melebihi kuota gerbang: "KURANGI GERBANG!" (merah)
+///   * Ada minimal 1 sel Pod LED merah: "CEK SEL MERAH!" (merah-oranye)
+///   * Belum 4/4 teruji: "UJI SAKELAR (X/4)" (sian)
+///   * 4/4 hijau & dalam kuota: "LULUS! 4/4" (hijau)
 /// - Zero-GC & shader OpenGLES3-safe (Sprites/Default, seluruh material dibersihkan di OnDestroy).
 /// </summary>
 public sealed class AirWeavingOutputTrigger : MonoBehaviour
@@ -19,24 +30,38 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     private const float OutputInteractRadius = 0.28f;
     private const float OutputRearmRadius = 0.38f;
     private const float FistHoldDurationSeconds = 0.45f;
-    private const float LockedWarnDurationSeconds = 0.40f;
     private const float RearmCooldownSeconds = 0.85f;
     private const float HaloCenterUpOffset = 0.145f;
     private const float HaloRadius = 0.155f;
-    private const float BadgeBelowOffset = -0.255f;
+    private const float BadgeBelowOffset = -0.405f;
 
-    private const string BadgeTextVerify = "[ KEPAL: UJI ]";
-    private const string BadgeTextNext = "[ KEPAL: LANJUT >> ]";
-    private const string BadgeTextSandbox = "[ KEPAL: SANDBOX >> ]";
+    // Jalan pintas tahan-kepal untuk verifikasi dinonaktifkan 100% di Mode Udara demi debugging mandiri
+    private static readonly bool EnableHoldToVerifyShortcut = false;
 
-    private static readonly Color ReadyHaloCyanColor = new Color(0.22f, 0.94f, 1.00f, 0.78f);
-    private static readonly Color ReadyHaloGoldColor = new Color(1.00f, 0.86f, 0.28f, 0.88f);
-    private static readonly Color WinHaloGreenColor = new Color(0.18f, 1.00f, 0.56f, 0.90f);
-    private static readonly Color WinHaloOuterColor = new Color(0.32f, 1.00f, 0.76f, 0.48f);
-    private static readonly Color LockedAmberColor = new Color(1.00f, 0.62f, 0.18f, 0.62f);
-    private static readonly Color BadgeBackdropColor = new Color(0.03f, 0.06f, 0.12f, 0.86f);
-    private static readonly Color BadgeVerifyTextColor = new Color(0.86f, 0.98f, 1.00f, 1f);
-    private static readonly Color BadgeWinTextColor = new Color(0.38f, 1.00f, 0.68f, 1f);
+    private const string BadgeConnectToOutput = "SAMBUNG KE OUTPUT";
+    private const string BadgeReduceGates = "KURANGI GERBANG!";
+    private const string BadgeCheckRedCells = "CEK SEL MERAH!";
+    private const string BadgePassedAllFour = "LULUS! 4/4";
+    private static readonly string[] BadgeTestSwitchesCache =
+    {
+        "UJI SAKELAR (0/4)",
+        "UJI SAKELAR (1/4)",
+        "UJI SAKELAR (2/4)",
+        "UJI SAKELAR (3/4)"
+    };
+
+    private static readonly Color TestHaloCyanColor = new Color(0.24f, 0.94f, 1.00f, 0.72f);
+    private static readonly Color OverQuotaHaloRedColor = new Color(1.00f, 0.24f, 0.24f, 0.88f);
+    private static readonly Color CheckRedHaloOrangeColor = new Color(1.00f, 0.46f, 0.18f, 0.86f);
+    private static readonly Color WinHaloGreenColor = new Color(0.18f, 1.00f, 0.56f, 0.92f);
+    private static readonly Color WinHaloOuterColor = new Color(0.32f, 1.00f, 0.76f, 0.52f);
+    private static readonly Color BadgeBackdropColor = new Color(0.03f, 0.06f, 0.12f, 0.88f);
+
+    private static readonly Color TextConnectColor = new Color(0.76f, 0.88f, 0.96f, 1f);
+    private static readonly Color TextOverQuotaRedColor = new Color(1.00f, 0.34f, 0.32f, 1f);
+    private static readonly Color TextCheckRedOrangeColor = new Color(1.00f, 0.54f, 0.24f, 1f);
+    private static readonly Color TextTestCyanColor = new Color(0.42f, 0.96f, 1.00f, 1f);
+    private static readonly Color TextWinGreenColor = new Color(0.36f, 1.00f, 0.68f, 1f);
 
     public event Action OnVerifyRequested;
     public event Action OnNextLevelRequested;
@@ -77,36 +102,36 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         visualRootObj = new GameObject("AR_AirWeavingOutputTrigger");
         visualRootObj.transform.SetParent(transform, false);
 
-        invitationMat = CreateSafeSpritesMaterial(ReadyHaloCyanColor, 3016);
+        invitationMat = CreateSafeSpritesMaterial(TestHaloCyanColor, 3016);
         winOuterMat = CreateSafeSpritesMaterial(WinHaloOuterColor, 3015);
-        progressMat = CreateSafeSpritesMaterial(ReadyHaloGoldColor, 3018);
+        progressMat = CreateSafeSpritesMaterial(WinHaloGreenColor, 3018);
         badgeBackdropMat = CreateSafeSpritesMaterial(BadgeBackdropColor, 2995);
 
         invitationRingRenderer = CreateRingRenderer("Output_InvitationHalo", visualRootObj.transform, RingSegments, loop: true, width: 0.008f, invitationMat);
         winOuterRingRenderer = CreateRingRenderer("Output_WinOuterHalo", visualRootObj.transform, RingSegments, loop: true, width: 0.006f, winOuterMat);
         progressArcRenderer = CreateRingRenderer("Output_ProgressArc", visualRootObj.transform, 0, loop: false, width: 0.015f, progressMat);
 
-        // Lencana mikro diegetik di bawah Pod LED 2x2 (bebas tabrakan dengan Label_Status3D & OutputTruthPod3D)
+        // Lencana pemandu debugging live tepat di bawah Pod LED 2x2
         badgeRootObj = new GameObject("Output_AffordanceBadge");
         badgeRootObj.transform.SetParent(visualRootObj.transform, false);
 
         badgeText = badgeRootObj.AddComponent<TextMeshPro>();
-        badgeText.fontSize = 0.44f;
+        badgeText.fontSize = 0.42f;
         badgeText.fontStyle = FontStyles.Bold;
         badgeText.alignment = TextAlignmentOptions.Center;
         badgeText.textWrappingMode = TextWrappingModes.NoWrap;
-        badgeText.color = BadgeVerifyTextColor;
+        badgeText.color = TextConnectColor;
         RectTransform txtRect = badgeText.rectTransform;
         if (txtRect != null)
         {
-            txtRect.sizeDelta = new Vector2(2.2f, 0.45f);
+            txtRect.sizeDelta = new Vector2(2.4f, 0.45f);
         }
 
         GameObject bgQuad = GameObject.CreatePrimitive(PrimitiveType.Quad);
         bgQuad.name = "Badge_Backdrop";
         bgQuad.transform.SetParent(badgeRootObj.transform, false);
         bgQuad.transform.localPosition = new Vector3(0f, 0f, 0.010f);
-        bgQuad.transform.localScale = new Vector3(0.54f, 0.088f, 1f);
+        bgQuad.transform.localScale = new Vector3(0.66f, 0.088f, 1f);
         Collider col = bgQuad.GetComponent<Collider>();
         if (col != null)
         {
@@ -149,7 +174,8 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     }
 
     /// <summary>
-    /// Memperbarui deteksi Kepal (Fist) pada badan Card_Output serta visual halo & cincin progres. Zero-GC.
+    /// Memperbarui pemandu debugging live pada Card_Output. Hold-to-verify dinonaktifkan penuh;
+    /// tahan-kepal hanya aktif pasca-Auto-Win untuk melanjutkan level secara Zero-Touch. Zero-GC.
     /// </summary>
     public void Tick(
         Camera mainCam,
@@ -159,7 +185,6 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         bool isVerifying,
         bool isCircuitComplete,
         bool isReadyForNextLevel,
-        bool isAwaitingSandboxTransition,
         bool isUiOverlayOpen,
         bool isHandDetected,
         bool isFistActive,
@@ -171,14 +196,16 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         bool isTargetingPort,
         bool isDraggingCable,
         bool isRecordingAirDraw,
-        float postDropLockoutTimer)
+        float postDropLockoutTimer,
+        OutputDebugGuidanceState guidanceState,
+        int passedRowCount)
     {
         if (!isVisualInitialized)
         {
             return;
         }
 
-        // 1. Isolasi penuh: selalu tersembunyi di Mode Kartu, Mode Sandbox, atau saat sedang verifikasi
+        // 1. Isolasi penuh: selalu tersembunyi di Mode Kartu, Mode Sandbox, atau saat sedang verifikasi/animasi fanfare
         if (!isAirWeavingActive || mainCam == null || isSandboxMode || isVerifying)
         {
             if (visualRootObj != null && visualRootObj.activeSelf)
@@ -198,7 +225,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             visualRootObj.SetActive(true);
         }
 
-        // Edge detection: saat baru saja lulus level pada rangkaian lengkap, wajib Re-Arm agar selebrasi tidak langsung melompat level
+        // Edge detection pasca-Auto-Win: wajib Re-Arm singkat agar selebrasi tidak langsung melompat level
         bool effectiveReadyForNext = isReadyForNextLevel && isCircuitComplete;
         if (effectiveReadyForNext && !wasReadyForNext)
         {
@@ -213,17 +240,14 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             rearmCooldownTimer = Mathf.Max(0f, rearmCooldownTimer - dt);
         }
 
-        // Pusat interaksi sedikit bergeser ke kanan-atas badan diorama (bebas Port_In di kiri & Pod LED di bawah)
         Vector2 targetCenterLocalXY = new Vector2(outputLocalXY.x + 0.03f, outputLocalXY.y + 0.10f);
         float distToOutput = isHandDetected ? Vector2.Distance(cursorLocalXY, targetCenterLocalXY) : float.MaxValue;
 
-        // Re-arm terpenuhi setelah jeda selesai dan tangan dibuka (Open) atau keluar radius
         if (requiresRearm && rearmCooldownTimer <= 0f && (!isHandDetected || !isFistActive || distToOutput > OutputRearmRadius))
         {
             requiresRearm = false;
         }
 
-        // 2. Kontrak Mutual Exclusion ketat (yield penuh bila membidik Port_In / menarik kabel / memegang gerbang)
         bool blockedByMutualExclusion = isUiOverlayOpen
                                         || isGrabbingGate
                                         || isHoveringGate
@@ -232,14 +256,13 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
                                         || isRecordingAirDraw
                                         || postDropLockoutTimer > 0f;
 
-        bool canInteractAction = effectiveReadyForNext || isCircuitComplete;
-        bool insideZone = isHandDetected && !blockedByMutualExclusion && distToOutput <= OutputInteractRadius;
+        // 2. Nonaktifkan jalan pintas hold-to-verify: tahan-kepal hanya aktif bila level sudah LULUS (untuk lanjut level Zero-Touch)
+        bool allowHoldAction = effectiveReadyForNext || (EnableHoldToVerifyShortcut && isCircuitComplete);
+        bool insideZone = allowHoldAction && isHandDetected && !blockedByMutualExclusion && distToOutput <= OutputInteractRadius;
 
-        // 3. Aksi tunggal Skema 2: Buka = arahkan kursor santai, Kepal (Fist) di atas Output = isi cincin progres & picu aksi
         if (insideZone && isFistActive && !requiresRearm)
         {
-            float requiredDuration = canInteractAction ? FistHoldDurationSeconds : LockedWarnDurationSeconds;
-            chargeProgress = Mathf.Clamp01(chargeProgress + (dt / requiredDuration));
+            chargeProgress = Mathf.Clamp01(chargeProgress + (dt / FistHoldDurationSeconds));
 
             if (chargeProgress >= 1f)
             {
@@ -251,7 +274,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
                 {
                     OnNextLevelRequested?.Invoke();
                 }
-                else
+                else if (EnableHoldToVerifyShortcut)
                 {
                     OnVerifyRequested?.Invoke();
                 }
@@ -262,14 +285,13 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             chargeProgress = Mathf.Max(0f, chargeProgress - (dt * 4.0f));
         }
 
-        // 4. Perbarui visual Halo Diegetik, Cincin Progres, & Lencana Mikro
+        // 3. Perbarui visual Halo & Lencana Pemandu Debugging Mandiri
         UpdateVisuals(
             mainCam.transform,
             outputWorldPos,
             effectiveReadyForNext,
-            isAwaitingSandboxTransition,
-            isCircuitComplete,
-            insideZone && !canInteractAction && isFistActive,
+            guidanceState,
+            passedRowCount,
             isUiOverlayOpen);
     }
 
@@ -292,17 +314,12 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         badgeBackdropTransform = null;
     }
 
-    // =========================================================================
-    // DIEGETIC VISUALS (CAMERA-FACING HALO, PROGRESS ARC, & MICRO-BADGE)
-    // =========================================================================
-
     private void UpdateVisuals(
         Transform camT,
         Vector3 outputWorldPos,
         bool isReadyForNextLevel,
-        bool isAwaitingSandboxTransition,
-        bool isCircuitComplete,
-        bool showLockedAmber,
+        OutputDebugGuidanceState guidanceState,
+        int passedRowCount,
         bool isUiOverlayOpen)
     {
         if (isUiOverlayOpen)
@@ -322,8 +339,8 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         Vector3 camForward = camT.forward;
         Vector3 haloCenter = outputWorldPos + (camUp * HaloCenterUpOffset) - (camForward * 0.16f);
 
-        // A. Halo Ajakan (Invitation Ring)
-        if (isReadyForNextLevel)
+        // A. Halo Diegetik sesuai status debugging live
+        if (isReadyForNextLevel || guidanceState == OutputDebugGuidanceState.PassedAllFour)
         {
             float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 5.0f));
             float innerR = HaloRadius + (0.010f * pulse);
@@ -331,17 +348,22 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, camRight, camUp, innerR, WinHaloGreenColor, 0.0085f);
             DrawFullCircle(winOuterRingRenderer, winOuterRingPoints, haloCenter, camRight, camUp, outerR, WinHaloOuterColor, 0.0055f);
         }
-        else if (isCircuitComplete)
+        else if (guidanceState == OutputDebugGuidanceState.ReduceGates)
         {
-            float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 2.6f));
-            Color haloColor = Color.Lerp(ReadyHaloCyanColor, ReadyHaloGoldColor, pulse * 0.65f);
-            float r = HaloRadius + (0.009f * pulse);
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, camRight, camUp, r, haloColor, 0.0075f);
+            float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 6.5f));
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, camRight, camUp, HaloRadius + (0.009f * pulse), OverQuotaHaloRedColor, 0.0085f);
             SetRingEnabled(winOuterRingRenderer, false);
         }
-        else if (showLockedAmber)
+        else if (guidanceState == OutputDebugGuidanceState.CheckRedCells)
         {
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, camRight, camUp, HaloRadius, LockedAmberColor, 0.0065f);
+            float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 5.5f));
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, camRight, camUp, HaloRadius + (0.008f * pulse), CheckRedHaloOrangeColor, 0.0075f);
+            SetRingEnabled(winOuterRingRenderer, false);
+        }
+        else if (guidanceState == OutputDebugGuidanceState.TestSwitches)
+        {
+            float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 2.6f));
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, camRight, camUp, HaloRadius + (0.006f * pulse), TestHaloCyanColor, 0.0065f);
             SetRingEnabled(winOuterRingRenderer, false);
         }
         else
@@ -350,7 +372,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             SetRingEnabled(winOuterRingRenderer, false);
         }
 
-        // B. Cincin Progres 0 -> 360 derajat saat tangan menahan
+        // B. Cincin Progres 0 -> 360 derajat (hanya pasca-Auto-Win saat menahan Kepal untuk lanjut level)
         if (chargeProgress > 0.01f && progressArcRenderer != null)
         {
             int segCount = Mathf.Clamp(Mathf.CeilToInt(chargeProgress * RingSegments), 2, RingSegments);
@@ -361,25 +383,18 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             for (int i = 0; i <= segCount; i++)
             {
                 float frac = i / (float)segCount;
-                // Mulai dari puncak jam 12 (+camUp), mengisi searah jarum jam
                 float angle = (Mathf.PI * 0.5f) - (frac * maxAngle);
                 progressArcPoints[i] = arcCenter + (camRight * (Mathf.Cos(angle) * arcRadius)) + (camUp * (Mathf.Sin(angle) * arcRadius));
             }
 
-            Color progColor = showLockedAmber
-                ? new Color(1.00f, 0.72f, 0.18f, 0.98f)
-                : (isReadyForNextLevel
-                    ? WinHaloGreenColor
-                    : Color.Lerp(ReadyHaloCyanColor, ReadyHaloGoldColor, chargeProgress));
-
             if (progressMat != null)
             {
-                progressMat.color = progColor;
+                progressMat.color = WinHaloGreenColor;
             }
             progressArcRenderer.enabled = true;
             progressArcRenderer.positionCount = segCount + 1;
-            progressArcRenderer.startColor = progColor;
-            progressArcRenderer.endColor = progColor;
+            progressArcRenderer.startColor = WinHaloGreenColor;
+            progressArcRenderer.endColor = WinHaloGreenColor;
             progressArcRenderer.SetPositions(progressArcPoints);
         }
         else
@@ -387,37 +402,72 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             SetRingEnabled(progressArcRenderer, false);
         }
 
-        // C. Lencana Mikro Diegetik tepat di bawah Pod LED 2x2 (bebas tabrakan dengan Pod & Label_Status3D)
-        bool showBadge = isReadyForNextLevel || isCircuitComplete;
+        // C. Lencana Pemandu Debugging Mandiri tepat di bawah Pod LED 2x2 (selalu tampil di Mode Udara kurikulum)
         if (badgeRootObj != null)
         {
-            if (badgeRootObj.activeSelf != showBadge)
+            if (!badgeRootObj.activeSelf)
             {
-                badgeRootObj.SetActive(showBadge);
+                badgeRootObj.SetActive(true);
             }
 
-            if (showBadge)
+            Vector3 badgePos = outputWorldPos + (camUp * BadgeBelowOffset) - (camForward * 0.22f);
+            badgeRootObj.transform.position = badgePos;
+            // Sejajar penuh dengan bidang kamera (flat camera-facing, bebas efek miring/terpelintir di sisi layar)
+            badgeRootObj.transform.rotation = camT.rotation;
+
+            OutputDebugGuidanceState effectiveState = isReadyForNextLevel ? OutputDebugGuidanceState.PassedAllFour : guidanceState;
+            string desiredText = ResolveGuidanceText(effectiveState, passedRowCount, out Color desiredColor, out float desiredWidth);
+
+            if (!string.Equals(desiredText, lastBadgeText, StringComparison.Ordinal) && badgeText != null)
             {
-                Vector3 badgePos = outputWorldPos + (camUp * BadgeBelowOffset) - (camForward * 0.20f);
-                badgeRootObj.transform.position = badgePos;
-                badgeRootObj.transform.rotation = Quaternion.LookRotation(badgePos - camT.position, camUp);
-
-                string desiredText = isReadyForNextLevel
-                    ? (isAwaitingSandboxTransition ? BadgeTextSandbox : BadgeTextNext)
-                    : BadgeTextVerify;
-
-                if (!string.Equals(desiredText, lastBadgeText, StringComparison.Ordinal) && badgeText != null)
+                lastBadgeText = desiredText;
+                badgeText.text = desiredText;
+                if (badgeBackdropTransform != null)
                 {
-                    lastBadgeText = desiredText;
-                    badgeText.text = desiredText;
-                    badgeText.color = isReadyForNextLevel ? BadgeWinTextColor : BadgeVerifyTextColor;
-                    if (badgeBackdropTransform != null)
-                    {
-                        float width = isReadyForNextLevel ? 0.64f : 0.48f;
-                        badgeBackdropTransform.localScale = new Vector3(width, 0.084f, 1f);
-                    }
+                    badgeBackdropTransform.localScale = new Vector3(desiredWidth, 0.088f, 1f);
                 }
             }
+
+            if (badgeText != null)
+            {
+                badgeText.color = desiredColor;
+            }
+        }
+    }
+
+    private static string ResolveGuidanceText(
+        OutputDebugGuidanceState state,
+        int passedRowCount,
+        out Color textColor,
+        out float backdropWidth)
+    {
+        switch (state)
+        {
+            case OutputDebugGuidanceState.ReduceGates:
+                textColor = TextOverQuotaRedColor;
+                backdropWidth = 0.64f;
+                return BadgeReduceGates;
+
+            case OutputDebugGuidanceState.CheckRedCells:
+                textColor = TextCheckRedOrangeColor;
+                backdropWidth = 0.58f;
+                return BadgeCheckRedCells;
+
+            case OutputDebugGuidanceState.TestSwitches:
+                textColor = TextTestCyanColor;
+                backdropWidth = 0.64f;
+                int clampedPassed = Mathf.Clamp(passedRowCount, 0, BadgeTestSwitchesCache.Length - 1);
+                return BadgeTestSwitchesCache[clampedPassed];
+
+            case OutputDebugGuidanceState.PassedAllFour:
+                textColor = TextWinGreenColor;
+                backdropWidth = 0.46f;
+                return BadgePassedAllFour;
+
+            default:
+                textColor = TextConnectColor;
+                backdropWidth = 0.68f;
+                return BadgeConnectToOutput;
         }
     }
 

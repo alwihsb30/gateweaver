@@ -1,4 +1,5 @@
 using UnityEngine;
+using TMPro;
 
 public enum OutputPodCellStatus
 {
@@ -9,15 +10,13 @@ public enum OutputPodCellStatus
 }
 
 /// <summary>
-/// Modul Pod LED Ikon 2x2 tanpa angka biner mentah pada Card_Output (GateWeaver AR v7.0 Fase 1).
-/// - Ditempatkan miring menghadap kamera di bibir depan alas AR_BaseTile3D (0.48 x 0.22, muat di dalam tapak 0.56 kartu fisik,
-///   tepi bawah Y > 0 aman dari meja Mode Kartu & tepi atas-belakang bebas dari seluruh 5 diorama maupun Label_Status3D).
-/// - Pemisahan visual tegas:
-///   * Kiri sel: 2 dot vertikal kondisi input (Atas = Input A Sian, Bawah = Input B Kuning).
-///   * Kanan sel: BENTUK target misi (Bola padat terang = Target AKTIF, Cincin berlubang gelap = Target MATI).
-///   * Pelat latar sel: WARNA status eksperimen/uji (Abu gelap = Belum diuji, Hijau = Cocok target, Merah = Salah,
-///     Putih-Biru elektrik berdenyut = Sedang dipindai — bebas bentrok dengan kuning Input B).
-/// - Otomatis tersembunyi penuh di Mode Sandbox dan bebas alokasi GC (2 shared material + 1 MaterialPropertyBlock).
+/// Modul Pod Tabel Kebenaran 2x2 pada Card_Output (GateWeaver AR v7.0 Polishing Final).
+/// - Menampilkan 4 kotak mini dengan label biner 2 digit tegas & rata tengah: "00", "01", "10", "11".
+/// - Warna status jernih: abu gelap = belum diuji, tepi sian terang = kombinasi aktif saat ini,
+///   hijau = lolos, merah = gagal, putih-biru = sedang dipindai.
+/// - Mode Kartu (v5): terpasang miring -48° di bibir depan kartu fisik (zero-regression).
+/// - Mode Udara (v7): otomatis sejajar rata menghadap kamera (camera-facing) tanpa miring/terpelintir
+///   dengan spasi bersih di atas lencana pemandu Output. Zero-GC & shader aman OpenGLES3.
 /// </summary>
 public sealed class OutputTruthPodVisual : MonoBehaviour
 {
@@ -28,47 +27,40 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
     private static readonly int GlossinessPropId = Shader.PropertyToID("_Glossiness");
     private static readonly int MetallicPropId = Shader.PropertyToID("_Metallic");
 
-    // Koordinat sel 2x2 pada bidang lokal +Y tray (lebar total tray 0.48, tinggi 0.22)
+    private static readonly string[] BinaryRowLabels = { "00", "01", "10", "11" };
+
+    // Koordinat 4 sel 2x2 simetris pada bidang lokal +Y tray (lebar 0.50, tinggi 0.24)
     private static readonly Vector2[] CellOffsetsXZ =
     {
-        new Vector2(-0.112f,  0.048f), // Row 0: A=0, B=0 (Kiri Atas)
-        new Vector2( 0.112f,  0.048f), // Row 1: A=0, B=1 (Kanan Atas)
-        new Vector2(-0.112f, -0.048f), // Row 2: A=1, B=0 (Kiri Bawah)
-        new Vector2( 0.112f, -0.048f)  // Row 3: A=1, B=1 (Kanan Bawah)
+        new Vector2(-0.120f,  0.054f), // Row 0: 00 (Kiri Atas)
+        new Vector2( 0.120f,  0.054f), // Row 1: 01 (Kanan Atas)
+        new Vector2(-0.120f, -0.054f), // Row 2: 10 (Kiri Bawah)
+        new Vector2( 0.120f, -0.054f)  // Row 3: 11 (Kanan Bawah)
     };
 
-    // Palet warna ortogonal (bebas bentrok antara Input A Sian, Input B Kuning, Target, & Status)
-    private static readonly Color TrayBodyColor = new Color(0.11f, 0.14f, 0.19f, 1f);
-    private static readonly Color TrayTrimColor = new Color(0.42f, 0.50f, 0.60f, 1f);
+    private static readonly Vector3 CardModeLocalPos = new Vector3(0f, 0.085f, -0.34f);
+    private static readonly Quaternion CardModeLocalRot = Quaternion.Euler(-48f, 0f, 0f);
 
-    private static readonly Color InputADotOnColor = new Color(0.18f, 0.85f, 1.00f, 1f);
-    private static readonly Color InputADotOnEmit = new Color(0.16f, 0.80f, 1.00f, 1f) * 1.20f;
-    private static readonly Color InputADotOffColor = new Color(0.12f, 0.17f, 0.23f, 1f);
-    private static readonly Color InputADotOffEmit = new Color(0.03f, 0.05f, 0.08f, 1f);
+    // Palet warna tegas & kontras tinggi
+    private static readonly Color TrayBodyColor = new Color(0.08f, 0.11f, 0.16f, 1f);
+    private static readonly Color TrayTrimColor = new Color(0.32f, 0.42f, 0.54f, 1f);
 
-    private static readonly Color InputBDotOnColor = new Color(1.00f, 0.84f, 0.22f, 1f);
-    private static readonly Color InputBDotOnEmit = new Color(1.00f, 0.80f, 0.18f, 1f) * 1.20f;
-    private static readonly Color InputBDotOffColor = new Color(0.17f, 0.16f, 0.12f, 1f);
-    private static readonly Color InputBDotOffEmit = new Color(0.05f, 0.04f, 0.02f, 1f);
-
-    private static readonly Color TargetOnOrbColor = new Color(0.92f, 1.00f, 0.98f, 1f);
-    private static readonly Color TargetOnOrbEmit = new Color(0.84f, 1.00f, 0.96f, 1f) * 1.25f;
-    private static readonly Color TargetOffRingColor = new Color(0.68f, 0.78f, 0.88f, 1f);
-    private static readonly Color TargetOffRingEmit = new Color(0.32f, 0.42f, 0.54f, 1f) * 0.90f;
-
-    private static readonly Color StatusUntestedColor = new Color(0.10f, 0.14f, 0.21f, 1f);
-    private static readonly Color StatusUntestedEmit = new Color(0.03f, 0.05f, 0.08f, 1f);
+    private static readonly Color StatusUntestedColor = new Color(0.14f, 0.18f, 0.25f, 1f);
+    private static readonly Color StatusUntestedEmit = new Color(0.04f, 0.06f, 0.10f, 1f);
     private static readonly Color StatusPassedColor = new Color(0.09f, 0.72f, 0.40f, 1f);
     private static readonly Color StatusPassedEmit = new Color(0.08f, 0.68f, 0.36f, 1f) * 0.95f;
-    private static readonly Color StatusFailedBaseColor = new Color(0.88f, 0.20f, 0.17f, 1f);
-    private static readonly Color StatusFailedPulseColor = new Color(1.00f, 0.44f, 0.34f, 1f);
+    private static readonly Color StatusFailedBaseColor = new Color(0.86f, 0.19f, 0.17f, 1f);
+    private static readonly Color StatusFailedPulseColor = new Color(1.00f, 0.42f, 0.32f, 1f);
     private static readonly Color StatusScanSkyColor = new Color(0.46f, 0.82f, 1.00f, 1f);
     private static readonly Color StatusScanWhiteColor = new Color(0.98f, 1.00f, 1.00f, 1f);
 
-    private static readonly Color RimIdleColor = new Color(0.20f, 0.27f, 0.36f, 1f);
-    private static readonly Color RimIdleEmit = new Color(0.05f, 0.07f, 0.10f, 1f);
-    private static readonly Color RimActiveFocusColor = new Color(0.92f, 0.96f, 1.00f, 1f);
-    private static readonly Color RimActiveFocusEmit = new Color(0.84f, 0.92f, 1.00f, 1f) * 1.15f;
+    private static readonly Color RimIdleColor = new Color(0.24f, 0.32f, 0.42f, 1f);
+    private static readonly Color RimIdleEmit = new Color(0.06f, 0.09f, 0.13f, 1f);
+    private static readonly Color RimActiveCyanColor = new Color(0.22f, 0.96f, 1.00f, 1f);
+    private static readonly Color RimActiveCyanEmit = new Color(0.20f, 0.92f, 1.00f, 1f) * 1.35f;
+
+    private static readonly Color LabelUntestedTextColor = new Color(0.84f, 0.91f, 0.98f, 1f);
+    private static readonly Color LabelActiveTextColor = new Color(1.00f, 1.00f, 1.00f, 1f);
 
     private GameObject podRootObj;
     private Material trayMetalMat;
@@ -77,11 +69,14 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
     private bool emissiveHasEmissionProp = false;
     private MaterialPropertyBlock mpb;
 
+    private GateNode ownerGateNode;
+    private Camera cachedMainCamera;
+    private bool wasAirModePose = false;
+
     private readonly Transform[] cellRootTransforms = new Transform[CellCount];
     private readonly Renderer[] cellPlateRenderers = new Renderer[CellCount];
     private readonly Renderer[] cellRimRenderers = new Renderer[CellCount];
-    private readonly GameObject[] targetOnOrbObjs = new GameObject[CellCount];
-    private readonly GameObject[] targetOffRingObjs = new GameObject[CellCount];
+    private readonly TextMeshPro[] cellBinaryLabels = new TextMeshPro[CellCount];
 
     private readonly bool[] expectedTargets = new bool[CellCount];
     private readonly OutputPodCellStatus[] cellStatuses = new OutputPodCellStatus[CellCount];
@@ -93,7 +88,7 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
     private float pulseClock = 0f;
 
     /// <summary>
-    /// Membangun seluruh struktur Pod LED 2x2 secara sinkron (dipanggil dari GateNode.Awake()).
+    /// Membangun seluruh struktur Pod Tabel Kebenaran 2x2 secara sinkron (dipanggil dari GateNode.Awake()).
     /// </summary>
     public void Initialize(Mesh sharedTorusMesh)
     {
@@ -102,37 +97,36 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
             return;
         }
 
+        ownerGateNode = GetComponent<GateNode>();
         trayMetalMat = CreateOpaqueSciFiMaterial(TrayBodyColor, 0.24f, 0.22f, enableEmission: false);
         trayTrimMat = CreateOpaqueSciFiMaterial(TrayTrimColor, 0.30f, 0.26f, enableEmission: false);
-        emissiveSharedMat = CreateOpaqueSciFiMaterial(Color.white, 0.34f, 0.12f, enableEmission: true);
+        emissiveSharedMat = CreateOpaqueSciFiMaterial(Color.white, 0.32f, 0.12f, enableEmission: true);
         emissiveHasEmissionProp = emissiveSharedMat != null && emissiveSharedMat.HasProperty(EmissionColorPropId);
         mpb = new MaterialPropertyBlock();
 
-        // Posisi terverifikasi: Z=-0.34, Y=0.085, Euler(-48,0,0) -> tepi bawah Y=+0.003 (di atas meja),
-        // tepi atas-belakang Z=-0.266 (bersih dari 5 diorama & Label_Status3D), lebar 0.48 (di dalam tapak 0.56).
         podRootObj = new GameObject("OutputTruthPod3D");
         podRootObj.transform.SetParent(transform, false);
-        podRootObj.transform.localPosition = new Vector3(0f, 0.085f, -0.34f);
-        podRootObj.transform.localRotation = Quaternion.Euler(-48f, 0f, 0f);
+        podRootObj.transform.localPosition = CardModeLocalPos;
+        podRootObj.transform.localRotation = CardModeLocalRot;
         podRootObj.transform.localScale = Vector3.one;
 
         Transform root = podRootObj.transform;
 
-        // Rangka nampan gelap + lis baja sci-fi
+        // Rangka nampan gelap simetris + lis tipis
         CreatePart("Pod_TrayBody", PrimitiveType.Cube, root,
-            Vector3.zero, Vector3.zero, new Vector3(0.480f, 0.020f, 0.220f), trayMetalMat);
+            Vector3.zero, Vector3.zero, new Vector3(0.504f, 0.018f, 0.242f), trayMetalMat);
         CreatePart("Pod_TrimTop", PrimitiveType.Cube, root,
-            new Vector3(0f, 0.009f, 0.107f), Vector3.zero, new Vector3(0.484f, 0.008f, 0.010f), trayTrimMat);
+            new Vector3(0f, 0.008f, 0.118f), Vector3.zero, new Vector3(0.508f, 0.007f, 0.008f), trayTrimMat);
         CreatePart("Pod_TrimBottom", PrimitiveType.Cube, root,
-            new Vector3(0f, 0.009f, -0.107f), Vector3.zero, new Vector3(0.484f, 0.008f, 0.010f), trayTrimMat);
+            new Vector3(0f, 0.008f, -0.118f), Vector3.zero, new Vector3(0.508f, 0.007f, 0.008f), trayTrimMat);
         CreatePart("Pod_CrossDividerV", PrimitiveType.Cube, root,
-            new Vector3(0f, 0.008f, 0f), Vector3.zero, new Vector3(0.008f, 0.008f, 0.204f), trayTrimMat);
+            new Vector3(0f, 0.007f, 0f), Vector3.zero, new Vector3(0.007f, 0.007f, 0.226f), trayTrimMat);
         CreatePart("Pod_CrossDividerH", PrimitiveType.Cube, root,
-            new Vector3(0f, 0.008f, 0f), Vector3.zero, new Vector3(0.464f, 0.008f, 0.008f), trayTrimMat);
+            new Vector3(0f, 0.007f, 0f), Vector3.zero, new Vector3(0.490f, 0.007f, 0.007f), trayTrimMat);
 
         for (int row = 0; row < CellCount; row++)
         {
-            BuildCell(row, root, sharedTorusMesh);
+            BuildCell(row, root);
         }
 
         isInitialized = true;
@@ -140,9 +134,6 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         UpdateRootVisibility();
     }
 
-    /// <summary>
-    /// Menyinkronkan visibilitas Pod dengan status tracking Card_Output (otomatis selalu mati di Sandbox).
-    /// </summary>
     public void SetTrackedVisible(bool tracked)
     {
         if (isNodeTracked == tracked)
@@ -154,39 +145,22 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         UpdateRootVisibility();
     }
 
-    /// <summary>
-    /// Mengatur target 4 kombinasi untuk level aktif dan langsung menyembunyikan Pod bila masuk Mode Sandbox.
-    /// </summary>
     public void ConfigureLevelTargets(bool[] expectedTruthTable, bool isSandbox)
     {
         isSandboxHidden = isSandbox;
 
         for (int i = 0; i < CellCount; i++)
         {
-            bool targetBit = !isSandbox
-                             && expectedTruthTable != null
-                             && i < expectedTruthTable.Length
-                             && expectedTruthTable[i];
-            expectedTargets[i] = targetBit;
-
-            if (targetOnOrbObjs[i] != null && targetOnOrbObjs[i].activeSelf != targetBit)
-            {
-                targetOnOrbObjs[i].SetActive(targetBit);
-            }
-
-            if (targetOffRingObjs[i] != null && targetOffRingObjs[i].activeSelf == targetBit)
-            {
-                targetOffRingObjs[i].SetActive(!targetBit);
-            }
+            expectedTargets[i] = !isSandbox
+                                 && expectedTruthTable != null
+                                 && i < expectedTruthTable.Length
+                                 && expectedTruthTable[i];
         }
 
         ResetDiscovery();
         UpdateRootVisibility();
     }
 
-    /// <summary>
-    /// Menghapus seluruh status eksperimen/uji ke kondisi belum teruji (dipanggil saat topologi/level/reset berubah).
-    /// </summary>
     public void ResetDiscovery()
     {
         for (int i = 0; i < CellCount; i++)
@@ -200,9 +174,6 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Menyorot sel kombinasi (A,B) yang sedang aktif sesuai posisi tuas manual pemain.
-    /// </summary>
     public void SetActiveManualRow(int rowIndex)
     {
         int clamped = (rowIndex >= 0 && rowIndex < CellCount) ? rowIndex : -1;
@@ -229,9 +200,6 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Mencatat hasil eksperimen langsung untuk kombinasi input yang sedang aktif saat rangkaian tersambung lengkap.
-    /// </summary>
     public void RecordLiveDiscovery(int rowIndex, bool measuredOutput)
     {
         if (isSandboxHidden || rowIndex < 0 || rowIndex >= CellCount)
@@ -282,7 +250,7 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
     }
 
     /// <summary>
-    /// Menganimasikan denyut halus pada sel yang sedang dipindai (Putih-Biru) atau gagal (Merah). Zero-GC.
+    /// Memperbarui orientasi camera-facing (khusus Mode Udara) & animasi denyut status sel. Zero-GC.
     /// </summary>
     public void TickAnimation(float deltaTime)
     {
@@ -290,6 +258,8 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         {
             return;
         }
+
+        UpdatePodSpatialOrientation();
 
         pulseClock += deltaTime;
 
@@ -304,17 +274,53 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
                 SetRendererColor(cellRimRenderers[i], StatusScanWhiteColor, StatusScanWhiteColor * 1.35f);
                 if (cellRootTransforms[i] != null)
                 {
-                    float s = 1.08f + (0.06f * t);
+                    float s = 1.07f + (0.05f * t);
                     cellRootTransforms[i].localScale = new Vector3(s, 1f, s);
                 }
             }
             else if (status == OutputPodCellStatus.Failed)
             {
-                float t = 0.5f + (0.5f * Mathf.Sin(pulseClock * 9.5f));
+                float t = 0.5f + (0.5f * Mathf.Sin(pulseClock * 8.5f));
                 Color c = Color.Lerp(StatusFailedBaseColor, StatusFailedPulseColor, t);
-                SetRendererColor(cellPlateRenderers[i], c, c * (0.75f + (0.40f * t)));
+                SetRendererColor(cellPlateRenderers[i], c, c * (0.75f + (0.35f * t)));
             }
         }
+    }
+
+    private void UpdatePodSpatialOrientation()
+    {
+        bool isAirMode = ownerGateNode != null && ownerGateNode.useExternalSpatialPose;
+        if (isAirMode)
+        {
+            Camera cam = ResolveMainCamera();
+            if (cam != null)
+            {
+                Transform camT = cam.transform;
+                // Sejajarkan rata menghadap kamera (local +Y = -camForward, local +Z = camUp, local +X = camRight)
+                podRootObj.transform.position = transform.position + (camT.up * -0.225f) - (camT.forward * 0.22f);
+                podRootObj.transform.rotation = Quaternion.LookRotation(camT.up, -camT.forward);
+                podRootObj.transform.localScale = Vector3.one * 1.16f;
+                wasAirModePose = true;
+            }
+        }
+        else if (wasAirModePose)
+        {
+            // Pulihkan presisi mount kartu fisik Mode Kartu v5 (zero-regression)
+            podRootObj.transform.localPosition = CardModeLocalPos;
+            podRootObj.transform.localRotation = CardModeLocalRot;
+            podRootObj.transform.localScale = Vector3.one;
+            wasAirModePose = false;
+        }
+    }
+
+    private Camera ResolveMainCamera()
+    {
+        if (cachedMainCamera != null && cachedMainCamera.isActiveAndEnabled)
+        {
+            return cachedMainCamera;
+        }
+        cachedMainCamera = Camera.main;
+        return cachedMainCamera;
     }
 
     private void OnDestroy()
@@ -323,13 +329,15 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         DestroyMat(ref trayTrimMat);
         DestroyMat(ref emissiveSharedMat);
         mpb = null;
+        ownerGateNode = null;
+        cachedMainCamera = null;
     }
 
     // =========================================================================
     // CONSTRUCTION & ZERO-GC VISUAL UPDATES
     // =========================================================================
 
-    private void BuildCell(int row, Transform parentRoot, Mesh sharedTorusMesh)
+    private void BuildCell(int row, Transform parentRoot)
     {
         Vector2 offset = CellOffsetsXZ[row];
         GameObject cellObj = new GameObject($"PodCell_{row}");
@@ -341,40 +349,34 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
 
         Transform cellT = cellObj.transform;
 
-        // 1. Bingkai sorot sel (sedikit lebih lebar dari pelat status)
+        // 1. Bingkai tepi kotak (sian terang saat kombinasi aktif, abu rapi saat idle)
         cellRimRenderers[row] = CreatePart($"Cell_{row}_Rim", PrimitiveType.Cube, cellT,
-            new Vector3(0f, 0.001f, 0f), Vector3.zero, new Vector3(0.214f, 0.005f, 0.088f), emissiveSharedMat);
+            new Vector3(0f, 0.001f, 0f), Vector3.zero, new Vector3(0.224f, 0.005f, 0.096f), emissiveSharedMat);
 
-        // 2. Pelat latar status hasil uji (Untested / Passed Hijau / Failed Merah / Scanning Putih-Biru)
+        // 2. Pelat latar status kotak (abu gelap = belum diuji, hijau = lolos, merah = gagal)
         cellPlateRenderers[row] = CreatePart($"Cell_{row}_Plate", PrimitiveType.Cube, cellT,
-            new Vector3(0f, 0.005f, 0f), Vector3.zero, new Vector3(0.198f, 0.006f, 0.074f), emissiveSharedMat);
+            new Vector3(0f, 0.006f, 0f), Vector3.zero, new Vector3(0.200f, 0.006f, 0.078f), emissiveSharedMat);
 
-        // 3. Kiri sel: 2 dot kondisi input vertikal (Atas = Input A Sian, Bawah = Input B Kuning)
-        bool bitA = (row == 2 || row == 3);
-        bool bitB = (row == 1 || row == 3);
+        // 3. Label biner 2 digit tegas & rata tengah: "00", "01", "10", "11"
+        GameObject lblObj = new GameObject($"Cell_{row}_BinaryLabel");
+        lblObj.transform.SetParent(cellT, false);
+        lblObj.transform.localPosition = new Vector3(0f, 0.014f, 0f);
+        lblObj.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+        lblObj.transform.localScale = Vector3.one;
 
-        Renderer dotA = CreatePart($"Cell_{row}_DotA", PrimitiveType.Sphere, cellT,
-            new Vector3(-0.064f, 0.014f, 0.019f), Vector3.zero, Vector3.one * (bitA ? 0.029f : 0.022f), emissiveSharedMat);
-        SetRendererColor(dotA, bitA ? InputADotOnColor : InputADotOffColor, bitA ? InputADotOnEmit : InputADotOffEmit);
-
-        Renderer dotB = CreatePart($"Cell_{row}_DotB", PrimitiveType.Sphere, cellT,
-            new Vector3(-0.064f, 0.014f, -0.019f), Vector3.zero, Vector3.one * (bitB ? 0.029f : 0.022f), emissiveSharedMat);
-        SetRendererColor(dotB, bitB ? InputBDotOnColor : InputBDotOffColor, bitB ? InputBDotOnEmit : InputBDotOffEmit);
-
-        // Pemisah tipis antara ikon input dan ikon target
-        CreatePart($"Cell_{row}_Arrow", PrimitiveType.Cube, cellT,
-            new Vector3(-0.014f, 0.011f, 0f), Vector3.zero, new Vector3(0.028f, 0.005f, 0.008f), trayTrimMat);
-
-        // 4. Kanan sel: Bentuk Target Misi (Bola padat menyala = Target 1, Cincin kosong gelap = Target 0)
-        Renderer onOrbRend = CreatePart($"Cell_{row}_TargetOnOrb", PrimitiveType.Sphere, cellT,
-            new Vector3(0.048f, 0.018f, 0f), Vector3.zero, Vector3.one * 0.044f, emissiveSharedMat);
-        SetRendererColor(onOrbRend, TargetOnOrbColor, TargetOnOrbEmit);
-        targetOnOrbObjs[row] = onOrbRend != null ? onOrbRend.gameObject : null;
-
-        GameObject offRingObj = CreateMeshPart($"Cell_{row}_TargetOffRing", sharedTorusMesh, cellT,
-            new Vector3(0.048f, 0.014f, 0f), Vector3.zero, Vector3.one * 0.025f, emissiveSharedMat, out Renderer offRingRend);
-        SetRendererColor(offRingRend, TargetOffRingColor, TargetOffRingEmit);
-        targetOffRingObjs[row] = offRingObj;
+        TextMeshPro tmp = lblObj.AddComponent<TextMeshPro>();
+        tmp.text = BinaryRowLabels[row];
+        tmp.fontSize = 0.56f;
+        tmp.fontStyle = FontStyles.Bold;
+        tmp.alignment = TextAlignmentOptions.Center;
+        tmp.textWrappingMode = TextWrappingModes.NoWrap;
+        tmp.color = LabelUntestedTextColor;
+        tmp.sortingOrder = 18;
+        if (tmp.rectTransform != null)
+        {
+            tmp.rectTransform.sizeDelta = new Vector2(0.195f, 0.074f);
+        }
+        cellBinaryLabels[row] = tmp;
     }
 
     private void ApplyAllCellVisuals()
@@ -420,16 +422,22 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         }
         else if (isManualFocused)
         {
-            SetRendererColor(cellRimRenderers[row], RimActiveFocusColor, RimActiveFocusEmit);
+            SetRendererColor(cellRimRenderers[row], RimActiveCyanColor, RimActiveCyanEmit);
         }
         else
         {
             SetRendererColor(cellRimRenderers[row], RimIdleColor, RimIdleEmit);
         }
 
+        if (cellBinaryLabels[row] != null)
+        {
+            bool brightText = isManualFocused || status == OutputPodCellStatus.Passed || status == OutputPodCellStatus.Failed;
+            cellBinaryLabels[row].color = brightText ? LabelActiveTextColor : LabelUntestedTextColor;
+        }
+
         if (cellRootTransforms[row] != null)
         {
-            float scaleXZ = status == OutputPodCellStatus.Scanning ? 1.12f : (isManualFocused ? 1.07f : 1.00f);
+            float scaleXZ = status == OutputPodCellStatus.Scanning ? 1.09f : (isManualFocused ? 1.05f : 1.00f);
             cellRootTransforms[row].localScale = new Vector3(scaleXZ, 1f, scaleXZ);
         }
     }
@@ -546,37 +554,6 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         }
 
         return rend;
-    }
-
-    private static GameObject CreateMeshPart(
-        string name,
-        Mesh mesh,
-        Transform parent,
-        Vector3 localPos,
-        Vector3 localEuler,
-        Vector3 localScale,
-        Material sharedMat,
-        out Renderer createdRenderer)
-    {
-        GameObject obj = new GameObject(name);
-        obj.transform.SetParent(parent, false);
-        obj.transform.localPosition = localPos;
-        obj.transform.localEulerAngles = localEuler;
-        obj.transform.localScale = localScale;
-
-        MeshFilter mf = obj.AddComponent<MeshFilter>();
-        mf.sharedMesh = mesh;
-
-        MeshRenderer mr = obj.AddComponent<MeshRenderer>();
-        mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        mr.receiveShadows = false;
-        if (sharedMat != null)
-        {
-            mr.sharedMaterial = sharedMat;
-        }
-
-        createdRenderer = mr;
-        return obj;
     }
 
     private static void DestroyMat(ref Material mat)

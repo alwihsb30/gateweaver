@@ -2085,6 +2085,15 @@ public class GateNode : MonoBehaviour
     /// </summary>
     private void RefreshConnectionVisuals(bool advanceFlowPhase)
     {
+        // v7.0 Polishing Final: Di Mode Udara (useExternalSpatialPose == true), seluruh kabel dirender seragam 100%
+        // oleh AirWeavingCableRouter (orb Port_Out -> orb Port_In). Mode Kartu (v5) tetap 100% memakai visual bawaan.
+        if (useExternalSpatialPose)
+        {
+            ResetConnectionSnapState();
+            SetConnectionVisualsActive(false);
+            return;
+        }
+
         if (!TryGetBezierControlPoints(
                 out Vector3 p0,
                 out Vector3 p1,
