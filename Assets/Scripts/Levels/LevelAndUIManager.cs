@@ -364,8 +364,25 @@ public class LevelAndUIManager : MonoBehaviour
         fadeDuration = 0.08f
     };
 
+    private CompactHudMenuController compactHudMenu;
+    private bool isReadyForNextLevel = false;
+    private bool isCircuitCompleteLive = false;
+
     public bool IsSandboxMode => isSandboxMode;
     public bool IsVerifying => isVerifying;
+    public bool IsReadyForNextLevel => isReadyForNextLevel;
+    public bool IsAwaitingSandboxTransition => awaitingPostVictoryChoice;
+    public bool IsCircuitCompleteLive => isCircuitCompleteLive;
+    public int CurrentHintTier => hintTierUsed;
+    public bool IsUiOverlayOpen => (compactHudMenu != null && compactHudMenu.IsMenuDrawerOpen)
+                                   || (levelSelectorModalPanel != null && levelSelectorModalPanel.activeSelf)
+                                   || (competencyReportPanelObj != null && competencyReportPanelObj.activeSelf);
+
+    public void TriggerToggleAirWeavingFromMenu() => OnToggleAirWeavingClicked();
+    public void CloseAllModalsForMenu() { CloseLevelSelector(false); CloseCompetencyReport(); }
+    public void TryShowLowPriorityNoHandToast(string msg, Color color) => compactHudMenu?.ShowToast(msg, color, 3.2f, false, true);
+    public void ClearLowPriorityNoHandToast() => compactHudMenu?.ClearLowPriorityNoHandToast();
+    public void ShowFeedbackToast(string msg, Color color, float duration = 2.6f) => compactHudMenu?.ShowToast(msg, color, duration, true, false);
 
     private void Awake()
     {
@@ -400,6 +417,7 @@ public class LevelAndUIManager : MonoBehaviour
     private void Start()
     {
         ConfigureARStudioLighting();
+        InitializeCompactHudMenu();
         LoadLevel(currentLevelIndex);
         EnsureAirWeavingControllerBootstrapped();
     }
@@ -412,7 +430,8 @@ public class LevelAndUIManager : MonoBehaviour
         UpdateTruthTableMatrixLive();
         UpdateWaveformMonitorLive();
         MonitorInputStateAudio();
-        UpdateFeedbackBackdropVisibility();
+        if (compactHudMenu != null) compactHudMenu.TickToast(Time.unscaledDeltaTime, isVerifying);
+        else UpdateFeedbackBackdropVisibility();
     }
 
     private void OnDestroy()
@@ -488,8 +507,11 @@ public class LevelAndUIManager : MonoBehaviour
         if (airWeavingController != null)
         {
             airWeavingController.OnAirWeavingModeChanged -= HandleAirWeavingModeChanged;
+            airWeavingController.OnOutputVerifyRequested -= OnVerifyButtonClicked;
+            airWeavingController.OnOutputNextLevelRequested -= NextLevel;
             airWeavingController = null;
         }
+        compactHudMenu = null;
 
         if (levelSelectorCloseButton != null)
         {
@@ -1008,21 +1030,27 @@ public class LevelAndUIManager : MonoBehaviour
         }
     }
 
-    private static void ApplyInputToggleVisualState(Image bgImage, Outline borderOutline, TMP_Text labelText, bool isHigh)
+    private static void ApplyInputToggleVisualState(Image bgImage, Outline borderOutline, TMP_Text labelText, bool isHigh, bool isInputB = false)
     {
         if (bgImage != null)
         {
-            bgImage.color = isHigh ? InputHighBgColor : InputLowBgColor;
+            bgImage.color = isInputB
+                ? (isHigh ? new Color(0.95f, 0.74f, 0.14f, 0.96f) : new Color(0.18f, 0.15f, 0.08f, 0.86f))
+                : (isHigh ? InputHighBgColor : InputLowBgColor);
         }
 
         if (borderOutline != null)
         {
-            borderOutline.effectColor = isHigh ? InputHighOutlineColor : InputLowOutlineColor;
+            borderOutline.effectColor = isInputB
+                ? (isHigh ? new Color(1.00f, 0.92f, 0.45f, 1.00f) : new Color(0.84f, 0.66f, 0.18f, 0.86f))
+                : (isHigh ? InputHighOutlineColor : InputLowOutlineColor);
         }
 
         if (labelText != null)
         {
-            labelText.color = isHigh ? InputHighTextColor : InputLowTextColor;
+            labelText.color = isInputB
+                ? (isHigh ? new Color(0.08f, 0.06f, 0.02f, 1.00f) : new Color(0.96f, 0.88f, 0.64f, 1.00f))
+                : (isHigh ? InputHighTextColor : InputLowTextColor);
         }
     }
 
@@ -1294,7 +1322,7 @@ public class LevelAndUIManager : MonoBehaviour
     /// </summary>
     private void EnsureTruthTableVisibleForVerification()
     {
-        if (!isScannerHudCollapsed && !isOscilloscopeTabActive)
+        if (compactHudMenu != null || (!isScannerHudCollapsed && !isOscilloscopeTabActive))
         {
             return;
         }
@@ -1517,7 +1545,7 @@ public class LevelAndUIManager : MonoBehaviour
 
     private void UpdateWaveformMonitorLive()
     {
-        if (waveBarRectsA == null || isVerifying)
+        if (waveBarRectsA == null || isVerifying || truthTableScannerPanelObj == null || !truthTableScannerPanelObj.activeInHierarchy)
         {
             return;
         }
@@ -1916,6 +1944,7 @@ public class LevelAndUIManager : MonoBehaviour
             return;
         }
 
+        compactHudMenu?.CloseMenuDrawer();
         CloseLevelSelector(playAudio: false);
         RefreshCompetencyReportUI();
         competencyReportPanelObj.transform.SetAsLastSibling();
@@ -2219,6 +2248,15 @@ public class LevelAndUIManager : MonoBehaviour
         airWeavingToggleButton.onClick.AddListener(OnToggleAirWeavingClicked);
     }
 
+    private void InitializeCompactHudMenu()
+    {
+        if (compactHudMenu == null) compactHudMenu = GetComponent<CompactHudMenuController>() ?? gameObject.AddComponent<CompactHudMenuController>();
+        compactHudMenu.Initialize(this, FindTargetCanvas(), ResolveSafeTMPFont(), txtLevelTitle, txtMissionDesc, txtQuotaStatus, txtFeedback,
+            feedbackBackdropObj, truthTableScannerPanelObj, resetLevelButtonObj,
+            levelSelectorOpenButton != null ? levelSelectorOpenButton.gameObject : null,
+            airWeavingToggleButton != null ? airWeavingToggleButton.gameObject : null, btnInputA, btnInputB, btnVerify, btnNextLevel);
+    }
+
     private void EnsureAirWeavingControllerBootstrapped()
     {
         if (airWeavingController == null)
@@ -2235,6 +2273,10 @@ public class LevelAndUIManager : MonoBehaviour
         airWeavingController.Configure(this, circuitManager, inputANode, inputBNode, outputNode, txtFeedback);
         airWeavingController.OnAirWeavingModeChanged -= HandleAirWeavingModeChanged;
         airWeavingController.OnAirWeavingModeChanged += HandleAirWeavingModeChanged;
+        airWeavingController.OnOutputVerifyRequested -= OnVerifyButtonClicked;
+        airWeavingController.OnOutputVerifyRequested += OnVerifyButtonClicked;
+        airWeavingController.OnOutputNextLevelRequested -= NextLevel;
+        airWeavingController.OnOutputNextLevelRequested += NextLevel;
         HandleAirWeavingModeChanged(airWeavingController.IsAirWeavingActive);
     }
 
@@ -2294,6 +2336,10 @@ public class LevelAndUIManager : MonoBehaviour
                 ? new Color(0.26f, 1.00f, 0.74f, 0.98f)
                 : MatrixAccentCyanColor;
         }
+
+        isReadyForNextLevel = false;
+        awaitingPostVictoryChoice = false;
+        if (compactHudMenu != null) { compactHudMenu.SetAirWeavingMode(isAirWeavingActive); return; }
 
         // Padatkan teks misi atas menjadi pita horizontal ramping di Mode Udara agar bersih di atas label Rak Parkir (XOR)
         if (txtMissionDesc != null)
@@ -2363,6 +2409,7 @@ public class LevelAndUIManager : MonoBehaviour
             return;
         }
 
+        compactHudMenu?.CloseMenuDrawer();
         CloseCompetencyReport();
         PlaySfx(clipToggleInput);
         RefreshLevelSelectorUI();
@@ -2676,7 +2723,7 @@ public class LevelAndUIManager : MonoBehaviour
         {
             if (txtFeedback != null)
             {
-                txtFeedback.text = "Mode Sandbox bebas berkreasi! Susun kombinasi gerbang apa pun lalu tekan Uji Rangkaian.";
+                txtFeedback.text = "Mode Sandbox bebas berkreasi! Amati rumus Boolean & aliran sinyal 3D secara langsung.";
                 txtFeedback.color = new Color(0.35f, 0.95f, 1f, 1f);
             }
             return;
@@ -2693,6 +2740,7 @@ public class LevelAndUIManager : MonoBehaviour
         }
 
         UpdateHintButtonUI();
+        compactHudMenu?.RefreshAllVisualStates();
 
         int safeIndex = Mathf.Clamp(currentLevelIndex, 0, levels.Count - 1);
         LevelScenario currentLevel = levels[safeIndex];
@@ -2992,10 +3040,12 @@ public class LevelAndUIManager : MonoBehaviour
     {
         scanningRowIndex = -1;
 
+        bool panelActive = truthTableScannerPanelObj != null && truthTableScannerPanelObj.activeInHierarchy;
         for (int i = 0; i < TruthTableRowCount; i++)
         {
             matrixRowScannedFlags[i] = false;
             matrixRowPassedFlags[i] = false;
+            if (!panelActive) continue;
 
             if (matrixRowMeasuredTexts[i] != null)
             {
@@ -3202,9 +3252,18 @@ public class LevelAndUIManager : MonoBehaviour
             && currentFormula != "Y = (Belum Terhubung)"
             && !currentFormula.Contains("?")
             && !currentFormula.Contains("(Siklus)");
+        bool hasValidLiveCircuit = isCircuitComplete && (isSandboxMode || activeGates > 0);
+        isCircuitCompleteLive = hasValidLiveCircuit;
 
         if (!isVerifying)
         {
+            if (isReadyForNextLevel && ((hasLastTopologySignature && topologyChanged) || !hasValidLiveCircuit))
+            {
+                isReadyForNextLevel = false;
+                awaitingPostVictoryChoice = false;
+                compactHudMenu?.RefreshAllVisualStates();
+            }
+
             if (hasLastTopologySignature && topologyChanged)
             {
                 if (HasAnyScannedMatrixRow())
@@ -3242,14 +3301,16 @@ public class LevelAndUIManager : MonoBehaviour
             hasLastEdgeTopologyHash = true;
         }
 
+        bool panelActive = truthTableScannerPanelObj != null && truthTableScannerPanelObj.activeInHierarchy;
         if (!hasRenderedFormulaBaseline || !string.Equals(lastRenderedFormula, currentFormula, StringComparison.Ordinal))
         {
             hasRenderedFormulaBaseline = true;
             lastRenderedFormula = currentFormula;
-            txtBooleanFormula.text = $"Rumus Rakitan: {currentFormula}";
+            if (isSandboxMode && txtMissionDesc != null) txtMissionDesc.text = $"Rumus: {currentFormula}";
+            if (panelActive) txtBooleanFormula.text = $"Rumus Rakitan: {currentFormula}";
         }
 
-        if (txtCurrentOutputReadout != null)
+        if (panelActive && txtCurrentOutputReadout != null)
         {
             int outputState = (outputNode != null && outputNode.isTracked)
                 ? (outputNode.currentOutputValue ? 1 : 0)
@@ -3291,12 +3352,14 @@ public class LevelAndUIManager : MonoBehaviour
             if (outputNode != null && outputNode.OutputTruthPod != null)
             {
                 outputNode.OutputTruthPod.SetActiveManualRow(activeManualRow);
-                if (!isSandboxMode && isCircuitComplete && activeManualRow >= 0 && outputNode.isTracked)
+                if (!isSandboxMode && hasValidLiveCircuit && activeManualRow >= 0 && outputNode.isTracked)
                 {
                     outputNode.OutputTruthPod.RecordLiveDiscovery(activeManualRow, outputNode.currentOutputValue);
                 }
             }
         }
+
+        if (!panelActive) return;
 
         for (int i = 0; i < TruthTableRowCount; i++)
         {
@@ -3987,26 +4050,29 @@ public class LevelAndUIManager : MonoBehaviour
     /// </summary>
     private void UpdateInputToggleButtonsUI()
     {
-        if (txtBtnToggleA != null && inputANode != null)
+        bool needA = txtBtnToggleA != null && inputANode != null && ((inputANode.currentOutputValue ? 1 : 0) != lastDisplayedInputA);
+        bool needB = txtBtnToggleB != null && inputBNode != null && ((inputBNode.currentOutputValue ? 1 : 0) != lastDisplayedInputB);
+        if (!needA && !needB) return;
+
+        ResolveActiveContextualLabels(currentLevelIndex, isSandboxMode,
+            out string aName, out string a0, out string a1,
+            out string bName, out string b0, out string b1,
+            out _, out _, out _);
+
+        if (needA)
         {
             int stateA = inputANode.currentOutputValue ? 1 : 0;
-            if (stateA != lastDisplayedInputA)
-            {
-                lastDisplayedInputA = stateA;
-                txtBtnToggleA.text = $"Input A: {stateA}";
-                ApplyInputToggleVisualState(imgBtnInputA, outlineBtnInputA, txtBtnToggleA, stateA > 0);
-            }
+            lastDisplayedInputA = stateA;
+            txtBtnToggleA.text = $"{aName}: {(stateA > 0 ? a1 : a0)} [{stateA}]";
+            ApplyInputToggleVisualState(imgBtnInputA, outlineBtnInputA, txtBtnToggleA, stateA > 0, isInputB: false);
         }
 
-        if (txtBtnToggleB != null && inputBNode != null)
+        if (needB)
         {
             int stateB = inputBNode.currentOutputValue ? 1 : 0;
-            if (stateB != lastDisplayedInputB)
-            {
-                lastDisplayedInputB = stateB;
-                txtBtnToggleB.text = $"Input B: {stateB}";
-                ApplyInputToggleVisualState(imgBtnInputB, outlineBtnInputB, txtBtnToggleB, stateB > 0);
-            }
+            lastDisplayedInputB = stateB;
+            txtBtnToggleB.text = $"{bName}: {(stateB > 0 ? b1 : b0)} [{stateB}]";
+            ApplyInputToggleVisualState(imgBtnInputB, outlineBtnInputB, txtBtnToggleB, stateB > 0, isInputB: true);
         }
     }
 
@@ -4269,6 +4335,7 @@ public class LevelAndUIManager : MonoBehaviour
             string unlimitedSymbol = supportsInfinityGlyph ? "\u221E" : "Bebas";
             txtQuotaStatus.text = $"Kuota Gerbang: {activeCount} / {unlimitedSymbol}";
             txtQuotaStatus.color = new Color(0.55f, 1f, 0.92f, 1f);
+            compactHudMenu?.SetQuotaAlertState(false);
             return;
         }
 
@@ -4290,8 +4357,10 @@ public class LevelAndUIManager : MonoBehaviour
         lastQuotaActiveCount = activeCount;
         lastQuotaMaxCount = maxQuota;
 
+        bool isOverQuota = activeCount > maxQuota;
         txtQuotaStatus.text = $"Kuota Gerbang: {activeCount} / {maxQuota}";
-        txtQuotaStatus.color = (activeCount > maxQuota) ? new Color(1.00f, 0.42f, 0.38f, 1f) : Color.white;
+        txtQuotaStatus.color = isOverQuota ? new Color(1.00f, 0.97f, 0.92f, 1f) : Color.white;
+        compactHudMenu?.SetQuotaAlertState(isOverQuota);
     }
 
     /// <summary>
@@ -4359,10 +4428,12 @@ public class LevelAndUIManager : MonoBehaviour
             txtResetLevelButtonLabel.text = "Reset Level";
         }
 
-        if (resetLevelButtonObj != null)
+        if (resetLevelButtonObj != null && compactHudMenu == null)
         {
             resetLevelButtonObj.SetActive(true);
         }
+
+        isReadyForNextLevel = false;
 
         if (txtLevelTitle != null)
         {
@@ -4372,9 +4443,11 @@ public class LevelAndUIManager : MonoBehaviour
         if (txtMissionDesc != null)
         {
             txtMissionDesc.text = currentLevel.missionDescription;
+            txtMissionDesc.color = Color.white;
         }
 
-        if (txtFeedback != null)
+        if (compactHudMenu != null) { compactHudMenu.ClearToastImmediate(); compactHudMenu.RefreshAllVisualStates(); }
+        else if (txtFeedback != null)
         {
             txtFeedback.text = "Susun kartu fisik di atas meja, lalu tekan tombol Uji Rangkaian.";
             txtFeedback.color = Color.white;
@@ -4384,6 +4457,8 @@ public class LevelAndUIManager : MonoBehaviour
         ResetTruthTableScanResults();
         ResetWaveformSamples();
         UpdateQuotaStatusUI();
+        lastDisplayedInputA = -1;
+        lastDisplayedInputB = -1;
         UpdateInputToggleButtonsUI();
         UpdateStarMasteryUI();
         UpdateHintButtonUI();
@@ -4442,22 +4517,27 @@ public class LevelAndUIManager : MonoBehaviour
             txtResetLevelButtonLabel.text = "Main Ulang (Level 1)";
         }
 
-        if (resetLevelButtonObj != null)
+        if (resetLevelButtonObj != null && compactHudMenu == null)
         {
             resetLevelButtonObj.SetActive(true);
         }
 
+        isReadyForNextLevel = false;
+        hasRenderedFormulaBaseline = false;
+
         if (txtLevelTitle != null)
         {
-            txtLevelTitle.text = "[SANDBOX] Laboratorium Rangkaian Bebas";
+            txtLevelTitle.text = "[SANDBOX] Laboratorium Bebas";
         }
 
         if (txtMissionDesc != null)
         {
-            txtMissionDesc.text = "Eksplorasi bebas tanpa batas kuota! Tekan Uji untuk memindai 4 baris output.";
+            txtMissionDesc.text = "Rumus: Y = (Belum Terhubung)";
+            txtMissionDesc.color = MatrixBrightCyanColor;
         }
 
-        if (txtFeedback != null)
+        if (compactHudMenu != null) { compactHudMenu.ClearToastImmediate(); compactHudMenu.RefreshAllVisualStates(); }
+        else if (txtFeedback != null)
         {
             txtFeedback.text = "Mode Sandbox aktif. Susun gerbang apa pun lalu tekan Uji Rangkaian.";
             txtFeedback.color = Color.white;
@@ -4467,6 +4547,8 @@ public class LevelAndUIManager : MonoBehaviour
         ResetTruthTableScanResults();
         ResetWaveformSamples();
         UpdateQuotaStatusUI();
+        lastDisplayedInputA = -1;
+        lastDisplayedInputB = -1;
         UpdateInputToggleButtonsUI();
         UpdateStarMasteryUI();
         UpdateHintButtonUI();
@@ -4533,7 +4615,7 @@ public class LevelAndUIManager : MonoBehaviour
     /// </summary>
     public void OnVerifyButtonClicked()
     {
-        if (isVerifying)
+        if (isVerifying || isSandboxMode)
         {
             return;
         }
@@ -4548,17 +4630,14 @@ public class LevelAndUIManager : MonoBehaviour
     private IEnumerator VerifyTruthTableRoutine()
     {
         isVerifying = true;
+        isReadyForNextLevel = false;
+        awaitingPostVictoryChoice = false;
+        compactHudMenu?.RefreshAllVisualStates();
         EnsureTruthTableVisibleForVerification();
 
         if (levels == null || levels.Count == 0)
         {
             InitializeDefaultLevels();
-        }
-
-        if (!isSandboxMode)
-        {
-            attemptsOnCurrentLevel++;
-            UpdateStarMasteryUI();
         }
 
         LevelScenario currentLevel = levels[Mathf.Clamp(currentLevelIndex, 0, levels.Count - 1)];
@@ -4617,6 +4696,7 @@ public class LevelAndUIManager : MonoBehaviour
                 yield break;
             }
 
+            bool isAirModeValidation = airWeavingController != null && airWeavingController.IsAirWeavingActive;
             if (circuitManager != null && circuitManager.allNodes != null)
             {
                 for (int i = 0; i < circuitManager.allNodes.Count; i++)
@@ -4629,8 +4709,11 @@ public class LevelAndUIManager : MonoBehaviour
                         {
                             if (txtFeedback != null)
                             {
-                                txtFeedback.text = $"Gagal! Slot pin gerbang {node.nodeType} masih kosong ('?') ({node.connectedInputs.Count}/{requiredInputs}). Dekatkan kartu sumber.";
-                                txtFeedback.color = new Color(1f, 0.5f, 0f);
+                                string emptyPinHint = isAirModeValidation
+                                    ? "Sambungkan kabel sumber ke slot kosong gerbang tersebut."
+                                    : "Dekatkan kartu sumber.";
+                                txtFeedback.text = $"Gagal! Slot pin gerbang {node.nodeType} masih kosong ('?') ({node.connectedInputs.Count}/{requiredInputs}). {emptyPinHint}";
+                                txtFeedback.color = new Color(1.00f, 0.96f, 0.93f, 1f);
                             }
 
                             PlaySfx(clipRowFail);
@@ -4641,14 +4724,33 @@ public class LevelAndUIManager : MonoBehaviour
                     }
                 }
             }
+
+            if (circuitManager != null && circuitManager.activeGateCardsCount == 0)
+            {
+                if (txtFeedback != null)
+                {
+                    txtFeedback.text = isAirModeValidation
+                        ? "Gagal! Belum ada gerbang logika terpasang di zona rakit."
+                        : "Gagal! Pasang minimal 1 kartu gerbang logika di antara Input dan Output.";
+                    txtFeedback.color = new Color(1.00f, 0.96f, 0.93f, 1f);
+                }
+
+                PlaySfx(clipRowFail);
+                SyncAudioStateBaselines(false);
+                isVerifying = false;
+                yield break;
+            }
         }
 
         if (outputNode == null || !outputNode.isTracked || outputNode.connectedInputs.Count == 0)
         {
             if (txtFeedback != null)
             {
-                txtFeedback.text = "Gagal! Kartu Output belum terdeteksi kamera atau belum tersambung ke rangkaian.";
-                txtFeedback.color = new Color(1f, 0.5f, 0f);
+                bool isAirModeOut = airWeavingController != null && airWeavingController.IsAirWeavingActive;
+                txtFeedback.text = isAirModeOut
+                    ? "Gagal! Output belum tersambung ke rangkaian — geser gerbang lebih dekat ke Output."
+                    : "Gagal! Kartu Output belum terdeteksi kamera atau belum tersambung ke rangkaian.";
+                txtFeedback.color = new Color(1.00f, 0.96f, 0.93f, 1f);
             }
 
             PlaySfx(clipRowFail);
@@ -4657,7 +4759,7 @@ public class LevelAndUIManager : MonoBehaviour
             yield break;
         }
 
-        // Tahap C: Pindai / Uji 4 Kombinasi Input Biner AB (00, 01, 10, 11)
+        if (!isSandboxMode) { attemptsOnCurrentLevel++; UpdateStarMasteryUI(); }
         ResetTruthTableScanResults();
 
         bool originalInputA = inputANode != null && inputANode.initialInputState;
@@ -4736,16 +4838,6 @@ public class LevelAndUIManager : MonoBehaviour
 
                 if (txtFeedback != null)
                 {
-                    string actualFormula = circuitManager != null
-                        ? circuitManager.GetCircuitBooleanExpression(outputNode)
-                        : "Y = (Belum Terhubung)";
-                    string diagnostic = BuildMisconceptionDiagnostic(
-                        actualFormula,
-                        currentLevel.expectedTruthTable,
-                        testA,
-                        testB,
-                        actualOutput,
-                        expectedOutput);
                     ResolveActiveContextualLabels(
                         currentLevelIndex,
                         sandboxMode: false,
@@ -4756,8 +4848,8 @@ public class LevelAndUIManager : MonoBehaviour
                     string stateB = testB ? ctxB1 : ctxB0;
                     string actualOutText = actualOutput ? ctxOut1 : ctxOut0;
                     string expectedOutText = expectedOutput ? ctxOut1 : ctxOut0;
-                    txtFeedback.text = $"Gagal saat [{ctxAName}: {stateA} [{(testA ? 1 : 0)}], {ctxBName}: {stateB} [{(testB ? 1 : 0)}]]: {ctxOutName} = {actualOutText} [{(actualOutput ? 1 : 0)}], seharusnya {expectedOutText} [{(expectedOutput ? 1 : 0)}]. {diagnostic}";
-                    txtFeedback.color = Color.red;
+                    txtFeedback.text = $"Gagal saat {ctxAName}: {stateA} & {ctxBName}: {stateB} — {ctxOutName} masih {actualOutText}, seharusnya {expectedOutText}!";
+                    txtFeedback.color = new Color(1.00f, 0.96f, 0.93f, 1f);
                 }
 
                 isVerifying = false;
@@ -4813,6 +4905,7 @@ public class LevelAndUIManager : MonoBehaviour
 
         AutoBindActionButtonsIfNeeded();
 
+        isReadyForNextLevel = true;
         if (isGameCleared)
         {
             awaitingPostVictoryChoice = true;
@@ -4828,7 +4921,7 @@ public class LevelAndUIManager : MonoBehaviour
                 txtNextLevelButtonLabel.text = "Mode Sandbox Bebas";
             }
 
-            if (nextLevelButtonObj != null)
+            if (compactHudMenu == null && nextLevelButtonObj != null)
             {
                 nextLevelButtonObj.SetActive(true);
             }
@@ -4838,7 +4931,7 @@ public class LevelAndUIManager : MonoBehaviour
                 txtResetLevelButtonLabel.text = "Main Ulang (Level 1)";
             }
 
-            if (resetLevelButtonObj != null)
+            if (compactHudMenu == null && resetLevelButtonObj != null)
             {
                 resetLevelButtonObj.SetActive(true);
             }
@@ -4858,11 +4951,12 @@ public class LevelAndUIManager : MonoBehaviour
                 txtNextLevelButtonLabel.text = "Level Berikutnya";
             }
 
-            if (nextLevelButtonObj != null)
+            if (compactHudMenu == null && nextLevelButtonObj != null)
             {
                 nextLevelButtonObj.SetActive(true);
             }
         }
+        compactHudMenu?.RefreshAllVisualStates();
 
         yield return new WaitForSeconds(0.10f);
         PlaySfx(clipVictoryFanfare);
@@ -4872,7 +4966,8 @@ public class LevelAndUIManager : MonoBehaviour
             outputNode.TriggerVictoryCelebration();
         }
 
-        if (isLastLevel && !wasAlreadyCleared)
+        bool isAirMode = airWeavingController != null && airWeavingController.IsAirWeavingActive;
+        if (isLastLevel && !wasAlreadyCleared && !isAirMode)
         {
             OpenCompetencyReport();
         }
@@ -4933,8 +5028,7 @@ public class LevelAndUIManager : MonoBehaviour
             return;
         }
 
-        if ((competencyReportPanelObj != null && competencyReportPanelObj.activeSelf)
-            || (levelSelectorModalPanel != null && levelSelectorModalPanel.activeSelf))
+        if (IsUiOverlayOpen)
         {
             return;
         }
@@ -5039,7 +5133,8 @@ public class LevelAndUIManager : MonoBehaviour
 
             if (!isSandboxMode)
             {
-                OnVerifyButtonClicked();
+                if (isReadyForNextLevel) NextLevel();
+                else OnVerifyButtonClicked();
             }
             else
             {

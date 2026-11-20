@@ -75,7 +75,7 @@ public class AirWeavingController : MonoBehaviour
     private const float InputAirTapRadius = 0.40f;
     private const float InputAirTapRearmRadius = 0.50f;
     private const float InputAirTapCooldownSeconds = 0.55f;
-    private const float ParkReturnThresholdY = 0.36f;
+    private const float ParkReturnThresholdY = 0.28f;
     private const float ParkSlotSnapRadius = 0.34f;
 
     // Parameter $1 Unistroke Air-Draw Spawner (Tahap 3)
@@ -89,20 +89,19 @@ public class AirWeavingController : MonoBehaviour
     private const float AirDrawFadeDurationSeconds = 0.35f;
     private const float AirDrawPostSpawnCooldownSeconds = 0.55f;
 
-    // Koordinat meja kerja terkalibrasi (Tahap 4A: Output utuh di dalam layar, Input A bebas panel lipat kiri,
-    // Input B bersih di atas tombol bawah, Rak Parkir & label XOR bebas teks misi atas)
-    private const float InputTerminalBaseX = -0.98f;
-    private const float InputATerminalY = 0.03f;
-    private const float InputBTerminalY = -0.63f;
-    private const float OutputTerminalBaseX = 1.34f;
+    // Koordinat meja kerja terkalibrasi v7.0 (bebas bilah atas 72 px & aman FOV 38-60° pada rasio 16:9 / 20:9)
+    private const float InputTerminalBaseX = -1.24f;
+    private const float InputATerminalY = -0.06f;
+    private const float InputBTerminalY = -0.68f;
+    private const float OutputTerminalBaseX = 1.28f;
     private const float OutputTerminalY = -0.30f;
-    private const float ParkingRackY = 0.60f;
-    private const float AssemblyMinBaseX = -0.56f;
-    private const float AssemblyMaxBaseX = 0.86f;
-    private const float AssemblyMinY = -0.72f;
-    private const float AssemblyMaxY = 0.24f;
+    private const float ParkingRackY = 0.52f;
+    private const float AssemblyMinBaseX = -0.74f;
+    private const float AssemblyMaxBaseX = 0.76f;
+    private const float AssemblyMinY = -0.74f;
+    private const float AssemblyMaxY = 0.16f;
 
-    private static readonly float[] ParkingSlotBaseX = { -0.76f, -0.32f, 0.12f, 0.56f, 1.00f };
+    private static readonly float[] ParkingSlotBaseX = { -0.64f, -0.22f, 0.20f, 0.62f, 1.04f };
     private static readonly NodeType[] ParkingSlotOrder =
     {
         NodeType.AND,
@@ -115,7 +114,9 @@ public class AirWeavingController : MonoBehaviour
     // Kemiringan ergonomis papan roti menghadap ARCamera (+X kanan, +Y atas-depan menampakkan siluet Quaternius & label 3D)
     private static readonly Quaternion WorkbenchTiltRotation = Quaternion.Euler(-38f, 0f, 0f);
 
-    private const float FeedbackUpdateIntervalSeconds = 0.25f;
+    private const float PostDropOutputLockoutSeconds = 0.65f;
+    private const float OutputZonePriorityRadius = 0.42f;
+    private const float NoHandPromptDelaySeconds = 5.0f;
     private const int PinchRingSegments = 20;
     private const int HoverRingSegments = 28;
 
@@ -277,7 +278,9 @@ public class AirWeavingController : MonoBehaviour
     private float airDrawFadeTimer = 0f;
     private bool airDrawFadeWasSuccess = false;
     private float airDrawPostSpawnCooldown = 0f;
-    private float feedbackHoldTimer = 0f;
+    private float postDropLockoutTimer = 0f;
+    private float noHandAbsentTimer = 0f;
+    private bool noHandToastShown = false;
 
     private Coroutine transitionCoroutine;
     private WebCamTexture webCamTexture;
@@ -326,7 +329,7 @@ public class AirWeavingController : MonoBehaviour
     private Material rackFrameMat;
     private Material airDrawStrokeMat;
 
-    private float feedbackTimer = 0f;
+    private AirWeavingOutputTrigger outputTrigger;
     private float fpsTimer = 0f;
     private int inferenceFramesInWindow = 0;
     private int displayedInferenceFps = 0;
@@ -337,10 +340,13 @@ public class AirWeavingController : MonoBehaviour
     public bool IsTransitioning => isTransitioning;
     public bool IsHandDetected => isHandDetected;
     public bool IsPinching => isPinching;
+    public int DisplayedInferenceFps => displayedInferenceFps;
     public Vector3 PinchWorldPosition => pinchWorldPosition;
     public Vector3 IndexTipWorldPosition => indexTipWorldPosition;
 
     public event Action<bool> OnAirWeavingModeChanged;
+    public event Action OnOutputVerifyRequested;
+    public event Action OnOutputNextLevelRequested;
 
     /// <summary>
     /// Dipanggil otomatis oleh LevelAndUIManager saat Start() (zero manual Inspector wiring).
@@ -394,7 +400,9 @@ public class AirWeavingController : MonoBehaviour
         hoveredGateSlotIndex = -1;
         hoveredInputNode = null;
         grabOcclusionGraceTimer = 0f;
+        postDropLockoutTimer = 0f;
         CancelAirDrawStrokeImmediate();
+        outputTrigger?.HideImmediate();
 
         if (!isAirWeavingActive)
         {
@@ -449,10 +457,7 @@ public class AirWeavingController : MonoBehaviour
         {
             airDrawPostSpawnCooldown = Mathf.Max(0f, airDrawPostSpawnCooldown - dt);
         }
-        if (feedbackHoldTimer > 0f)
-        {
-            feedbackHoldTimer = Mathf.Max(0f, feedbackHoldTimer - dt);
-        }
+        if (postDropLockoutTimer > 0f) postDropLockoutTimer = Mathf.Max(0f, postDropLockoutTimer - dt);
 
         UpdateVideoQuadTransform(mainCam);
         UpdateWorkbenchGuideVisuals(mainCam);
@@ -465,6 +470,7 @@ public class AirWeavingController : MonoBehaviour
         UpdateWorkbenchInteractions(mainCam, dt);
         UpdateAirDrawStrokeFade(mainCam, dt);
         SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: false);
+        UpdateOutputSpatialTrigger(mainCam, dt);
         UpdateAirWeavingStatusFeedback();
     }
 
@@ -481,6 +487,11 @@ public class AirWeavingController : MonoBehaviour
             transitionCoroutine = null;
         }
 
+        if (outputTrigger != null)
+        {
+            outputTrigger.OnVerifyRequested -= HandleOutputTriggerVerify;
+            outputTrigger.OnNextLevelRequested -= HandleOutputTriggerNextLevel;
+        }
         ShutdownNativeAndCameraImmediate();
         DestroyVisualRigAndMaterials();
         cachedGateNodes.Clear();
@@ -639,6 +650,7 @@ public class AirWeavingController : MonoBehaviour
         UpdateWorkbenchGuideVisuals(mainCam);
         SetHandRigVisible(false);
         SetHoverRingVisible(false);
+        outputTrigger?.HideImmediate();
 
         // 8. Tata seluruh 8 GateNode (Input A, Input B, Output terkunci di papan roti; 5 gerbang di Rak Parkir Atas)
         InitializeWorkbenchSlots(mainCam);
@@ -658,11 +670,12 @@ public class AirWeavingController : MonoBehaviour
         indexWasInsideInputB = false;
         isIndexOnlyWandPose = false;
         airDrawPostSpawnCooldown = 0f;
-        feedbackHoldTimer = 0f;
+        postDropLockoutTimer = 0f;
+        noHandAbsentTimer = 0f;
+        noHandToastShown = false;
         CancelAirDrawStrokeImmediate();
         ResetLandmarkOneEuroFilters();
         lastTimestampMs = 0;
-        feedbackTimer = FeedbackUpdateIntervalSeconds;
         fpsTimer = 0f;
         inferenceFramesInWindow = 0;
         displayedInferenceFps = 0;
@@ -673,7 +686,7 @@ public class AirWeavingController : MonoBehaviour
 
         SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: true);
 
-        SetFeedbackImmediate("[Air-Weaving v6] Cubit & seret gerbang dari rak atas, atau gambar ^/O/Z/V/| dengan jari telunjuk!", FeedbackActiveColor, 2.2f);
+        SetFeedbackImmediate("Mode Udara aktif — cubit gerbang atau tahan di Output untuk uji.", FeedbackActiveColor, 2.6f);
         OnAirWeavingModeChanged?.Invoke(true);
     }
 
@@ -921,6 +934,19 @@ public class AirWeavingController : MonoBehaviour
     {
         float aspectScale = ComputeHorizontalAspectScale(mainCam);
 
+        // 0. Jeda seluruh gestur tangan selama laci menu / modal UI terbuka (Guard #2 v7.0)
+        if (levelManager != null && levelManager.IsUiOverlayOpen)
+        {
+            if (grabbedGateSlotIndex >= 0 && grabbedGateSlotIndex < gateSlots.Count) { ReleaseGrabbedGate(gateSlots[grabbedGateSlotIndex], aspectScale); grabbedGateSlotIndex = -1; }
+            CancelAirDrawStrokeImmediate();
+            hoveredGateSlotIndex = -1;
+            hoveredInputNode = null;
+            isPinching = false;
+            wasPinching = false;
+            SetHoverRingVisible(false);
+            return;
+        }
+
         // 1. Kelola Occlusion Grace (0.16s) saat sedang memegang gerbang (prioritas #1: batalkan Air-Draw bila aktif)
         if (grabbedGateSlotIndex >= 0 && grabbedGateSlotIndex < gateSlots.Count)
         {
@@ -984,11 +1010,23 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // 3. Cari target gerbang terdekat dari kursor Pinch / Telunjuk (prioritas #1/#2 di atas Air-Draw)
+        // 3. Zona Output menang prioritas penuh atas Air-Draw & hover gerbang di dekatnya saat tidak sedang menggenggam
         Vector2 cursorXY = isPinching ? pinchWorkbenchLocalXY : indexWorkbenchLocalXY;
-        hoveredGateSlotIndex = (!isRecordingAirDraw || pinchJustStarted || isPinching)
-            ? FindNearestGateSlotIndex(cursorXY, GateHoverGrabRadius, ParkedGateHoverRadius)
-            : -1;
+        bool cursorInOutputZone = IsCursorInsideOutputPriorityZone(cursorXY, aspectScale);
+        if (cursorInOutputZone)
+        {
+            if (isRecordingAirDraw)
+            {
+                CancelAirDrawStrokeImmediate();
+            }
+            hoveredGateSlotIndex = -1;
+        }
+        else
+        {
+            hoveredGateSlotIndex = (!isRecordingAirDraw || pinchJustStarted || isPinching)
+                ? FindNearestGateSlotIndex(cursorXY, GateHoverGrabRadius, ParkedGateHoverRadius)
+                : -1;
+        }
 
         // 4. Cek Air-Tap / Pinch singkat pada terminal tetap Input A & Input B (hanya bila tidak membidik gerbang)
         hoveredInputNode = null;
@@ -1023,8 +1061,6 @@ public class AirWeavingController : MonoBehaviour
                 grabbed.node.SetExternalSpatialPose(true, worldPos, worldRot);
                 grabbed.node.TriggerTapFeedback();
             }
-
-            SetFeedbackImmediate($"[Air-Weaving v6] Memegang gerbang {grabbed.node.nodeType} — arahkan ke zona tengah atau rak atas.", FeedbackPinchColor, 0.8f);
         }
         else
         {
@@ -1036,12 +1072,29 @@ public class AirWeavingController : MonoBehaviour
         UpdateHoverHighlightVisual(mainCam, aspectScale);
     }
 
+    private bool IsCursorInsideOutputPriorityZone(Vector2 cursorXY, float aspectScale)
+    {
+        if (grabbedGateSlotIndex >= 0 || postDropLockoutTimer > 0f)
+        {
+            return false;
+        }
+        if (levelManager != null && (levelManager.IsSandboxMode || levelManager.IsVerifying || levelManager.IsUiOverlayOpen))
+        {
+            return false;
+        }
+
+        Vector2 outputCenterXY = new Vector2(OutputTerminalBaseX * aspectScale, OutputTerminalY + 0.12f);
+        return Vector2.Distance(cursorXY, outputCenterXY) <= OutputZonePriorityRadius
+               || Vector2.Distance(indexWorkbenchLocalXY, outputCenterXY) <= OutputZonePriorityRadius;
+    }
+
     private void UpdateAirDrawInteraction(Camera mainCam, float aspectScale, float dt)
     {
         bool blockedByHigherPriority = isPinching
                                        || rawPinching
                                        || hoveredGateSlotIndex >= 0
                                        || hoveredInputNode != null
+                                       || IsCursorInsideOutputPriorityZone(indexWorkbenchLocalXY, aspectScale)
                                        || (levelManager != null && levelManager.IsVerifying);
 
         if (blockedByHigherPriority)
@@ -1288,6 +1341,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
+        postDropLockoutTimer = PostDropOutputLockoutSeconds;
         Vector2 homeXY = GetParkingSlotLocalXY(slot.slotIndex, aspectScale);
         float distToHome = Vector2.Distance(slot.currentLocalXY, homeXY);
         bool shouldReturnToRack = slot.currentLocalXY.y > ParkReturnThresholdY || distToHome <= ParkSlotSnapRadius;
@@ -1299,7 +1353,6 @@ public class AirWeavingController : MonoBehaviour
             slot.currentLocalXY = homeXY;
             slot.currentLocalZ = WorkbenchDepth;
             slot.currentScale = ParkedGateScale;
-            SetFeedbackImmediate($"[Air-Weaving v6] Gerbang {slot.node.nodeType} dikembalikan ke Rak Parkir.", FeedbackActiveColor);
         }
         else
         {
@@ -1310,7 +1363,6 @@ public class AirWeavingController : MonoBehaviour
             slot.currentLocalZ = WorkbenchDepth;
             slot.currentScale = ActiveGateScale;
             slot.node.TriggerTapFeedback();
-            SetFeedbackImmediate($"[Air-Weaving v6] Gerbang {slot.node.nodeType} terpasang di Zona Rakit.", FeedbackPinchColor);
         }
     }
 
@@ -1395,9 +1447,6 @@ public class AirWeavingController : MonoBehaviour
         }
 
         targetNode.TriggerTapFeedback();
-        string label = isInputB ? "Input B" : "Input A";
-        string bit = targetNode.currentOutputValue ? "1 [HIGH]" : "0 [LOW]";
-        SetFeedbackImmediate($"[Air-Tap v6] Sakelar {label} -> {bit}", FeedbackPinchColor);
     }
 
     private void SyncAllWorkbenchNodesToCamera(Camera mainCam, bool snapImmediately)
@@ -1956,9 +2005,33 @@ public class AirWeavingController : MonoBehaviour
         hoverHighlightRingRenderer.SetPositions(hoverRingPoints);
     }
 
+    private void HandleOutputTriggerVerify() => OnOutputVerifyRequested?.Invoke();
+    private void HandleOutputTriggerNextLevel() => OnOutputNextLevelRequested?.Invoke();
+
+    private void UpdateOutputSpatialTrigger(Camera mainCam, float dt)
+    {
+        if (outputTrigger == null) return;
+        float aspectScale = ComputeHorizontalAspectScale(mainCam);
+        Vector2 outputLocalXY = new Vector2(OutputTerminalBaseX * aspectScale, OutputTerminalY);
+        Vector3 outputWorldPos = outputNode != null
+            ? outputNode.transform.position
+            : mainCam.transform.TransformPoint(new Vector3(outputLocalXY.x, outputLocalXY.y, WorkbenchDepth));
+        outputTrigger.Tick(mainCam, dt, isAirWeavingActive,
+            levelManager != null && levelManager.IsSandboxMode,
+            levelManager != null && levelManager.IsVerifying,
+            levelManager != null && levelManager.IsCircuitCompleteLive,
+            levelManager != null && levelManager.IsReadyForNextLevel,
+            levelManager != null && levelManager.IsAwaitingSandboxTransition,
+            levelManager != null && levelManager.IsUiOverlayOpen,
+            isHandDetected, isPinching, indexWorkbenchLocalXY, pinchWorkbenchLocalXY,
+            outputLocalXY, outputWorldPos,
+            grabbedGateSlotIndex >= 0, hoveredGateSlotIndex >= 0, isRecordingAirDraw, postDropLockoutTimer);
+    }
+
     private void UpdateAirWeavingStatusFeedback()
     {
-        fpsTimer += Time.unscaledDeltaTime;
+        float dt = Time.unscaledDeltaTime;
+        fpsTimer += dt;
         if (fpsTimer >= 0.50f)
         {
             displayedInferenceFps = Mathf.RoundToInt(inferenceFramesInWindow / fpsTimer);
@@ -1966,53 +2039,19 @@ public class AirWeavingController : MonoBehaviour
             fpsTimer = 0f;
         }
 
-        feedbackTimer += Time.unscaledDeltaTime;
-        if (feedbackTimer < FeedbackUpdateIntervalSeconds)
+        if (isHandDetected)
         {
-            return;
+            if (noHandToastShown) { noHandToastShown = false; levelManager?.ClearLowPriorityNoHandToast(); }
+            noHandAbsentTimer = 0f;
         }
-        feedbackTimer = 0f;
-
-        if (txtFeedback == null || (levelManager != null && levelManager.IsVerifying) || feedbackHoldTimer > 0f)
+        else if (levelManager == null || (!levelManager.IsVerifying && !levelManager.IsUiOverlayOpen))
         {
-            return;
-        }
-
-        if (isRecordingAirDraw)
-        {
-            txtFeedback.text = "[Air-Draw] Menggambar pola... (^=AND, O=OR, Z=XOR, V=NAND, |=NOT)";
-            txtFeedback.color = AirDrawStrokeStartColor;
-        }
-        else if (grabbedGateSlotIndex >= 0 && grabbedGateSlotIndex < gateSlots.Count && gateSlots[grabbedGateSlotIndex].node != null)
-        {
-            WorkbenchGateSlot grabbed = gateSlots[grabbedGateSlotIndex];
-            string actionHint = grabbed.currentLocalXY.y > ParkReturnThresholdY
-                ? "Lepas untuk parkir kembali"
-                : "Lepas untuk pasang di Zona Rakit";
-            txtFeedback.text = $"[Air-Weaving v6] Gerbang {grabbed.node.nodeType} | {actionHint} | {displayedInferenceFps} FPS";
-            txtFeedback.color = FeedbackPinchColor;
-        }
-        else if (hoveredGateSlotIndex >= 0 && hoveredGateSlotIndex < gateSlots.Count && gateSlots[hoveredGateSlotIndex].node != null)
-        {
-            NodeType gType = gateSlots[hoveredGateSlotIndex].node.nodeType;
-            txtFeedback.text = $"[Air-Weaving v6] Bidik Gerbang {gType} — Cubit (Pinch) untuk tarik | {displayedInferenceFps} FPS";
-            txtFeedback.color = FeedbackActiveColor;
-        }
-        else if (hoveredInputNode != null)
-        {
-            string inputName = hoveredInputNode == inputBNode ? "Input B" : "Input A";
-            txtFeedback.text = $"[Air-Weaving v6] Sentuh / Cubit {inputName} untuk jungkit sakelar | {displayedInferenceFps} FPS";
-            txtFeedback.color = HoverInputRingColor;
-        }
-        else if (isHandDetected)
-        {
-            txtFeedback.text = $"[Air-Weaving v6] Tangan Siap | Pinch: {(isPinching ? "AKTIF" : "LEPAS")} | {displayedInferenceFps} FPS";
-            txtFeedback.color = isPinching ? FeedbackPinchColor : FeedbackActiveColor;
-        }
-        else
-        {
-            txtFeedback.text = $"[Air-Weaving v6] Arahkan tangan ke kamera... | {displayedInferenceFps} FPS";
-            txtFeedback.color = FeedbackWaitingColor;
+            noHandAbsentTimer += dt;
+            if (noHandAbsentTimer >= NoHandPromptDelaySeconds && !noHandToastShown)
+            {
+                noHandToastShown = true;
+                levelManager?.TryShowLowPriorityNoHandToast("Arahkan tangan ke kamera", FeedbackWaitingColor);
+            }
         }
     }
 
@@ -2183,6 +2222,13 @@ public class AirWeavingController : MonoBehaviour
             airDrawStrokeRenderer.sharedMaterial = airDrawStrokeMat;
         }
         airDrawStrokeRenderer.enabled = false;
+        if (outputTrigger == null)
+        {
+            outputTrigger = GetComponent<AirWeavingOutputTrigger>() ?? gameObject.AddComponent<AirWeavingOutputTrigger>();
+            outputTrigger.OnVerifyRequested += HandleOutputTriggerVerify;
+            outputTrigger.OnNextLevelRequested += HandleOutputTriggerNextLevel;
+        }
+        outputTrigger.EnsureVisualsCreated();
 
         workbenchVisualRootObj.SetActive(false);
     }
@@ -2397,6 +2443,7 @@ public class AirWeavingController : MonoBehaviour
 
         SetHandRigVisible(false);
         SetHoverRingVisible(false);
+        outputTrigger?.HideImmediate();
 
         if (workbenchVisualRootObj != null && workbenchVisualRootObj.activeSelf)
         {
@@ -2661,12 +2708,9 @@ public class AirWeavingController : MonoBehaviour
         return null;
     }
 
-    private void SetFeedbackImmediate(string message, Color color, float holdSeconds = 0f)
+    private void SetFeedbackImmediate(string message, Color color, float holdSeconds = 2.4f)
     {
-        if (holdSeconds > 0f)
-        {
-            feedbackHoldTimer = holdSeconds;
-        }
+        if (levelManager != null) { levelManager.ShowFeedbackToast(message, color, holdSeconds > 0f ? holdSeconds : 2.4f); return; }
 
         if (txtFeedback != null)
         {
