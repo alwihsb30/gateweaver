@@ -330,7 +330,9 @@ public class AirWeavingController : MonoBehaviour
     private AirWeavingOutputTrigger outputTrigger;
     private AirWeavingHologramVisual hologramVisual;
     private AirWeavingCableRouter cableRouter;
+    private AirWeavingSummonVisual summonVisual;
     private readonly AirWeavingHandGestureDetector handGestureDetector = new AirWeavingHandGestureDetector();
+    private readonly AirWeavingCircleSummoner circleSummoner = new AirWeavingCircleSummoner();
     private readonly List<GateNode> activePlacedGatesBuffer = new List<GateNode>(5);
     private float fpsTimer = 0f;
     private int inferenceFramesInWindow = 0;
@@ -404,7 +406,9 @@ public class AirWeavingController : MonoBehaviour
         postDropLockoutTimer = 0f;
         CancelAirDrawStrokeImmediate();
         handGestureDetector.Reset();
+        circleSummoner.Reset();
         cableRouter?.ClearAllWires(circuitManager);
+        summonVisual?.HideImmediate();
         outputTrigger?.HideImmediate();
 
         if (!isAirWeavingActive)
@@ -474,9 +478,11 @@ public class AirWeavingController : MonoBehaviour
         handGestureDetector.TickTemporalState(dt, isHandDetected, isStickyDrag);
         UpdateCableRouterInteraction(mainCam);
         UpdateWorkbenchInteractions(mainCam, dt);
+        UpdateCircleSummoner(mainCam, dt);
         UpdateAirDrawStrokeFade(mainCam, dt);
         SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: false);
         UpdateHologramVisuals(mainCam);
+        UpdateCircleSummonVisuals(mainCam, dt);
         UpdateOutputSpatialTrigger(mainCam, dt);
         UpdateAirWeavingStatusFeedback();
     }
@@ -662,6 +668,8 @@ public class AirWeavingController : MonoBehaviour
         outputTrigger?.HideImmediate();
         hologramVisual?.HideImmediate();
         cableRouter?.HideImmediate();
+        circleSummoner.Reset();
+        summonVisual?.HideImmediate();
 
         // 8. Tata seluruh 8 GateNode (Input A, Input B, Output terkunci di papan roti; 5 gerbang di Rak Parkir Atas)
         InitializeWorkbenchSlots(mainCam);
@@ -693,9 +701,11 @@ public class AirWeavingController : MonoBehaviour
         transitionCoroutine = null;
 
         handGestureDetector.Reset();
+        circleSummoner.Reset();
         circuitManager?.SetManualRoutingMode(true);
         cableRouter?.ClearAllWires(circuitManager);
         hologramVisual?.SetRootVisible(true);
+        summonVisual?.HideImmediate();
 
         SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: true);
 
@@ -1022,8 +1032,8 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // 2B. Prioritas #1 Port Kabel: bila kursor sedang membidik atau menyeret port kabel, badan gerbang & Input A/B wajib mengalah penuh
-        if (cableRouter != null && (cableRouter.IsDraggingCable || cableRouter.IsHoveringPort))
+        // 2B. Prioritas #1 Port Kabel & Summon Aktif: badan gerbang & Input A/B wajib mengalah penuh
+        if ((cableRouter != null && (cableRouter.IsDraggingCable || cableRouter.IsHoveringPort)) || circleSummoner.IsActive)
         {
             if (isRecordingAirDraw)
             {
@@ -1640,6 +1650,7 @@ public class AirWeavingController : MonoBehaviour
             wasHandDetected = false;
             rawPinching = false;
             isIndexOnlyWandPose = false;
+            circleSummoner.ClearPoseVoteBuffer();
             ResetLandmarkOneEuroFilters();
             SetHandRigVisible(false);
             return;
@@ -1823,8 +1834,9 @@ public class AirWeavingController : MonoBehaviour
         // Deteksi pose "Tongkat Telunjuk" (Index-Only Wand): telunjuk terentang & minimal 2 dari 3 jari lain tertekuk
         isIndexOnlyWandPose = EvaluateIndexOnlyWandPose(landmarks);
 
-        // Perbarui detektor Kepal/Buka & Kursor Telapak Anti-Lompat (v7.0 Fase 3)
+        // Perbarui detektor Kepal/Buka & Kursor Telapak Anti-Lompat (v7.0 Fase 3 + Fase 4)
         handGestureDetector.UpdateFromLandmarks(landmarks, smoothedLandmarksWorld, camTransform);
+        circleSummoner.RecordPoseSample(handGestureDetector.CurrentSummonPose);
 
         indexTipWorldPosition = smoothedLandmarksWorld[8];
         pinchWorldPosition = handGestureDetector.PalmCursorWorldPosition;
@@ -2048,7 +2060,7 @@ public class AirWeavingController : MonoBehaviour
             isAirWeavingActive,
             levelManager != null && levelManager.IsUiOverlayOpen,
             levelManager != null && levelManager.IsVerifying,
-            grabbedGateSlotIndex >= 0,
+            grabbedGateSlotIndex >= 0 || circleSummoner.IsActive,
             isHandDetected,
             handGestureDetector.IsFistActive,
             handGestureDetector.FistJustStarted,
@@ -2110,6 +2122,116 @@ public class AirWeavingController : MonoBehaviour
             handGestureDetector.MeanCurlRatio);
     }
 
+    private void UpdateCircleSummoner(Camera mainCam, float dt)
+    {
+        if (mainCam == null) return;
+        float aspectScale = ComputeHorizontalAspectScale(mainCam);
+        bool overlayOrVerify = levelManager != null && (levelManager.IsUiOverlayOpen || levelManager.IsVerifying);
+        bool draggingCable = cableRouter != null && cableRouter.IsDraggingCable;
+        bool blocked;
+        if (circleSummoner.IsActive)
+        {
+            // Begitu sudah masuk Charging/Ready, jangan batalkan hanya karena ujung jari melintas di atas gerbang/port/Output/tepi papan
+            blocked = overlayOrVerify || grabbedGateSlotIndex >= 0 || draggingCable;
+        }
+        else
+        {
+            bool cableBusy = draggingCable || (cableRouter != null && cableRouter.IsHoveringPort);
+            bool inOutputZone = IsCursorInsideOutputPriorityZone(handGestureDetector.PalmCursorLocalXY, aspectScale);
+            blocked = overlayOrVerify
+                      || grabbedGateSlotIndex >= 0
+                      || cableBusy
+                      || hoveredGateSlotIndex >= 0
+                      || hoveredInputNode != null
+                      || inOutputZone;
+        }
+
+        Vector2 assemblyMin = new Vector2(AssemblyMinBaseX * aspectScale, AssemblyMinY);
+        Vector2 assemblyMax = new Vector2(AssemblyMaxBaseX * aspectScale, AssemblyMaxY);
+
+        circleSummoner.Tick(
+            dt,
+            isAirWeavingActive,
+            blocked,
+            isHandDetected,
+            handGestureDetector.IsFistActive,
+            handGestureDetector.FistJustStarted,
+            handGestureDetector.CurrentSummonPose,
+            handGestureDetector.IsRelaxedOpenFiveBloom,
+            handGestureDetector.ActiveSummonTipLocalXY,
+            handGestureDetector.ThumbTipLocalXY,
+            assemblyMin,
+            assemblyMax);
+
+        if (circleSummoner.BloomJustTriggeredThisFrame)
+        {
+            HandleCircleSummonBloomDeploy(mainCam, aspectScale, circleSummoner.DeployedGateType, circleSummoner.DeployedLocalXY);
+        }
+    }
+
+    private void HandleCircleSummonBloomDeploy(Camera mainCam, float aspectScale, NodeType gateType, Vector2 deployLocalXY)
+    {
+        WorkbenchGateSlot targetSlot = null;
+        for (int i = 0; i < gateSlots.Count; i++)
+        {
+            if (gateSlots[i] != null && gateSlots[i].node != null && gateSlots[i].node.nodeType == gateType)
+            {
+                targetSlot = gateSlots[i];
+                break;
+            }
+        }
+
+        if (targetSlot == null || targetSlot.node == null) return;
+
+        // Aturan #3 (Notice + Pulse Non-Destruktif): jika gerbang sudah terpasang di papan, jangan pindahkan/ganggu kabelnya
+        if (targetSlot.isPlacedOnWorkbench)
+        {
+            targetSlot.node.TriggerTapFeedback();
+            summonVisual?.TriggerBloomBurst(targetSlot.node.transform.position, isAmberNotice: true);
+            SetFeedbackImmediate($"Gerbang {gateType} sudah terpasang di papan!", FeedbackWaitingColor, 2.2f);
+            return;
+        }
+
+        Vector2 spawnXY = ClampAssemblyZoneLocalXY(deployLocalXY, aspectScale);
+        targetSlot.isPlacedOnWorkbench = true;
+        targetSlot.placedLocalXY = spawnXY;
+        targetSlot.currentLocalXY = spawnXY;
+        targetSlot.currentLocalZ = WorkbenchDepth;
+        targetSlot.currentScale = ParkedGateScale;
+
+        Transform camT = mainCam.transform;
+        Vector3 worldPos = camT.TransformPoint(new Vector3(spawnXY.x, spawnXY.y, WorkbenchDepth));
+        Quaternion worldRot = camT.rotation * WorkbenchTiltRotation;
+        targetSlot.node.transform.localScale = Vector3.one * targetSlot.currentScale;
+        targetSlot.node.SetExternalSpatialPose(true, worldPos, worldRot);
+        targetSlot.node.TriggerTapFeedback();
+        summonVisual?.TriggerBloomBurst(worldPos, isAmberNotice: false);
+        postDropLockoutTimer = PostDropOutputLockoutSeconds;
+        SetFeedbackImmediate($"Gerbang {gateType} dipanggil ke zona rakit!", FeedbackPinchColor, 1.8f);
+    }
+
+    private void UpdateCircleSummonVisuals(Camera mainCam, float dt)
+    {
+        if (summonVisual == null) return;
+        bool hasGateContext = circleSummoner.IsActive || circleSummoner.HasLivePoseIndicator;
+        NodeType visualGate = circleSummoner.IsActive ? circleSummoner.ActiveGateType : circleSummoner.LiveIndicatorGateType;
+        bool alreadyOnBoard = hasGateContext && IsGateTypePlacedOnWorkbench(visualGate);
+        summonVisual.TickVisuals(mainCam, dt, isAirWeavingActive, WorkbenchDepth, circleSummoner, alreadyOnBoard);
+    }
+
+    private bool IsGateTypePlacedOnWorkbench(NodeType gateType)
+    {
+        for (int i = 0; i < gateSlots.Count; i++)
+        {
+            WorkbenchGateSlot slot = gateSlots[i];
+            if (slot != null && slot.node != null && slot.node.nodeType == gateType)
+            {
+                return slot.isPlacedOnWorkbench;
+            }
+        }
+        return false;
+    }
+
     private void UpdateOutputSpatialTrigger(Camera mainCam, float dt)
     {
         if (outputTrigger == null) return;
@@ -2130,7 +2252,8 @@ public class AirWeavingController : MonoBehaviour
             grabbedGateSlotIndex >= 0, hoveredGateSlotIndex >= 0,
             cableRouter != null && cableRouter.IsHoveringPort,
             cableRouter != null && cableRouter.IsDraggingCable,
-            isRecordingAirDraw, postDropLockoutTimer);
+            isRecordingAirDraw || circleSummoner.IsActive || circleSummoner.ConsumedFistCancelThisFrame,
+            postDropLockoutTimer);
     }
 
     private void UpdateAirWeavingStatusFeedback()
@@ -2344,6 +2467,11 @@ public class AirWeavingController : MonoBehaviour
             cableRouter = GetComponent<AirWeavingCableRouter>() ?? gameObject.AddComponent<AirWeavingCableRouter>();
         }
         cableRouter.EnsureVisualsCreated();
+        if (summonVisual == null)
+        {
+            summonVisual = GetComponent<AirWeavingSummonVisual>() ?? gameObject.AddComponent<AirWeavingSummonVisual>();
+        }
+        summonVisual.EnsureVisualsCreated();
 
         workbenchVisualRootObj.SetActive(false);
     }
@@ -2561,6 +2689,8 @@ public class AirWeavingController : MonoBehaviour
         outputTrigger?.HideImmediate();
         hologramVisual?.HideImmediate();
         cableRouter?.HideImmediate();
+        circleSummoner.Reset();
+        summonVisual?.HideImmediate();
 
         if (workbenchVisualRootObj != null && workbenchVisualRootObj.activeSelf)
         {

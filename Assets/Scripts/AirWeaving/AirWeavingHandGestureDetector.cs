@@ -9,6 +9,17 @@ using NormalizedLandmark = Mediapipe.Tasks.Components.Containers.NormalizedLandm
 /// - Schmitt-trigger hysteresis lebar (masuk < 0.88, keluar > 1.18), asymmetric debounce (45 ms masuk / 80-130 ms keluar),
 ///   velocity guard saat seret cepat, occlusion grace 180 ms, dan pre-fist target latch 55 ms. Zero-GC.
 /// </summary>
+public enum SummonHandPose
+{
+    None = 0,
+    OneFingerAnd = 1,
+    TwoFingersOr = 2,
+    ThreeFingersXor = 3,
+    FourFingersNand = 4,
+    ThumbOnlyNot = 5,
+    OpenFiveBloom = 6
+}
+
 public sealed class AirWeavingHandGestureDetector
 {
     private const float MinPalmScaleClamp = 0.055f;
@@ -17,6 +28,15 @@ public sealed class AirWeavingHandGestureDetector
     private const float FistStickyExitMeanRatio = 1.15f;
     private const float FingerFoldedPalmRatio = 0.92f;
     private const float FingerFoldedPipRatio = 1.04f;
+    private const float SummonFingerExtendPalmRatio = 1.00f;
+    private const float SummonFingerExtendPipRatio = 1.02f;
+    private const float SummonFingerFoldPalmRatio = 0.88f;
+    private const float SummonFingerFoldPipRatio = 0.98f;
+    private const float ThumbBloomIndexRatio = 0.46f;
+    private const float ThumbBloomPinkyRatio = 0.90f;
+    private const float ThumbStrongNotIndexRatio = 0.52f;
+    private const float ThumbStrongNotPinkyRatio = 0.96f;
+    private const float OpenFiveBloomMeanRatio = 1.12f;
     private const float PreFistLatchMeanRatio = 1.02f;
 
     private const float DebounceEnterSeconds = 0.045f;
@@ -50,15 +70,28 @@ public sealed class AirWeavingHandGestureDetector
     private Vector2 latchedCursorLocalXY = Vector2.zero;
     private bool hasLatchedCursor = false;
 
+    private readonly bool[] mainFingerExtended = new bool[4];
+    private bool isThumbExtended = false;
+    private bool isThumbStrongOut = false;
+    private bool isRelaxedOpenFiveBloom = false;
+    private SummonHandPose currentSummonPose = SummonHandPose.None;
+
     public bool IsFistActive => isFistActive;
     public bool FistJustStarted => fistJustStarted;
     public bool FistJustEnded => fistJustEnded;
     public bool IsPreFistCurling => isPreFistCurling;
     public float MeanCurlRatio => meanCurlRatio;
     public int FoldedFingerCount => foldedFingerCount;
+    public SummonHandPose CurrentSummonPose => currentSummonPose;
+    public bool IsOpenFiveBloom => currentSummonPose == SummonHandPose.OpenFiveBloom;
+    public bool IsRelaxedOpenFiveBloom => isRelaxedOpenFiveBloom;
+    public bool IsIndexFingerExtended => mainFingerExtended[0];
     public float CursorSpeedUnitsPerSec { get; private set; }
     public Vector3 PalmCursorWorldPosition { get; private set; }
     public Vector2 PalmCursorLocalXY { get; private set; }
+    public Vector2 IndexTipLocalXY { get; private set; }
+    public Vector2 ThumbTipLocalXY { get; private set; }
+    public Vector2 ActiveSummonTipLocalXY { get; private set; }
     public Vector2 StabilizedCursorLocalXY => hasLatchedCursor ? latchedCursorLocalXY : PalmCursorLocalXY;
 
     public void Reset()
@@ -79,9 +112,20 @@ public sealed class AirWeavingHandGestureDetector
         prevCursorLocalXY = Vector2.zero;
         latchedCursorLocalXY = Vector2.zero;
         hasLatchedCursor = false;
+        for (int i = 0; i < 4; i++)
+        {
+            mainFingerExtended[i] = false;
+        }
+        isThumbExtended = false;
+        isThumbStrongOut = false;
+        isRelaxedOpenFiveBloom = false;
+        currentSummonPose = SummonHandPose.None;
         CursorSpeedUnitsPerSec = 0f;
         PalmCursorWorldPosition = Vector3.zero;
         PalmCursorLocalXY = Vector2.zero;
+        IndexTipLocalXY = Vector2.zero;
+        ThumbTipLocalXY = Vector2.zero;
+        ActiveSummonTipLocalXY = Vector2.zero;
     }
 
     /// <summary>
@@ -131,12 +175,70 @@ public sealed class AirWeavingHandGestureDetector
             {
                 folded++;
             }
+
+            // Schmitt-trigger per-jari rileks untuk klasifikasi 1-4 jari anti-flicker (Fase 4 tuning)
+            if (!mainFingerExtended[i])
+            {
+                if (rPalm > SummonFingerExtendPalmRatio && rPip > SummonFingerExtendPipRatio)
+                {
+                    mainFingerExtended[i] = true;
+                }
+            }
+            else if (rPalm < SummonFingerFoldPalmRatio || rPip < SummonFingerFoldPipRatio)
+            {
+                mainFingerExtended[i] = false;
+            }
         }
 
         meanCurlRatio = sumRatio * 0.25f;
         foldedFingerCount = folded;
         rawEnterCondition = (meanCurlRatio < FistEnterMeanRatio) && (foldedFingerCount >= 3);
         rawExitCondition = (meanCurlRatio > FistExitMeanRatio) && (foldedFingerCount <= 1);
+
+        // 3B. Evaluasi ibu jari orientation-invariant + pemetaan kanonik 5 gerbang & Open-5 Bloom (Fase 4 tuning)
+        NormalizedLandmark l4 = landmarks[4];
+        float dThumbIndex = Dist2D(l4, l5) / palmScale;
+        float dThumbPinky = Dist2D(l4, l17) / palmScale;
+        isThumbExtended = dThumbIndex > ThumbBloomIndexRatio && dThumbPinky > ThumbBloomPinkyRatio;
+        isThumbStrongOut = dThumbIndex > ThumbStrongNotIndexRatio && dThumbPinky > ThumbStrongNotPinkyRatio;
+
+        int extendedMainCount = (mainFingerExtended[0] ? 1 : 0)
+                                + (mainFingerExtended[1] ? 1 : 0)
+                                + (mainFingerExtended[2] ? 1 : 0)
+                                + (mainFingerExtended[3] ? 1 : 0);
+
+        isRelaxedOpenFiveBloom = extendedMainCount >= 3 && meanCurlRatio > OpenFiveBloomMeanRatio && isThumbExtended;
+
+        if (extendedMainCount == 4 && isThumbExtended && meanCurlRatio > OpenFiveBloomMeanRatio)
+        {
+            currentSummonPose = SummonHandPose.OpenFiveBloom;
+        }
+        else if (extendedMainCount == 4 && !isThumbExtended)
+        {
+            // Khusus 4 jari (NAND): wajib ibu jari terlipat (<= 0.46 || <= 0.90) agar tidak bentrok dengan OpenFiveBloom
+            currentSummonPose = SummonHandPose.FourFingersNand;
+        }
+        else if (extendedMainCount == 3)
+        {
+            // Berbasis jumlah jari utama terbuka (1=AND, 2=OR, 3=XOR; ibu jari rileks) agar tahan variasi sudut jari
+            currentSummonPose = SummonHandPose.ThreeFingersXor;
+        }
+        else if (extendedMainCount == 2)
+        {
+            currentSummonPose = SummonHandPose.TwoFingersOr;
+        }
+        else if (extendedMainCount == 1)
+        {
+            currentSummonPose = SummonHandPose.OneFingerAnd;
+        }
+        else if (extendedMainCount == 0 && foldedFingerCount >= 3 && isThumbStrongOut)
+        {
+            currentSummonPose = SummonHandPose.ThumbOnlyNot;
+        }
+        else
+        {
+            currentSummonPose = SummonHandPose.None;
+        }
 
         // 4. Kursor telapak anti-lompat: 0.50*L9 + 0.30*L5 + 0.20*L0 (pergeseran < 0.02 unit saat mengepal)
         Vector3 palmWorld = (smoothedLandmarksWorld[9] * 0.50f)
@@ -146,6 +248,35 @@ public sealed class AirWeavingHandGestureDetector
 
         Vector3 localPt = camTransform.InverseTransformPoint(palmWorld);
         PalmCursorLocalXY = new Vector2(localPt.x, localPt.y);
+
+        Vector3 indexLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[8]);
+        IndexTipLocalXY = new Vector2(indexLocal.x, indexLocal.y);
+        Vector3 thumbLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[4]);
+        ThumbTipLocalXY = new Vector2(thumbLocal.x, thumbLocal.y);
+
+        // Ujung jari aktif dalam ruang koordinat lokal workbench yang 100% sama dengan PalmCursorLocalXY
+        if (currentSummonPose == SummonHandPose.ThumbOnlyNot)
+        {
+            ActiveSummonTipLocalXY = ThumbTipLocalXY;
+        }
+        else if (mainFingerExtended[0])
+        {
+            ActiveSummonTipLocalXY = IndexTipLocalXY;
+        }
+        else
+        {
+            int activeTipLandmarkIdx = 8;
+            for (int i = 1; i < 4; i++)
+            {
+                if (mainFingerExtended[i])
+                {
+                    activeTipLandmarkIdx = FingerTipIndices[i];
+                    break;
+                }
+            }
+            Vector3 activeTipLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[activeTipLandmarkIdx]);
+            ActiveSummonTipLocalXY = new Vector2(activeTipLocal.x, activeTipLocal.y);
+        }
     }
 
     /// <summary>
@@ -224,7 +355,15 @@ public sealed class AirWeavingHandGestureDetector
                 preFistLatchTimer = 0f;
             }
 
-            if (rawEnterCondition)
+            // Guard Anti-Fist (Fase 4): saat tidak sedang sticky-drag, 1 jari telunjuk (#8) teracung maupun
+            // pose summon sah (AND/OR/XOR/NAND/NOT) tidak boleh memicu masuk Fist; kepalan penuh tetap 45 ms.
+            bool isSummonGatePose = currentSummonPose == SummonHandPose.OneFingerAnd
+                                    || currentSummonPose == SummonHandPose.TwoFingersOr
+                                    || currentSummonPose == SummonHandPose.ThreeFingersXor
+                                    || currentSummonPose == SummonHandPose.FourFingersNand
+                                    || currentSummonPose == SummonHandPose.ThumbOnlyNot;
+            bool allowFistEnter = rawEnterCondition && (isStickyHoldActive || (!mainFingerExtended[0] && !isSummonGatePose));
+            if (allowFistEnter)
             {
                 enterHoldTimer += dt;
                 if (enterHoldTimer >= DebounceEnterSeconds)
