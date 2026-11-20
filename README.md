@@ -1,4 +1,4 @@
-# GateWeaver AR (v6.0 — Dual-Mode AR: Kartu Fisik v5.0 & Air-Weaving Tanpa Kartu v6.0)
+# GateWeaver AR (v7.0 — Dual-Mode AR: Kartu Fisik v5.0 & Air-Weaving Hologram v7.0)
 
 **Media Pembelajaran Interaktif *Dual-Mode Spatial Augmented Reality* untuk Rangkaian Gerbang Logika Kombinasional Berbasis Kurikulum Merdeka (Fase E)**
 
@@ -6,54 +6,78 @@
 
 ## 1. Deskripsi Proyek & Pemetaan Kurikulum Merdeka
 
-**GateWeaver AR v6.0** adalah aplikasi pembelajaran interaktif **Dual-Mode Augmented Reality** untuk Android dan Unity Editor yang menyatukan dua pengalaman praktikum rangkaian logika kombinasional dalam satu mesin simulasi terpadu (`CircuitManager` & `GateNode`):
+**GateWeaver AR v7.0** adalah aplikasi pembelajaran interaktif **Dual-Mode Augmented Reality** untuk Android dan Unity Editor yang menyatukan dua pengalaman praktikum rangkaian logika kombinasional dalam satu mesin simulasi terpadu (`CircuitManager` & `GateNode`):
 
-1. **Mode Kartu (`v5.0` — Tangible Spatial AR):** Menggunakan 8 kartu cetak fisik dengan Vuforia Engine `11.4.4` untuk menghadirkan 12 model mesin 3D sci-fi modular Quaternius lengkap dengan landasan soket `AR_BaseTile3D`, bayangan kontak, tuas sakelar fisik 3D, mekanisme animasi tiap gerbang, 5 diorama Output reaktif, saluran energi berlapis (*plasma core + outer sheath*), 4 *energy bolt*, dan *Connection Snap Lock VFX*.
-2. **Mode Udara (`v6.0` — Markerless Air-Weaving):** Memungkinkan siswa merakit rangkaian gerbang logika **tanpa perlu mencetak kartu** menggunakan kamera depan Android / webcam + **MediaPipe `HandLandmarker`** (CPU mode) dengan rangka tangan neon 21 sendi berfilter **One-Euro Filter**, manipulasi *Scale-Invariant Air-Pinch + Occlusion Grace*, *Air-Tap* sakelar `Input A/B`, serta **`$1 Unistroke` Air-Draw Spawner** untuk memanggil 5 gerbang logika langsung dengan menggambar simbol di udara.
+1. **Mode Kartu (`v5.0` — Tangible Spatial AR, 0% Regresi):** Menggunakan 8 kartu cetak fisik dengan Vuforia Engine `11.4.4` untuk menghadirkan 12 model mesin 3D sci-fi modular Quaternius, landasan soket `AR_BaseTile3D`, mekanisme terbuka (*Open Cutaway*) `GateMechanismVisual`, Pod Tabel Kebenaran `2x2` (`OutputTruthPodVisual`), tuas sakelar fisik 3D, 5 diorama Output reaktif, saluran energi berlapis (*plasma core + outer sheath*), dan *Connection Snap Lock VFX* — seluruh alur auto-snap kartu fisik v5 tetap utuh 100%.
+2. **Mode Udara (`v7.0` — Markerless Hologram Air-Weaving, 100% *Zero-Touch*):** Memungkinkan siswa merakit, menyambungkan kabel manual, dan melakukan *debugging* rangkaian gerbang logika **tanpa kartu cetak dan tanpa tombol layar** menggunakan kamera depan Android / webcam + **MediaPipe `HandLandmarker`** (CPU mode) dengan hologram 3D melayang, **2-Tahap Circle Summon + Open-5 Bloom**, kabel port-ke-port berbasis **Cubit (`Pinch`)**, manipulasi objek berbasis **Kepal (`Fist`)**, sakelar **Sentuh Telunjuk `#8`**, serta **100% Debugging Mandiri** lewat Pod `00/01/10/11` menghadap kamera hingga *Auto-Win* otomatis.
 
 ### Pemetaan Capaian Pembelajaran (CP)
 - **Mata Pelajaran:** Informatika (Kurikulum Merdeka — SMA/SMK Kelas X Fase E, serta pengayaan SMP Fase D)
 - **Elemen:** Sistem Komputer (**SK**) dan Berpikir Komputasional (**BK**)
 - **Kompetensi Materi:**
-  - Memahami fungsi, simbol, dan tabel kebenaran gerbang logika dasar maupun kombinasional (`AND`, `OR`, `NOT`, `XOR`, `NAND`, `NOR`, `XNOR`, serta ekuivalensi **Hukum De Morgan**).
+  - Memahami fungsi, simbol, mekanisme aliran energi internal (*Open Cutaway*), dan tabel kebenaran gerbang logika dasar maupun kombinasional (`AND`, `OR`, `NOT`, `XOR`, `NAND`, `NOR`, `XNOR`, serta ekuivalensi **Hukum De Morgan**).
   - Menerjemahkan spesifikasi permasalahan logika nyata menjadi ekspresi aljabar Boolean dan rangkaian gerbang kombinasional baik melalui kartu fisik maupun interaksi gestur tangan spasial.
-  - Menganalisis perubahan sinyal waktu nyata menggunakan diagram pewaktuan digital (*timing diagram*) `A(t)`, `B(t)`, dan `Y(t)` serta mendiagnosis kesalahan sambungan atau polaritas rangkaian.
+  - Melakukan *debugging* mandiri secara sistematis pada keempat kombinasi biner (`00`, `01`, `10`, `11`) melalui Pod `OutputTruthPodVisual` 3D serta mendiagnosis kesalahan sambungan, polaritas, atau kelebihan kuota gerbang.
   - Mengoptimasi efisiensi rangkaian sesuai batas kuota komponen dan mengembangkan kecakapan abad ke-21 (**4C**: *Critical Thinking*, *Collaboration*, *Communication*, dan *Creativity*).
 
 ---
 
-## 2. Arsitektur Dual-Mode v6.0 & Mekanik Air-Weaving
+## 2. Arsitektur Dual-Mode v7.0, HUD Minimalis, & Skema Kontrol Mode Udara
 
-### A. Perpindahan Dual-Mode & *Camera Handover* (Camera2-Safe)
-Tombol **`Btn_ToggleAirWeaving`** pada HUD memungkinkan perpindahan seketika antara **`Mode: Kartu (v5)`** dan **`Mode: Udara (v6)`** tanpa memuat ulang scene ([`AirWeavingController.cs`](Assets/Scripts/AirWeaving/AirWeavingController.cs), [`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs)):
-- **Saat masuk ke Mode Udara (`v6`):** `VuforiaBehaviour` beserta seluruh `DefaultObserverEventHandler` pada 8 kartu dijeda secara bersih dengan jeda rilis perangkat keras kamera Android Camera2 (`0.35 dtk`), lalu kamera depan (atau webcam di Editor) dibuka pada resolusi efisien `480 x 360 @ 30 FPS` dan dihubungkan ke `MediaPipeUnityPlugin 0.16.3` (`HandLandmarker` CPU mode dengan berkas model [`Assets/StreamingAssets/hand_landmarker.task`](Assets/StreamingAssets/hand_landmarker.task)).
-- **Penataan Meja Kerja Spasial 3D:** Seluruh 8 `GateNode` masuk ke mode `useExternalSpatialPose = true` pada kedalaman meja kerja `WorkbenchDepth = 3.60f` (skala 1:1 selaras ambang sambungan `CircuitManager` v5.0 tanpa mengubah satu baris pun di `CircuitManager.cs`): terminal `Input A`, `Input B`, dan `Output` terkunci ergonomis di sisi kiri/kanan, sementara 5 gerbang (`AND`, `OR`, `XOR`, `NAND`, `NOT`) tersusun rapi pada **Rak Parkir Atas** dengan lencana 3D tajam.
-- **Saat kembali ke Mode Kartu (`v5`):** Handle native MediaPipe (`IDisposable`), `NativeArray<byte>`, dan `WebCamTexture` dimatikan serta dilepas penuh (`OnDisable`/`OnDestroy` anti-SIGABRT), status `DefaultObserverEventHandler` dan `VuforiaBehaviour` dipulihkan, dan seluruh 8 kartu kembali melacak marker fisik.
+### A. Perpindahan Dual-Mode, *Camera Handover* (Camera2-Safe), & HUD Minimalis
+Pengaturan mode, level, petunjuk, reset, rapor, dan audio disatukan ke dalam **Bilah Atas Ramping (`72 px`) + Laci Menu Kompak** pojok kanan atas ([`CompactHudMenuController.cs`](Assets/Scripts/Levels/CompactHudMenuController.cs), [`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs)):
+- **Mode Udara (`v7`):** **0 tombol gameplay** di layar (*100% Zero-Touch*). Seluruh interaksi dilakukan lewat gestur tangan 3D; `Txt_Feedback` hanya muncul sementara dalam mode *Toast-Only* berkontras tinggi.
+- **Mode Kartu (`v5`):** Menampilkan 4 kapsul ramping semi-transparan di sudut bawah (`Input A`, `Input B`, `Uji Rangkaian` / `Level Berikutnya`; tombol Uji otomatis tersembunyi di Mode Sandbox).
+- **Perpindahan Instan (`Mode: Udara (v7)` ↔ `Mode: Kartu (v5)`):**
+  - **Masuk ke Mode Udara (`v7`):** `VuforiaBehaviour` beserta seluruh `DefaultObserverEventHandler` pada 8 kartu dijeda secara bersih dengan jeda rilis perangkat keras kamera Android Camera2 (`0.35 dtk`), lalu kamera depan (atau webcam di Editor) dibuka pada resolusi efisien `480 x 360 @ 30 FPS` dan dihubungkan ke `MediaPipeUnityPlugin 0.16.3` (`HandLandmarker` CPU mode dengan model [`Assets/StreamingAssets/hand_landmarker.task`](Assets/StreamingAssets/hand_landmarker.task)). Seluruh 8 `GateNode` masuk ke mode `useExternalSpatialPose = true` pada meja kerja spasial 3D (`Input A/B` di kiri, `Output` di kanan, 5 gerbang di **Rak Parkir Atas**).
+  - **Kembali ke Mode Kartu (`v5`):** Handle native MediaPipe (`IDisposable`), `NativeArray<byte>`, dan `WebCamTexture` dimatikan serta dilepas penuh (`OnDisable`/`OnDestroy` anti-SIGABRT), lalu `DefaultObserverEventHandler` dan `VuforiaBehaviour` dipulihkan 100%.
 
-### B. Interaksi Gestur Tangan Air-Weaving (`v6.0`)
-1. **Rangka Tangan Neon 21 Sendi + *One-Euro Filter* Adaptif (*Zero-GC*)**
-   - Ke-21 landmark tangan dipetakan 1:1 ke bidang meja kerja 3D menggunakan **One-Euro Filter** adaptif (`minCutoff = 1.6 Hz`, `beta = 0.045`, `dCutoff = 1.0 Hz`, terkalibrasi untuk 20–30 FPS kamera Android/webcam dengan array *struct* pra-alokasi tanpa GC).
-   - Sangat tenang dan bebas getaran saat *hover* atau menahan ujung telunjuk, namun responsif tanpa *lag* saat menarik mesin 3D atau menggambar pola cepat; filter otomatis di-reset bersih ketika tangan baru muncul kembali.
-2. ***Scale-Invariant Air-Pinch* + *Hysteresis* + *Occlusion Grace***
-   - Rasio cubitan ternormalisasi terhadap skala telapak tangan (`dist(#4, #8) / max(0.06, dist(#0, #9))`) dengan *hysteresis* (`aktif < 0.34`, `lepas > 0.46`) dan masa tenggang oklusi `0.16 dtk` agar genggaman tidak terputus meski jari sesaat tertutup saat memindahkan gerbang.
-   - Cubit gerbang di **Rak Parkir Atas** untuk menariknya ke **Zona Rakit** (kabel energi berlapis v5.0 & *Snap Lock VFX* otomatis tersambung), atau seret kembali ke atas ambang rak untuk memarkir ulang.
-3. ***Air-Tap* Sakelar `Input A` & `Input B`**
-   - Sentuh langsung dengan ujung telunjuk (atau cubit singkat) pada konsol 3D `Input A` / `Input B` untuk menjungkitkan tuas fisik `-38° <-> +38°` dengan *cooldown* anti-dobel.
-4. **`$1 Unistroke` Air-Draw Gate Spawner & *Enhanced Neon Energy Trail* ([`UnistrokeGestureRecognizer.cs`](Assets/Scripts/AirWeaving/UnistrokeGestureRecognizer.cs))**
-   - Prioritas interaksi terjamin: *Air-Pinch* dan *Air-Tap* `Input A/B` selalu mendahului Air-Draw dan langsung membatalkan goresan aktif bila pengguna mencubit gerbang.
-   - Acungkan pose **Tongkat Telunjuk** (jari telunjuk lurus, minimal 2 dari 3 jari lain terlipat) di dalam Zona Rakit untuk menggores lintasan berpendar sian-violet (`AR_IndexNeonTrail` + `AR_AirDrawStrokeLine`). Lepas pose atau tahan diam `0.38 dtk` untuk memanggil gerbang tepat di pusat goresan disertai kilatan emas-hijau dan *energy burst*:
+### B. Skema Kontrol Final Mode Udara (`v7.0`)
+Seluruh interaksi Mode Udara dipisahkan secara tegas berdasarkan gestur (*dual-channel, zero-GC*) sehingga tidak saling bertabrakan:
 
-| Simbol Udara | Gerbang Dipanggil | Arah Goresan yang Didukung |
-| :---: | :---: | :--- |
-| **`^`** | **`AND`** | Kiri-ke-kanan & kanan-ke-kiri |
-| **`O`** | **`OR`** | Lingkaran searah (`CW`) & berlawanan (`CCW`) dari segala sudut awal (`0°`, `90°`, `-90°`, `180°`) |
-| **`Z`** | **`XOR`** | Maju, mundur, & cermin |
-| **`V`** | **`NAND`** | Kiri-ke-kanan & kanan-ke-kiri |
-| **`\|`** | **`NOT`** | Garis vertikal tegas atas-ke-bawah & bawah-ke-atas (prapemeriksaan proporsi *bounding-box* anti-salah-baca sapuan datar) |
+1. **Tracking & Visual 3D Melayang ([`AirWeavingController.cs`](Assets/Scripts/AirWeaving/AirWeavingController.cs), [`AirWeavingHologramVisual.cs`](Assets/Scripts/AirWeaving/AirWeavingHologramVisual.cs))**
+   - Proyeksi tangan 21 sendi **1:1** dengan *smoothing* adaptif berbasis kecepatan (*One-Euro-style*): tenang dan presisi saat membidik port atau sakelar, namun responsif tanpa *lag* saat memindah objek cepat.
+   - Seluruh hologram 3D tampil **melayang bebas tanpa cincin lantai** dengan animasi *sinusoidal levitation* halus dan *velocity tilt* hingga **`±12°`** mengikuti gerak seret.
+   - Area rakit ditandai dengan **4 siku sudut (`AssemblyZone`)** minimalis (tanpa kotak 2D permanen), dan *reticle* telapak / cincin cubit otomatis tersembunyi ketika tangan keluar dari jangkauan kamera.
 
-### C. Otomatisasi `libc++_shared.so` Android (Unity 6 / Gradle 9 Safe)
-- MediaPipe native ARM64 (`libmediapipe_c.so`) membutuhkan `libc++_shared.so` di dalam APK.
-- Alih-alih memakai `mainTemplate.gradle` kustom yang rentan terhadap perubahan AGP 9 / Gradle 9 di Unity 6, proyek menggunakan skrip editor C# murni [`Assets/Editor/AndroidLibcppCopier.cs`](Assets/Editor/AndroidLibcppCopier.cs) (`IPostGenerateGradleAndroidProject`, `callbackOrder = 99`) yang secara otomatis mendeteksi NDK bawaan Unity 6 dan menyalin `libc++_shared.so` ke `src/main/jniLibs/arm64-v8a/` saat build Android.
+2. **Summon Gerbang — 2-Tahap *Circle Summon* + *Open-5 Bloom* ([`AirWeavingCircleSummoner.cs`](Assets/Scripts/AirWeaving/AirWeavingCircleSummoner.cs), [`AirWeavingSummonVisual.cs`](Assets/Scripts/AirWeaving/AirWeavingSummonVisual.cs))**
+   - **Tahap 1 (Pose + Putar Lingkaran):** Acungkan pose jari di dalam ruang rakit — indikator pose live langsung tampil di ujung jari aktif — lalu putar ujung jari membentuk lingkaran hingga cincin pengisian penuh:
+     | Pose Jari | Indikator Live | Gerbang Dipanggil |
+     | :---: | :---: | :---: |
+     | **`1` jari** (Telunjuk) | `[ 1: AND ]` | **`AND`** |
+     | **`2` jari** (Telunjuk + Tengah) | `[ 2: OR ]` | **`OR`** |
+     | **`3` jari** (Telunjuk + Tengah + Manis) | `[ 3: XOR ]` | **`XOR`** |
+     | **`4` jari** (Jempol lipat) | `[ 4: NAND ]` | **`NAND`** |
+     | **`Jempol saja`** (4 jari lain lipat) | `[ JEMPOL: NOT ]` | **`NOT`** |
+   - **Tahap 2 (*Open-5 Bloom*):** Setelah pratinjau hologram terkunci, buka lebar **5 jari** untuk memunculkan (*spawn*) gerbang dari **Rak Parkir Atas** tepat di pusat lingkaran dengan efek ledakan cincin *Bloom*.
+   - **Batal & Anti-Duplikat Non-Destruktif:** Kepalkan tangan (`Fist`) untuk membatalkan panggilan secara instan. Jika jenis gerbang tersebut sudah terpasang di papan, sistem menampilkan **Notice + Pulse amber** non-destruktif (`[ <GATE> SUDAH DI PAPAN ]`) tanpa memindahkan gerbang yang sudah dirangkai.
+
+3. **Manajemen Kabel Manual — Cubit / `Pinch` ([`AirWeavingCableRouter.cs`](Assets/Scripts/AirWeaving/AirWeavingCableRouter.cs), [`AirWeavingHandGestureDetector.cs`](Assets/Scripts/AirWeaving/AirWeavingHandGestureDetector.cs))**
+   - Cubit **Jempol `#4` + Telunjuk `#8`** pada orb port hologram (`Port_Out` atau `Port_In`) dengan *pre-pinch guard* skala-invarian agar tidak bentrok dengan gestur lain:
+     - **Tarik & *Fan-Out*:** Cubit `Port_Out` lalu seret ke `Port_In` tujuan untuk memasang kabel (mencubit `Port_Out` yang sudah terhubung menarik cabang *fan-out* baru tanpa memutus kabel lama).
+     - **Cabut, Pindah, & Hapus:** Cubit `Port_In` yang sudah terisi untuk mencabut ujung kabel — seret ke `Port_In` lain untuk memindah, atau **lepas di ruang kosong** untuk memutus kabel. Menempelkan kabel baru ke `Port_In` terisi otomatis mengganti kabel lama.
+   - **Renderer Kabel Seragam 100%:** Seluruh kabel Mode Udara (primer maupun *fan-out*) dirender seragam tepat dari orb ke orb oleh `AirWeavingCableRouter` menggunakan **pool 20 Bezier zero-GC** dengan warna sinyal live (`1` = sian terang, `0` = merah/oranye menyala).
+
+4. **Manipulasi Objek — Kepal / `Fist` ([`AirWeavingHandGestureDetector.cs`](Assets/Scripts/AirWeaving/AirWeavingHandGestureDetector.cs), [`AirWeavingController.cs`](Assets/Scripts/AirWeaving/AirWeavingController.cs))**
+   - Kepal badan gerbang (*sticky hysteresis* + *occlusion grace* `180 ms`) untuk menggenggam dan memindahkan posisinya secara bebas di dalam `AssemblyZone`.
+   - **Hapus / Kembalikan ke Rak:** Tarik gerbang yang sedang digenggam keluar dari 4 siku `AssemblyZone` (bingkai aura dan 4 siku menyala merah) lalu lepas kepalan untuk mengembalikan gerbang ke **Rak Parkir Atas** dan memutus seluruh kabelnya secara bersih.
+
+5. **Sakelar `Input A` & `Input B` — Sentuh Telunjuk `#8` ([`AirWeavingController.cs`](Assets/Scripts/AirWeaving/AirWeavingController.cs))**
+   - Sentuh ringan hologram `Input A` atau `Input B` menggunakan ujung jari telunjuk `#8` (`75 ms` *dwell* + *Exit-to-Rearm* anti-dobel) dengan umpan balik cincin ***ripple*** 3D dan jungkit tuas fisik `-38° ↔ +38°` untuk membalik nilai biner **`0 ↔ 1`**.
+
+6. **100% Debugging Mandiri & *Auto-Win* ([`OutputTruthPodVisual.cs`](Assets/Scripts/Core/OutputTruthPodVisual.cs), [`AirWeavingOutputTrigger.cs`](Assets/Scripts/AirWeaving/AirWeavingOutputTrigger.cs))**
+   - Diorama `Output` dilengkapi panel **Pod Tabel Kebenaran `2x2`** berisi 4 kotak biner **`00`**, **`01`**, **`10`**, **`11`** yang otomatis sejajar menghadap kamera (*camera-facing*) di Mode Udara, menandai kombinasi aktif saat ini serta status tiap baris (belum diuji / hijau lolos / merah salah).
+   - Tepat di bawah Pod tampil **lencana pemandu live** yang menuntun siswa mendiagnosis rangkaian secara mandiri:
+     - `SAMBUNG KE OUTPUT` — rangkaian belum terhubung valid ke `Output`.
+     - `KURANGI GERBANG!` — jumlah gerbang di papan melebihi kuota misi.
+     - `CEK SEL MERAH!` — ada kombinasi input yang keluarannya belum sesuai target.
+     - `UJI SAKELAR (X/4)` — gerakkan sakelar `Input A/B` untuk menguji sisa kombinasi biner.
+     - `LULUS! 4/4` — keempat sel hijau & dalam kuota → memicu ***Auto-Win* otomatis** + selebrasi 3D.
+   - Setelah lulus, **tahan kepal (`Fist`) pada diorama `Output`** untuk lanjut ke level berikutnya secara ***Zero-Touch Next Level***.
+
+### C. Visual Mekanisme Terbuka (*Open Cutaway*) & Otomatisasi `libc++_shared.so` Android
+- **Open Cutaway (`GateMechanismVisual.cs`):** Kelima gerbang (`AND`, `OR`, `NOT`, `XOR`, `NAND`) menampilkan konstruksi mekanik terbuka berkode warna sinyal live langsung pada mesin 3D (termasuk *Power Core* internal menyala konstan pada `NOT` & `NAND`) secara *tracking-agnostic* di Mode Kartu maupun Mode Udara.
+- **Unity 6 / Gradle 9 Safe (`AndroidLibcppCopier.cs`):** MediaPipe native ARM64 (`libmediapipe_c.so`) membutuhkan `libc++_shared.so` di dalam APK. Skrip editor C# murni [`Assets/Editor/AndroidLibcppCopier.cs`](Assets/Editor/AndroidLibcppCopier.cs) (`IPostGenerateGradleAndroidProject`, `callbackOrder = 99`) secara otomatis mendeteksi NDK bawaan Unity 6 dan menyalin `libc++_shared.so` ke `src/main/jniLibs/arm64-v8a/` saat build Android tanpa `mainTemplate.gradle` usang.
 
 ---
 
@@ -61,22 +85,22 @@ Tombol **`Btn_ToggleAirWeaving`** pada HUD memungkinkan perpindahan seketika ant
 
 Seluruh target marker terdaftar pada basis data Vuforia [GateWeaverDB.xml](Assets/StreamingAssets/Vuforia/GateWeaverDB.xml) (`0.80 x 0.80` unit Unity, setara kartu cetak `8 cm x 8 cm`) dan berbagi 12 aset FBX modular **Quaternius (CC0)** dari `Assets/Resources/Models/V5_SciFi/` di Mode Kartu maupun Mode Udara:
 
-| No | Target Vuforia | Objek Scene | Peran (`NodeType`) | Kuota Input | Model 3D Quaternius (`V5_SciFi/`) | Mekanisme & Interaksi |
+| No | Target Vuforia | Objek Scene | Peran (`NodeType`) | Kuota Input | Model 3D Quaternius (`V5_SciFi/`) | Mekanisme Visual & Interaksi |
 | :---: | :--- | :--- | :--- | :---: | :--- | :--- |
-| 1 | `InputA` | `Card_Input_A` | `InputSource` | `0` | `Props_Computer.fbx` | Tuas sakelar 3D (`-38°` LOW / `+38°` HIGH); ubah via sentuh 3D, *Air-Tap*, rotasi kartu `~90°`, atau `Btn_ToggleInputA` |
-| 2 | `InputB` | `Card_Input_B` | `InputSource` | `0` | `Props_Computer.fbx` | Tuas sakelar 3D (`-38°` LOW / `+38°` HIGH); ubah via sentuh 3D, *Air-Tap*, rotasi kartu `~90°`, atau `Btn_ToggleInputB` |
-| 3 | `AND` | `Card_Gate_AND` | `AND` | `2` | `Props_ContainerFull.fbx` | 2 piston kompresor vertikal sinkron + percikan energi; panggil di udara via simbol **`^`** |
-| 4 | `OR` | `Card_Gate_OR` | `OR` | `2` | `Props_Teleporter_1.fbx` | Turbin energi berputar & kristal inti melayang; panggil di udara via simbol **`O`** |
-| 5 | `XOR` | `Card_Gate_XOR` | `XOR` | `2` | `Props_Teleporter_2.fbx` | 2 cincin giroskop berlawanan arah; panggil di udara via simbol **`Z`** |
-| 6 | `NAND` | `Card_Gate_NAND` | `NAND` | `2` | `Props_Vessel_Tall.fbx` | Koil energi menyapu tabung vertikal & kubah pembalik; panggil di udara via simbol **`V`** |
-| 7 | `NOT` | `Card_Gate_NOT` | `NOT` | `1` | `Props_Laser.fbx` | Cincin lensa fokus & bilah pembalik fase; panggil di udara via simbol **`\|`** |
-| 8 | `Output` | `Card_Output` | `OutputActuator` | `1` | 5 Varian Diorama (`RoofTile_OrangeVent`, `Staircase`, `Door_Double`, `Props_Pod`, `Props_Capsule`) | Diorama reaktif + selebrasi percikan 3D saat lulus; sentuh 3D untuk uji rangkaian (Level) atau inspeksi rumus (Sandbox) |
+| 1 | `InputA` | `Card_Input_A` | `InputSource` | `0` | `Props_Computer.fbx` | Tuas sakelar 3D (`-38°` LOW / `+38°` HIGH); Mode Udara: sentuh ujung telunjuk `#8` (`75 ms` + *ripple*); Mode Kartu: kapsul bawah, sentuh 3D, atau rotasi kartu `~90°` |
+| 2 | `InputB` | `Card_Input_B` | `InputSource` | `0` | `Props_Computer.fbx` | Tuas sakelar 3D (`-38°` LOW / `+38°` HIGH); Mode Udara: sentuh ujung telunjuk `#8` (`75 ms` + *ripple*); Mode Kartu: kapsul bawah, sentuh 3D, atau rotasi kartu `~90°` |
+| 3 | `AND` | `Card_Gate_AND` | `AND` | `2` | `Props_ContainerFull.fbx` | Mekanisme *Open Cutaway* seri (`GateMechanismVisual`) + piston kompresor; Mode Udara: Circle Summon **`1` jari** → **Open-5** |
+| 4 | `OR` | `Card_Gate_OR` | `OR` | `2` | `Props_Teleporter_1.fbx` | Mekanisme *Open Cutaway* paralel (`GateMechanismVisual`) + turbin energi; Mode Udara: Circle Summon **`2` jari** → **Open-5** |
+| 5 | `XOR` | `Card_Gate_XOR` | `XOR` | `2` | `Props_Teleporter_2.fbx` | Mekanisme *Open Cutaway* komparator fasa (`GateMechanismVisual`) + cincin giroskop; Mode Udara: Circle Summon **`3` jari** → **Open-5** |
+| 6 | `NAND` | `Card_Gate_NAND` | `NAND` | `2` | `Props_Vessel_Tall.fbx` | Mekanisme *Open Cutaway* + *Power Core* internal (`GateMechanismVisual`) + koil pembalik; Mode Udara: Circle Summon **`4` jari (jempol lipat)** → **Open-5** |
+| 7 | `NOT` | `Card_Gate_NOT` | `NOT` | `1` | `Props_Laser.fbx` | Mekanisme *Open Cutaway* + *Power Core* internal (`GateMechanismVisual`) + lensa pembalik fase; Mode Udara: Circle Summon **`Jempol saja`** → **Open-5** |
+| 8 | `Output` | `Card_Output` | `OutputActuator` | `1` | 5 Varian Diorama (`RoofTile_OrangeVent`, `Staircase`, `Door_Double`, `Props_Pod`, `Props_Capsule`) | Diorama reaktif + Pod Tabel Kebenaran `2x2` (`00/01/10/11`, `OutputTruthPodVisual`) + lencana pemandu & *Auto-Win* / tahan kepal *Next Level* (Mode Udara) atau tombol/sentuh Uji (Mode Kartu) |
 
 ---
 
 ## 4. Kurikulum 7 Level Progresif & Mode Sandbox Bebas (Total 21 Bintang)
 
-Seluruh skenario misi dikelola oleh `LevelAndUIManager` ([`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs)) dengan penghargaan **3 bintang per level** (maksimal **21 bintang**), lompat instan melalui modal **`Panel_LevelSelector`**, pemindai tabel kebenaran & osiloskop bertab yang dapat dilipat, *scaffolding* 3 tingkat, diagnostik miskonsepsi, audio PCM prosedural, dan rapor kompetensi **`Panel_CompetencyReport`**:
+Seluruh skenario misi dikelola oleh `LevelAndUIManager` ([`LevelAndUIManager.cs`](Assets/Scripts/Levels/LevelAndUIManager.cs)) & `CompactHudMenuController` ([`CompactHudMenuController.cs`](Assets/Scripts/Levels/CompactHudMenuController.cs)) dengan penghargaan **3 bintang per level** (maksimal **21 bintang**), lompat instan melalui modal **`Pilih Level`**, *scaffolding* 3 tingkat (`Petunjuk 0/3`), diagnostik miskonsepsi, audio PCM prosedural, dan rapor kompetensi **`Rapor CP`**:
 
 | Level | Judul Misi | Deskripsi Misi | Rangkaian Solusi | Kuota Gerbang | Diorama Output | Target (`AB: 00, 01, 10, 11`) |
 | :---: | :--- | :--- | :--- | :---: | :--- | :---: |
@@ -87,7 +111,7 @@ Seluruh skenario misi dikelola oleh `LevelAndUIManager` ([`LevelAndUIManager.cs`
 | **5** | Sinkronisasi Inti Kembar | Output = `1` saat `A` dan `B` bernilai **sama** (`XNOR`) | `Y = NOT(A XOR B)` | Maks `2` | `Props_Capsule` + Cincin Orbital | `1, 0, 0, 1` |
 | **6** | Sensor Hening Ruang Server (NOR) | Output = `1` **hanya** saat `A = 0` dan `B = 0` | `Y = NOT(A OR B)` | Maks `2` | `RoofTile_OrangeVent` + Sirine | `1, 0, 0, 0` |
 | **7 (Boss)** | Kunci Biometrik De Morgan | Output = `0` **hanya** saat `A = 0` dan `B = 1` | `Y = (A OR (NOT B))` **atau** `Y = ((NOT A) NAND B)` | Maks `2` | `Door_Double` + Brankas Biometrik | `1, 0, 1, 1` |
-| **Sandbox** | Laboratorium Rangkaian Bebas | Eksplorasi bebas tanpa batas kuota & pindai 4 kombinasi | Rangkaian bebas | Bebas (`∞`) | Menyesuaikan level terakhir | Pemindaian 4 baris (`00..11`) |
+| **Sandbox** | Laboratorium Rangkaian Bebas | Eksplorasi bebas tanpa batas kuota & pengamatan sinyal real-time | Rangkaian bebas | Bebas (`∞`) | Menyesuaikan level terakhir | Eksplorasi 4 kombinasi (`00..11`) |
 
 ---
 
@@ -99,11 +123,11 @@ Dikonfigurasi berdasarkan [ProjectVersion.txt](ProjectSettings/ProjectVersion.tx
 | :--- | :--- |
 | **Unity Editor Version** | `6000.6.9f1` (`8c45277fb9c5`) |
 | **AR Marker SDK (v5 Mode)** | PTC Vuforia Engine `11.4.4` (`com.ptc.vuforia.engine`) |
-| **Hand Tracking SDK (v6 Mode)** | MediaPipeUnityPlugin `0.16.3` (`com.github.homuler.mediapipe`, `HandLandmarker` CPU mode) |
+| **Hand Tracking SDK (v7 Mode)** | MediaPipeUnityPlugin `0.16.3` (`com.github.homuler.mediapipe`, `HandLandmarker` CPU mode) |
 | **Native Android C++ Hook** | [`Assets/Editor/AndroidLibcppCopier.cs`](Assets/Editor/AndroidLibcppCopier.cs) (`IPostGenerateGradleAndroidProject`) |
 | **Input System** | Unity New Input System `1.20.1` (`activeInputHandler: 1`, `ENABLE_INPUT_SYSTEM`) |
 | **Application ID (Android)** | `com.GateWeaverStudio.GateWeaverAR` |
-| **Version / Version Code** | **`6.0`** / **`6`** (`bundleVersion: 6.0`, `AndroidBundleVersionCode: 6`) |
+| **Version / Version Code** | **`7.0`** / **`7`** (`bundleVersion: 7.0`, `AndroidBundleVersionCode: 7`) |
 | **Minimum API Level** | Android `10.0` (`API Level 29`) |
 | **Scripting Backend** | `IL2CPP` (`scriptingBackend.Android: 1`) |
 | **Target Architecture** | `ARM64` (`AndroidTargetArchitectures: 2`) |
@@ -119,36 +143,48 @@ Dikonfigurasi berdasarkan [ProjectVersion.txt](ProjectSettings/ProjectVersion.tx
 GateWeaverAR/
 ├── Assets/
 │   ├── Editor/
-│   │   └── AndroidLibcppCopier.cs              # Otomatisasi salin libc++_shared.so (Unity 6 / Gradle 9)
+│   │   └── AndroidLibcppCopier.cs                  # Otomatisasi salin libc++_shared.so (Unity 6 / Gradle 9)
 │   ├── Resources/
-│   │   └── Models/V5_SciFi/                    # 12 model FBX sci-fi modular Quaternius (CC0)
+│   │   └── Models/V5_SciFi/                        # 12 model FBX sci-fi modular Quaternius (CC0)
 │   ├── Scenes/
 │   │   └── SampleScene.unity
 │   ├── Scripts/
 │   │   ├── AirWeaving/
-│   │   │   ├── AirWeavingController.cs         # Camera Handover, One-Euro Filter, Air-Pinch/Tap, Air-Draw
-│   │   │   └── UnistrokeGestureRecognizer.cs   # $1 Unistroke Recognizer murni C# (zero-GC) untuk ^, O, Z, V, |
+│   │   │   ├── AirWeavingCableRouter.cs            # Kabel manual Pinch (fan-out/unplug) & pool 20 Bezier seragam
+│   │   │   ├── AirWeavingCircleSummoner.cs         # State machine 2-tahap Circle-Charge -> Open-5 Bloom
+│   │   │   ├── AirWeavingController.cs             # Camera Handover, tracking 1:1 adaptif, levitasi, sakelar #8
+│   │   │   ├── AirWeavingHandGestureDetector.cs    # Detektor dual-kanal: Fist (objek), Pinch (kabel), Pose Summon
+│   │   │   ├── AirWeavingHologramVisual.cs         # Hologram 3D melayang, aura hover/buang, ripple, reticle adaptif
+│   │   │   ├── AirWeavingOutputTrigger.cs          # Pemandu debugging mandiri live Output & Zero-Touch Next Level
+│   │   │   ├── AirWeavingSummonVisual.cs           # Indikator pose ujung jari, cincin charge, Notice amber, Bloom VFX
+│   │   │   └── UnistrokeGestureRecognizer.cs       # Modul $1 Unistroke legacy v6 (nonaktif default di v7.0)
 │   │   ├── Core/
-│   │   │   ├── CircuitManager.cs               # Routing spasial Greedy Closest-Pair & anti-siklus
-│   │   │   └── GateNode.cs                     # Mesin 3D v5.0, port fisik, VFX kabel, external spatial pose
+│   │   │   ├── CircuitManager.cs                   # Evaluasi rangkaian: auto-snap Mode Kartu + manual Mode Udara
+│   │   │   ├── GateMechanismVisual.cs              # Visual mekanisme terbuka (Open Cutaway) 5 gerbang + Power Core
+│   │   │   ├── GateNode.cs                         # Mesin 3D v5.0, port fisik, VFX kabel Kartu, spatial pose Udara
+│   │   │   └── OutputTruthPodVisual.cs             # Pod Tabel Kebenaran 2x2 (00/01/10/11) miring/camera-facing
 │   │   └── Levels/
-│   │       └── LevelAndUIManager.cs            # 7 level + Sandbox, HUD bertab, audio PCM, tombol Dual-Mode
+│   │       ├── CompactHudMenuController.cs         # Bilah Atas 72px, Laci Menu Kompak, Zero-Touch HUD, Toast-Only
+│   │       └── LevelAndUIManager.cs                # 7 level + Sandbox, rapor CP, petunjuk 3 tingkat, audio PCM
 │   └── StreamingAssets/
-│       ├── hand_landmarker.task                # Model MediaPipe HandLandmarker (~7,5 MB)
+│       ├── hand_landmarker.task                    # Model MediaPipe HandLandmarker (~7,5 MB)
 │       └── Vuforia/
-│           └── GateWeaverDB.xml                # Basis data 8 kartu marker Vuforia
+│           └── GateWeaverDB.xml                    # Basis data 8 kartu marker Vuforia
+├── docs/
+│   └── GDD.md                                      # Game Design Document (v7.0)
 ├── Packages/
-│   ├── manifest.json                           # Referensi Vuforia 11.4.4 & MediaPipe 0.16.3
-│   └── com.github.homuler.mediapipe-0.16.3.tgz # (Diabaikan di .gitignore — unduh lokal, lihat Bagian 7)
+│   ├── manifest.json                               # Referensi Vuforia 11.4.4 & MediaPipe 0.16.3
+│   └── com.github.homuler.mediapipe-0.16.3.tgz     # (Diabaikan di .gitignore — unduh lokal, lihat Bagian 7)
 ├── ProjectSettings/
-│   ├── ProjectSettings.asset                   # Version 6.0 / VersionCode 6 (IL2CPP ARM64 OpenGLES3)
+│   ├── ProjectSettings.asset                       # Version 7.0 / VersionCode 7 (IL2CPP ARM64 OpenGLES3)
 │   └── ProjectVersion.txt
+├── GEMINI.md                                       # Aturan arsitektur & alur kerja pengembang/AI (v7.0)
 └── README.md
 ```
 
 ---
 
-## 7. Setup Pengembang (`git clone`), Verifikasi, & Build `GateWeaverAR_v6.apk`
+## 7. Setup Pengembang (`git clone`), Verifikasi, & Build `GateWeaverAR_v7.apk`
 
 ### Prasyarat Setelah `git clone` (Penting!)
 Berkas tarball lokal `Packages/com.github.homuler.mediapipe-0.16.3.tgz` (~277 MB) dikecualikan di [`.gitignore`](.gitignore) untuk mematuhi batas 100 MB/file GitHub. Sebelum membuka proyek di Unity Editor:
@@ -158,13 +194,15 @@ Berkas tarball lokal `Packages/com.github.homuler.mediapipe-0.16.3.tgz` (~277 MB
 
 ### Verifikasi *Play Mode* & Build Android
 1. Buka `Assets/Scenes/SampleScene.unity` di Unity Editor **`6000.6.9f1`**.
-2. Uji **Mode Kartu (`v5`)**: pastikan 8 kartu marker menampilkan model Quaternius skala ~2x, tuas 3D interaktif, saluran energi berlapis + *Snap Lock VFX*, HUD bertab/lipat, `Pilih Level`, dan `Rapor CP`.
-3. Tekan **`Mode: Udara (v6)`** untuk menguji **Mode Air-Weaving**:
-   - Verifikasi *Camera Handover* bersih dan rangka 21 sendi neon tampil halus tanpa getaran saat diam (One-Euro Filter) namun responsif saat bergerak cepat.
-   - Uji *Air-Pinch* untuk menarik gerbang dari Rak Parkir Atas ke Zona Rakit (dan mengembalikannya ke atas untuk parkir), serta *Air-Tap* pada `Input A`/`Input B`.
-   - Uji **Air-Draw** dengan pose Tongkat Telunjuk di Zona Rakit untuk 5 pola: `^` (`AND`), `O` (`OR`), `Z` (`XOR`), `V` (`NAND`), dan `|` (`NOT`).
-   - Kembali ke **`Mode: Kartu (v5)`** dan pastikan kamera Vuforia pulih bersih.
-4. Build **`GateWeaverAR_v6.apk`**: buka **File → Build Profiles → Android → Build** (`Version = 6.0`, `Bundle Version Code = 6`, `IL2CPP`, `ARM64`, `OpenGLES3`, `Min API 29`). Skrip [`AndroidLibcppCopier.cs`](Assets/Editor/AndroidLibcppCopier.cs) akan otomatis menyisipkan `libc++_shared.so` ke proyek Gradle.
+2. Uji **Mode Kartu (`v5`)**: pastikan 8 kartu marker menampilkan model Quaternius, mekanisme terbuka *Open Cutaway*, Pod Tabel Kebenaran `2x2` miring `-48°`, saluran energi berlapis + *Snap Lock VFX*, 4 kapsul ramping bawah, dan Laci Menu Kompak pojok kanan atas (`Pilih Level`, `Rapor CP`, `Petunjuk`, `Audio`).
+3. Buka Laci Menu Kompak lalu pilih **`Mode: Udara (v7)`** untuk menguji **Mode Air-Weaving v7.0**:
+   - Verifikasi *Camera Handover* bersih, HUD bawah memiliki **0 tombol gameplay**, hologram 3D melayang halus (*sinusoidal levitation* + *velocity tilt* `±12°`), 4 siku `AssemblyZone` tampil rapi, dan *reticle* menghilang saat tangan keluar kamera.
+   - Uji **2-Tahap Circle Summon + Open-5 Bloom**: putar jari untuk 5 pose (`1`=AND, `2`=OR, `3`=XOR, `4` jempol lipat=NAND, `Jempol`=NOT) lalu buka **5 jari** untuk *spawn*, kepal untuk batal instan, serta uji *Notice + Pulse* amber saat memanggil gerbang yang sudah ada di papan.
+   - Uji **Kabel Manual (`Pinch` `#4+#8`)**: tarik kabel orb-ke-orb, buat *fan-out* dari `Port_Out`, cabut & lepas di ruang kosong dari `Port_In`.
+   - Uji **Manipulasi Objek (`Fist`)**: kepal gerbang untuk memindah posisi; tarik keluar 4 siku `AssemblyZone` (menyala merah) lalu lepas untuk mengembalikan ke rak & memutus kabelnya.
+   - Uji **Sakelar Telunjuk `#8` & Debugging Mandiri**: sentuh `Input A`/`Input B` (`75 ms` + *ripple*) untuk menguji keempat kotak `00`, `01`, `10`, `11` pada Pod `OutputTruthPodVisual` hingga `LULUS! 4/4` memicu *Auto-Win*, lalu tahan kepal pada Output untuk *Zero-Touch Next Level*.
+   - Buka Laci Menu Kompak lalu kembali ke **`Mode: Kartu (v5)`** dan pastikan kamera Vuforia pulih 100%.
+4. Build **`GateWeaverAR_v7.apk`**: buka **File → Build Profiles → Android → Build** (`Version = 7.0`, `Bundle Version Code = 7`, `IL2CPP`, `ARM64`, `OpenGLES3`, `Min API 29`). Skrip [`AndroidLibcppCopier.cs`](Assets/Editor/AndroidLibcppCopier.cs) akan otomatis menyisipkan `libc++_shared.so` ke proyek Gradle.
 
 ---
 

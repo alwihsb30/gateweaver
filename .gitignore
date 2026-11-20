@@ -77,3 +77,7 @@ crashlytics-build.properties
 
 # Local large MediaPipeUnityPlugin tarball (>100 MB GitHub limit; keep locally in Packages/ for Unity)
 Packages/com.github.homuler.mediapipe-*.tgz
+
+# Unity Editor automatic scene/asset recovery folder
+Assets/_Recovery/
+Assets/_Recovery.meta
