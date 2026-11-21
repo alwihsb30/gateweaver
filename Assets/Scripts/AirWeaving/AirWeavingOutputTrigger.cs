@@ -31,16 +31,17 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     private const float OutputRearmRadius = 0.38f;
     private const float FistHoldDurationSeconds = 0.45f;
     private const float RearmCooldownSeconds = 0.85f;
-    private const float HaloCenterUpOffset = 0.145f;
-    private const float HaloRadius = 0.155f;
+    private const float HaloCenterUpOffset = 0.155f;
+    private const float HaloRadius = 0.258f;
+    private const float HaloDepthBehindOutput = 0.18f;
     private const float BadgeBelowOffset = -0.405f;
 
     // Jalan pintas tahan-kepal untuk verifikasi dinonaktifkan 100% di Mode Udara demi debugging mandiri
     private static readonly bool EnableHoldToVerifyShortcut = false;
 
     private const string BadgeConnectToOutput = "SAMBUNG KE OUTPUT";
-    private const string BadgeReduceGates = "KURANGI GERBANG!";
-    private const string BadgeCheckRedCells = "CEK SEL MERAH!";
+    private const string BadgeReduceGates = "KURANGI GERBANG";
+    private const string BadgeCheckRedCells = "CEK SEL MERAH";
     private const string BadgePassedAllFour = "LULUS! 4/4";
     private static readonly string[] BadgeTestSwitchesCache =
     {
@@ -91,6 +92,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     private string lastBadgeText = string.Empty;
 
     public bool IsCharging => chargeProgress > 0.01f;
+    public float ChargeProgress => chargeProgress;
 
     public void EnsureVisualsCreated()
     {
@@ -102,10 +104,11 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         visualRootObj = new GameObject("AR_AirWeavingOutputTrigger");
         visualRootObj.transform.SetParent(transform, false);
 
-        invitationMat = CreateSafeSpritesMaterial(TestHaloCyanColor, 3016);
-        winOuterMat = CreateSafeSpritesMaterial(WinHaloOuterColor, 3015);
-        progressMat = CreateSafeSpritesMaterial(WinHaloGreenColor, 3018);
-        badgeBackdropMat = CreateSafeSpritesMaterial(BadgeBackdropColor, 2995);
+        // Halo berada di belakang sumbu kamera bodi 3D Output (2982..2984) agar tidak pernah memotong/clipping model 3D LAB
+        invitationMat = CreateSafeSpritesMaterial(TestHaloCyanColor, 2983);
+        winOuterMat = CreateSafeSpritesMaterial(WinHaloOuterColor, 2982);
+        progressMat = CreateSafeSpritesMaterial(WinHaloGreenColor, 2984);
+        badgeBackdropMat = CreateSafeSpritesMaterial(BadgeBackdropColor, 2998);
 
         invitationRingRenderer = CreateRingRenderer("Output_InvitationHalo", visualRootObj.transform, RingSegments, loop: true, width: 0.008f, invitationMat);
         winOuterRingRenderer = CreateRingRenderer("Output_WinOuterHalo", visualRootObj.transform, RingSegments, loop: true, width: 0.006f, winOuterMat);
@@ -121,6 +124,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         badgeText.alignment = TextAlignmentOptions.Center;
         badgeText.textWrappingMode = TextWrappingModes.NoWrap;
         badgeText.color = TextConnectColor;
+        badgeText.sortingOrder = 22;
         RectTransform txtRect = badgeText.rectTransform;
         if (txtRect != null)
         {
@@ -337,7 +341,8 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         Vector3 camRight = camT.right;
         Vector3 camUp = camT.up;
         Vector3 camForward = camT.forward;
-        Vector3 haloCenter = outputWorldPos + (camUp * HaloCenterUpOffset) - (camForward * 0.16f);
+        // Geser sedikit ke belakang (+camForward) dengan radius luas mengelilingi luar bodi 3D Output agar bebas clipping
+        Vector3 haloCenter = outputWorldPos + (camUp * HaloCenterUpOffset) + (camForward * HaloDepthBehindOutput);
 
         // A. Halo Diegetik sesuai status debugging live
         if (isReadyForNextLevel || guidanceState == OutputDebugGuidanceState.PassedAllFour)
@@ -445,12 +450,12 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         {
             case OutputDebugGuidanceState.ReduceGates:
                 textColor = TextOverQuotaRedColor;
-                backdropWidth = 0.64f;
+                backdropWidth = 0.62f;
                 return BadgeReduceGates;
 
             case OutputDebugGuidanceState.CheckRedCells:
                 textColor = TextCheckRedOrangeColor;
-                backdropWidth = 0.58f;
+                backdropWidth = 0.56f;
                 return BadgeCheckRedCells;
 
             case OutputDebugGuidanceState.TestSwitches:

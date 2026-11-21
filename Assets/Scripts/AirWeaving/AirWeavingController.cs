@@ -145,17 +145,19 @@ public class AirWeavingController : MonoBehaviour
         { 5, 9 }, { 9, 13 }, { 13, 17 }
     };
 
-    private static readonly Color NeonCyanBoneColor = new Color(0.14f, 0.96f, 1.00f, 0.42f);
-    private static readonly Color NeonJointBaseColor = new Color(0.24f, 0.92f, 1.00f, 0.52f);
-    private static readonly Color NeonJointTipColor = new Color(0.86f, 1.00f, 0.98f, 0.62f);
+    // Skeleton tangan dibuat 65-70% lebih halus & rendah opasitas agar tidak menumpuk di atas label/hologram
+    private static readonly Color NeonCyanBoneColor = new Color(0.20f, 0.88f, 1.00f, 0.16f);
+    private static readonly Color NeonJointBaseColor = new Color(0.28f, 0.90f, 1.00f, 0.18f);
+    private static readonly Color NeonJointTipColor = new Color(0.80f, 0.98f, 1.00f, 0.24f);
     private static readonly Color PinchActiveColor = new Color(0.76f, 1.00f, 0.28f, 1.00f);
     private static readonly Color PinchIdleColor = new Color(0.20f, 0.92f, 1.00f, 0.85f);
     private static readonly Color HoverGateRingColor = new Color(0.28f, 0.98f, 1.00f, 0.92f);
     private static readonly Color HoverGrabbedRingColor = new Color(1.00f, 0.88f, 0.26f, 0.96f);
     private static readonly Color HoverReturnRackColor = new Color(1.00f, 0.56f, 0.26f, 0.95f);
     private static readonly Color HoverInputRingColor = new Color(0.42f, 1.00f, 0.68f, 0.92f);
-    private static readonly Color WorkbenchFrameColor = new Color(0.18f, 0.80f, 0.96f, 0.28f);
-    private static readonly Color RackFrameColor = new Color(0.32f, 0.90f, 1.00f, 0.52f);
+    private static readonly Color WorkbenchFrameColor = new Color(0.12f, 0.84f, 0.98f, 0.42f);
+    private static readonly Color WorkbenchFrameShadowColor = new Color(0.02f, 0.06f, 0.12f, 0.54f);
+    private static readonly Color AirWeavingLabelPillColor = new Color(0.02f, 0.05f, 0.11f, 0.94f);
     private static readonly Color FeedbackActiveColor = new Color(0.35f, 0.96f, 1.00f, 1.00f);
     private static readonly Color FeedbackPinchColor = new Color(0.76f, 1.00f, 0.30f, 1.00f);
     private static readonly Color FeedbackWaitingColor = new Color(1.00f, 0.82f, 0.34f, 1.00f);
@@ -279,7 +281,6 @@ public class AirWeavingController : MonoBehaviour
     private readonly Vector3[] pinchRingPoints = new Vector3[PinchRingSegments];
     private readonly Vector3[] hoverRingPoints = new Vector3[HoverRingSegments];
     private readonly Vector3[] cornerBracketPointsBuffer = new Vector3[3];
-    private readonly Vector3[] rackLinePoints = new Vector3[2];
 
     private readonly List<WorkbenchGateSlot> gateSlots = new List<WorkbenchGateSlot>(5);
     private int grabbedGateSlotIndex = -1;
@@ -332,8 +333,8 @@ public class AirWeavingController : MonoBehaviour
     private LineRenderer pinchCursorRingRenderer;
 
     private GameObject workbenchVisualRootObj;
+    private LineRenderer[] assemblyCornerShadowRenderers;
     private LineRenderer[] assemblyCornerBracketRenderers;
-    private LineRenderer rackDividerRenderer;
     private LineRenderer hoverHighlightRingRenderer;
     private LineRenderer airDrawStrokeRenderer;
 
@@ -344,14 +345,30 @@ public class AirWeavingController : MonoBehaviour
     private Material trailMat;
     private Material pinchRingMat;
     private Material hoverRingMat;
+    private Material workbenchFrameShadowMat;
     private Material workbenchFrameMat;
-    private Material rackFrameMat;
     private Material airDrawStrokeMat;
+
+    private struct SavedNodeLabelStyle
+    {
+        public GateNode node;
+        public Vector3 originalLocalPos;
+        public MeshRenderer labelMeshRenderer;
+        public int originalSortingOrder;
+        public Material backdropMat;
+        public Color originalBackdropColor;
+        public int originalBackdropQueue;
+        public Material pipMat;
+        public int originalPipQueue;
+    }
+
+    private readonly List<SavedNodeLabelStyle> savedNodeLabelStyles = new List<SavedNodeLabelStyle>(12);
 
     private AirWeavingOutputTrigger outputTrigger;
     private AirWeavingHologramVisual hologramVisual;
     private AirWeavingCableRouter cableRouter;
     private AirWeavingSummonVisual summonVisual;
+    private AirWeavingSpatialSfx spatialSfx;
     private readonly AirWeavingHandGestureDetector handGestureDetector = new AirWeavingHandGestureDetector();
     private readonly AirWeavingCircleSummoner circleSummoner = new AirWeavingCircleSummoner();
     private readonly List<GateNode> activePlacedGatesBuffer = new List<GateNode>(5);
@@ -360,7 +377,7 @@ public class AirWeavingController : MonoBehaviour
     private int inferenceFramesInWindow = 0;
     private int displayedInferenceFps = 0;
 
-    // Cermin ringan status 4 sel Pod LED untuk pemandu debugging live di Output (zero-GC, 0 diff pada LevelAndUIManager)
+    // Cermin ringan status 4 sel Pod LED & edge-tracking SFX spasial Mode Udara (zero-GC, 0 diff pada LevelAndUIManager)
     private int debugPassedRowMask = 0;
     private int debugFailedRowMask = 0;
     private int lastDebugLevelIndex = -1;
@@ -368,6 +385,34 @@ public class AirWeavingController : MonoBehaviour
     private int lastDebugWireCount = -1;
     private int lastDebugTopologyVersion = -1;
     private bool lastDebugCircuitComplete = false;
+    private enum HoverSfxCategory
+    {
+        None = 0,
+        PortOrb = 1,
+        GateBody = 2,
+        InputSwitch = 3
+    }
+
+    private const float HoverNoneLeaveGraceSeconds = 0.09f;
+    private const float HoverPostActionSuppressSeconds = 0.14f;
+    private const float HologramWakeMinAbsentSeconds = 1.20f;
+
+    private AirWeavingCircleSummoner.SummonStage lastSfxSummonStage = AirWeavingCircleSummoner.SummonStage.Idle;
+    private NodeType lastSfxSummonGateType = NodeType.AND;
+    private int lastSfxSummonChargeStep = 0;
+    private Vector3 lastSfxSummonWorldPos = Vector3.zero;
+    private int lastSfxPassedRowMask = 0;
+    private int lastSfxFailedRowMask = 0;
+    private OutputDebugGuidanceState lastSfxGuidanceState = OutputDebugGuidanceState.ConnectToOutput;
+    private HoverSfxCategory lastHoverSfxCategory = HoverSfxCategory.None;
+    private GateNode lastHoverSfxNode = null;
+    private int lastHoverSfxSubId = 0;
+    private float hoverSfxNoneGraceTimer = 0f;
+    private float hoverSfxPostActionSuppressTimer = 0f;
+    private bool wasGrabbedGateInDeleteZone = false;
+    private int lastOutputHoldSfxStep = 0;
+    private float handAbsentForWakeSeconds = 0f;
+    private bool wasHandDetectedForWakeSfx = false;
     private readonly List<GateNode> cachedGateNodes = new List<GateNode>(12);
     private readonly List<Behaviour> pausedObserverHandlers = new List<Behaviour>(12);
 
@@ -438,6 +483,15 @@ public class AirWeavingController : MonoBehaviour
         CancelAirDrawStrokeImmediate();
         handGestureDetector.Reset();
         circleSummoner.Reset();
+        lastSfxSummonStage = AirWeavingCircleSummoner.SummonStage.Idle;
+        lastSfxSummonChargeStep = 0;
+        wasGrabbedGateInDeleteZone = false;
+        lastOutputHoldSfxStep = 0;
+        ResetHoverSfxTracking();
+        if (spatialSfx != null)
+        {
+            spatialSfx.StopHumImmediate();
+        }
         cableRouter?.ClearAllWires(circuitManager);
         summonVisual?.HideImmediate();
         outputTrigger?.HideImmediate();
@@ -482,6 +536,10 @@ public class AirWeavingController : MonoBehaviour
         if (mainCam == null || webCamTexture == null || !webCamTexture.isPlaying)
         {
             hologramVisual?.HideCursors();
+            if (spatialSfx != null)
+            {
+                spatialSfx.StopHumImmediate();
+            }
             return;
         }
 
@@ -537,12 +595,15 @@ public class AirWeavingController : MonoBehaviour
         bool isFistStickyDrag = grabbedGateSlotIndex >= 0;
         bool isPinchStickyDrag = cableRouter != null && cableRouter.IsDraggingCable;
         handGestureDetector.TickTemporalState(dt, isHandDetected, isFistStickyDrag, isPinchStickyDrag);
+        UpdateHandWakeAudioFeedback(dt);
         UpdateCableRouterInteraction(mainCam);
         UpdateWorkbenchInteractions(mainCam, dt);
         UpdateCircleSummoner(mainCam, dt);
         UpdateAirDrawStrokeFade(mainCam, dt);
         SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: false);
         SyncCableRouterVisualsAfterPoseUpdate(mainCam);
+        UpdateHoverSfxFeedback(dt);
+        UpdateContinuousHumFeedback(mainCam, dt);
         UpdateWorkbenchGuideVisuals(mainCam);
         UpdateHologramVisuals(mainCam);
         UpdateCircleSummonVisuals(mainCam, dt);
@@ -568,7 +629,17 @@ public class AirWeavingController : MonoBehaviour
             outputTrigger.OnVerifyRequested -= HandleOutputTriggerVerify;
             outputTrigger.OnNextLevelRequested -= HandleOutputTriggerNextLevel;
         }
+        if (cableRouter != null)
+        {
+            cableRouter.OnWireGrabbedSfx -= HandleCableGrabSfx;
+            cableRouter.OnWireTargetLockSfx -= HandleCableTargetLockSfx;
+            cableRouter.OnWireTargetUnlockSfx -= HandleCableTargetUnlockSfx;
+            cableRouter.OnWireConnectedSfx -= HandleCableConnectSfx;
+            cableRouter.OnWireDisconnectedSfx -= HandleCableDetachSfx;
+            cableRouter.OnWireRejectSfx -= HandleCableRejectSfx;
+        }
         circuitManager?.SetManualRoutingMode(false);
+        RestoreAirWeavingLabelReadabilityStyles();
         ShutdownNativeAndCameraImmediate();
         DestroyVisualRigAndMaterials();
         cachedGateNodes.Clear();
@@ -736,6 +807,7 @@ public class AirWeavingController : MonoBehaviour
 
         // 8. Tata seluruh 8 GateNode (Input A, Input B, Output terkunci di papan roti; 5 gerbang di Rak Parkir Atas)
         InitializeWorkbenchSlots(mainCam);
+        ApplyAirWeavingLabelReadabilityStyles();
 
         isHandDetected = false;
         wasHandDetected = false;
@@ -766,6 +838,17 @@ public class AirWeavingController : MonoBehaviour
 
         handGestureDetector.Reset();
         circleSummoner.Reset();
+        lastSfxSummonStage = AirWeavingCircleSummoner.SummonStage.Idle;
+        lastSfxSummonChargeStep = 0;
+        wasGrabbedGateInDeleteZone = false;
+        lastOutputHoldSfxStep = 0;
+        handAbsentForWakeSeconds = 0f;
+        wasHandDetectedForWakeSfx = false;
+        ResetHoverSfxTracking();
+        if (spatialSfx != null)
+        {
+            spatialSfx.Configure(levelManager, mainCam);
+        }
         ResetLiveDebugMirror();
         ResetInputTouchState();
         circuitManager?.SetManualRoutingMode(true);
@@ -812,6 +895,7 @@ public class AirWeavingController : MonoBehaviour
         hoveredInputNode = null;
         cableRouter?.ClearAllWires(circuitManager);
         circuitManager?.SetManualRoutingMode(false);
+        RestoreAirWeavingLabelReadabilityStyles();
         ShutdownNativeAndCameraImmediate();
         HideAllAirWeavingVisuals();
 
@@ -835,6 +919,7 @@ public class AirWeavingController : MonoBehaviour
             mainCam.backgroundColor = savedCameraBgColor;
         }
 
+        RestoreAirWeavingLabelReadabilityStyles();
         RefreshGateNodesList();
         for (int i = 0; i < cachedGateNodes.Count; i++)
         {
@@ -1081,6 +1166,23 @@ public class AirWeavingController : MonoBehaviour
                 grabbed.currentLocalZ = Mathf.Lerp(grabbed.currentLocalZ, WorkbenchDepth + GrabLiftOffsetZ, 1f - Mathf.Exp(-GateDragSmoothingSpeed * dt));
                 grabbed.currentScale = Mathf.Lerp(grabbed.currentScale, GrabbedGateScale, 1f - Mathf.Exp(-GateDragSmoothingSpeed * dt));
                 grabbed.isPlacedOnWorkbench = true;
+
+                bool curOutsideBox = IsOutsideAssemblyZone(grabbed.currentLocalXY, aspectScale);
+                if (curOutsideBox != wasGrabbedGateInDeleteZone)
+                {
+                    wasGrabbedGateInDeleteZone = curOutsideBox;
+                    if (spatialSfx != null && grabbed.node != null)
+                    {
+                        if (curOutsideBox)
+                        {
+                            spatialSfx.PlayDeleteZoneEnter(grabbed.node.transform.position);
+                        }
+                        else
+                        {
+                            spatialSfx.PlayDeleteZoneExit(grabbed.node.transform.position);
+                        }
+                    }
+                }
             }
             else
             {
@@ -1181,7 +1283,21 @@ public class AirWeavingController : MonoBehaviour
                 grabbed.node.transform.localScale = Vector3.one * grabbed.currentScale;
                 grabbed.node.SetExternalSpatialPose(true, worldPos, worldRot);
                 grabbed.node.TriggerTapFeedback();
+                if (spatialSfx != null)
+                {
+                    spatialSfx.PlayGateGrab(worldPos);
+                }
             }
+            else if (grabbed.node != null && spatialSfx != null)
+            {
+                spatialSfx.PlayGateGrab(grabbed.node.transform.position);
+            }
+            hoverSfxPostActionSuppressTimer = HoverPostActionSuppressSeconds;
+            lastHoverSfxCategory = HoverSfxCategory.GateBody;
+            lastHoverSfxNode = grabbed.node;
+            lastHoverSfxSubId = grabbed.slotIndex + 1;
+            hoverSfxNoneGraceTimer = 0f;
+            wasGrabbedGateInDeleteZone = IsOutsideAssemblyZone(grabbed.currentLocalXY, aspectScale);
         }
         else if (EnableLegacyAirDraw)
         {
@@ -1476,6 +1592,7 @@ public class AirWeavingController : MonoBehaviour
 
         if (shouldReturnToRack)
         {
+            Vector3 releaseWorldPos = slot.node.transform.position;
             slot.isPlacedOnWorkbench = false;
             slot.placedLocalXY = homeXY;
             slot.currentLocalXY = homeXY;
@@ -1494,6 +1611,10 @@ public class AirWeavingController : MonoBehaviour
             // Putus seluruh kabel gerbang & reset status uji manual (perubahan topologi otomatis mereset manualPassedRowMask = 0)
             cableRouter?.RemoveWiresForNode(slot.node, circuitManager);
             ResetLiveDebugMirror();
+            if (spatialSfx != null && (levelManager == null || !levelManager.IsUiOverlayOpen))
+            {
+                spatialSfx.PlayOutsideBoxDelete(releaseWorldPos);
+            }
         }
         else
         {
@@ -1504,7 +1625,13 @@ public class AirWeavingController : MonoBehaviour
             slot.currentLocalZ = WorkbenchDepth;
             slot.currentScale = ActiveGateScale;
             slot.node.TriggerTapFeedback();
+            if (spatialSfx != null && (levelManager == null || !levelManager.IsUiOverlayOpen))
+            {
+                spatialSfx.PlayGatePlace(slot.node.transform.position);
+            }
         }
+        hoverSfxPostActionSuppressTimer = HoverPostActionSuppressSeconds;
+        wasGrabbedGateInDeleteZone = false;
     }
 
     private void ResetInputTouchState()
@@ -1631,6 +1758,10 @@ public class AirWeavingController : MonoBehaviour
         }
 
         targetNode.TriggerTapFeedback();
+        if (spatialSfx != null)
+        {
+            spatialSfx.PlaySwitchToggle(targetNode.currentOutputValue, targetNode.transform.position);
+        }
     }
 
     private static void ComputeFloatingNodePose(
@@ -2272,7 +2403,224 @@ public class AirWeavingController : MonoBehaviour
     }
 
     private void HandleOutputTriggerVerify() => OnOutputVerifyRequested?.Invoke();
-    private void HandleOutputTriggerNextLevel() => OnOutputNextLevelRequested?.Invoke();
+
+    private void HandleOutputTriggerNextLevel()
+    {
+        lastOutputHoldSfxStep = 0;
+        if (isAirWeavingActive && spatialSfx != null)
+        {
+            Vector3 pos = outputNode != null ? outputNode.transform.position : Vector3.zero;
+            spatialSfx.PlayOutputHoldConfirm(pos);
+        }
+        OnOutputNextLevelRequested?.Invoke();
+    }
+
+    private void HandleCableGrabSfx()
+    {
+        hoverSfxPostActionSuppressTimer = HoverPostActionSuppressSeconds;
+        if (isAirWeavingActive && spatialSfx != null && cableRouter != null)
+        {
+            spatialSfx.PlayCableGrab(cableRouter.LastSfxWorldPosition);
+        }
+    }
+
+    private void HandleCableTargetLockSfx()
+    {
+        if (isAirWeavingActive && spatialSfx != null && cableRouter != null)
+        {
+            spatialSfx.PlayCableTargetLock(cableRouter.LastSfxWorldPosition);
+        }
+    }
+
+    private void HandleCableTargetUnlockSfx()
+    {
+        if (isAirWeavingActive && spatialSfx != null && cableRouter != null)
+        {
+            spatialSfx.PlayCableTargetUnlock(cableRouter.LastSfxWorldPosition);
+        }
+    }
+
+    private void HandleCableConnectSfx()
+    {
+        hoverSfxPostActionSuppressTimer = HoverPostActionSuppressSeconds;
+        if (isAirWeavingActive && spatialSfx != null && cableRouter != null)
+        {
+            spatialSfx.PlayCableSnapConnect(cableRouter.LastSfxWorldPosition);
+        }
+    }
+
+    private void HandleCableDetachSfx()
+    {
+        hoverSfxPostActionSuppressTimer = HoverPostActionSuppressSeconds;
+        if (isAirWeavingActive && spatialSfx != null && cableRouter != null)
+        {
+            spatialSfx.PlayCableDetach(cableRouter.LastSfxWorldPosition);
+        }
+    }
+
+    private void HandleCableRejectSfx()
+    {
+        hoverSfxPostActionSuppressTimer = HoverPostActionSuppressSeconds;
+        if (isAirWeavingActive && spatialSfx != null && cableRouter != null)
+        {
+            spatialSfx.PlaySoftReject(cableRouter.LastSfxWorldPosition);
+        }
+    }
+
+    private void UpdateHandWakeAudioFeedback(float dt)
+    {
+        bool overlayOrVerify = levelManager != null && (levelManager.IsUiOverlayOpen || levelManager.IsVerifying);
+        if (isHandDetected)
+        {
+            if (!wasHandDetectedForWakeSfx
+                && handAbsentForWakeSeconds >= HologramWakeMinAbsentSeconds
+                && !overlayOrVerify
+                && spatialSfx != null)
+            {
+                spatialSfx.PlayHologramWake(handGestureDetector.PalmCursorWorldPosition);
+            }
+            wasHandDetectedForWakeSfx = true;
+            handAbsentForWakeSeconds = 0f;
+        }
+        else
+        {
+            wasHandDetectedForWakeSfx = false;
+            if (!overlayOrVerify)
+            {
+                handAbsentForWakeSeconds += dt;
+            }
+        }
+    }
+
+    private void UpdateContinuousHumFeedback(Camera mainCam, float dt)
+    {
+        if (spatialSfx == null)
+        {
+            return;
+        }
+
+        bool overlayOrVerify = levelManager != null && (levelManager.IsUiOverlayOpen || levelManager.IsVerifying);
+        if (!isAirWeavingActive || !isHandDetected || overlayOrVerify || mainCam == null)
+        {
+            spatialSfx.StopHumImmediate();
+            return;
+        }
+
+        if (cableRouter != null
+            && cableRouter.IsDraggingCable
+            && cableRouter.TryGetActiveDragFeedback(out Vector3 dragTipWorldPos, out float dragLength, out bool isLockedTarget))
+        {
+            spatialSfx.UpdateCableDragHum(dragTipWorldPos, dragLength, isLockedTarget, dt);
+            return;
+        }
+
+        if (grabbedGateSlotIndex >= 0
+            && grabbedGateSlotIndex < gateSlots.Count
+            && gateSlots[grabbedGateSlotIndex] != null
+            && gateSlots[grabbedGateSlotIndex].node != null)
+        {
+            WorkbenchGateSlot grabbed = gateSlots[grabbedGateSlotIndex];
+            float normalizedSpeed = Mathf.Clamp01(grabbed.smoothedVelocityXY.magnitude / 2.60f);
+            spatialSfx.UpdateGateDragHum(grabbed.node.transform.position, normalizedSpeed, wasGrabbedGateInDeleteZone, dt);
+            return;
+        }
+
+        spatialSfx.StopHumImmediate();
+    }
+
+    private void ResetHoverSfxTracking()
+    {
+        lastHoverSfxCategory = HoverSfxCategory.None;
+        lastHoverSfxNode = null;
+        lastHoverSfxSubId = 0;
+        hoverSfxNoneGraceTimer = 0f;
+        hoverSfxPostActionSuppressTimer = 0f;
+    }
+
+    /// <summary>
+    /// Memicu micro-tick elektronik ringan tepat 1x per transisi target hover baru (orb port, badan gerbang, atau sakelar Input A/B).
+    /// Dilengkapi hysteresis lepas 90 ms & jeda pasca-aksi agar tidak spam saat tangan diam atau melepas objek/kabel. Zero-GC.
+    /// </summary>
+    private void UpdateHoverSfxFeedback(float dt)
+    {
+        if (hoverSfxPostActionSuppressTimer > 0f)
+        {
+            hoverSfxPostActionSuppressTimer = Mathf.Max(0f, hoverSfxPostActionSuppressTimer - dt);
+        }
+
+        bool overlayOrVerify = levelManager != null && (levelManager.IsUiOverlayOpen || levelManager.IsVerifying);
+        bool busyGesture = grabbedGateSlotIndex >= 0
+                           || (cableRouter != null && cableRouter.IsDraggingCable)
+                           || handGestureDetector.IsFistActive
+                           || handGestureDetector.IsPinchActive
+                           || circleSummoner.IsActive;
+
+        if (!isAirWeavingActive || !isHandDetected || overlayOrVerify)
+        {
+            ResetHoverSfxTracking();
+            return;
+        }
+
+        if (busyGesture)
+        {
+            hoverSfxNoneGraceTimer = 0f;
+            return;
+        }
+
+        HoverSfxCategory curCategory = HoverSfxCategory.None;
+        GateNode curNode = null;
+        int curSubId = 0;
+        Vector3 curWorldPos = Vector3.zero;
+
+        if (cableRouter != null && cableRouter.TryGetHoveredPortInfo(out GateNode portNode, out bool portIsOutput, out int portSlot, out Vector3 portWorldPos))
+        {
+            curCategory = HoverSfxCategory.PortOrb;
+            curNode = portNode;
+            curSubId = (portIsOutput ? 1 : 0) | ((portSlot & 3) << 1);
+            curWorldPos = portWorldPos;
+        }
+        else if (hoveredInputNode != null)
+        {
+            curCategory = HoverSfxCategory.InputSwitch;
+            curNode = hoveredInputNode;
+            curSubId = hoveredInputNode == inputBNode ? 2 : 1;
+            curWorldPos = hoveredInputNode.transform.position;
+        }
+        else if (hoveredGateSlotIndex >= 0
+                 && hoveredGateSlotIndex < gateSlots.Count
+                 && gateSlots[hoveredGateSlotIndex] != null
+                 && gateSlots[hoveredGateSlotIndex].node != null)
+        {
+            curCategory = HoverSfxCategory.GateBody;
+            curNode = gateSlots[hoveredGateSlotIndex].node;
+            curSubId = gateSlots[hoveredGateSlotIndex].slotIndex + 1;
+            curWorldPos = curNode.transform.position;
+        }
+
+        if (curCategory == HoverSfxCategory.None)
+        {
+            hoverSfxNoneGraceTimer += dt;
+            if (hoverSfxNoneGraceTimer >= HoverNoneLeaveGraceSeconds)
+            {
+                lastHoverSfxCategory = HoverSfxCategory.None;
+                lastHoverSfxNode = null;
+                lastHoverSfxSubId = 0;
+            }
+            return;
+        }
+
+        hoverSfxNoneGraceTimer = 0f;
+        if (curCategory != lastHoverSfxCategory || curNode != lastHoverSfxNode || curSubId != lastHoverSfxSubId)
+        {
+            lastHoverSfxCategory = curCategory;
+            lastHoverSfxNode = curNode;
+            lastHoverSfxSubId = curSubId;
+            if (spatialSfx != null && hoverSfxPostActionSuppressTimer <= 0f)
+            {
+                spatialSfx.PlayHoverTick(curWorldPos);
+            }
+        }
+    }
 
     private void UpdateCableRouterInteraction(Camera mainCam)
     {
@@ -2386,7 +2734,15 @@ public class AirWeavingController : MonoBehaviour
 
         bool draggingCable = cableRouter != null && cableRouter.IsDraggingCable;
         bool hoveringPort = cableRouter != null && cableRouter.IsHoveringPort;
-        bool hidePalmReticle = overlayOpen || isVerifying || draggingCable;
+        bool isHoveringOrGrabbingGate = isGrabbingGate || hoveredGateSlotIndex >= 0;
+        // Sembunyikan reticle telapak (+) saat menarik kabel atau saat sudah mengunci target hover/grab agar tidak menumpuk 3 cincin
+        bool hidePalmReticle = overlayOpen
+                               || isVerifying
+                               || draggingCable
+                               || hoveringPort
+                               || isHoveringOrGrabbingGate
+                               || hoveredInputNode != null
+                               || circleSummoner.IsActive;
 
         hologramVisual.UpdatePalmReticle(
             camT,
@@ -2456,10 +2812,81 @@ public class AirWeavingController : MonoBehaviour
             assemblyMin,
             assemblyMax);
 
+        UpdateCircleSummonAudioFeedback(mainCam, overlayOrVerify);
+
         if (circleSummoner.BloomJustTriggeredThisFrame)
         {
             HandleCircleSummonBloomDeploy(mainCam, aspectScale, circleSummoner.DeployedGateType, circleSummoner.DeployedLocalXY);
         }
+    }
+
+    private void UpdateCircleSummonAudioFeedback(Camera mainCam, bool overlayOrVerify)
+    {
+        AirWeavingCircleSummoner.SummonStage curStage = circleSummoner.Stage;
+        if (curStage != AirWeavingCircleSummoner.SummonStage.Idle && mainCam != null)
+        {
+            Vector2 centerXY = circleSummoner.PreviewCenterLocalXY;
+            lastSfxSummonWorldPos = mainCam.transform.TransformPoint(new Vector3(centerXY.x, centerXY.y, WorkbenchDepth));
+        }
+
+        if (spatialSfx != null && !overlayOrVerify)
+        {
+            NodeType curGateType = circleSummoner.ActiveGateType;
+            bool enteredChargingFromIdle = curStage == AirWeavingCircleSummoner.SummonStage.Charging
+                                           && lastSfxSummonStage == AirWeavingCircleSummoner.SummonStage.Idle;
+
+            if (enteredChargingFromIdle)
+            {
+                spatialSfx.PlaySummonIgnite(lastSfxSummonWorldPos);
+                lastSfxSummonGateType = curGateType;
+            }
+            else if ((curStage == AirWeavingCircleSummoner.SummonStage.Charging
+                      || curStage == AirWeavingCircleSummoner.SummonStage.Ready)
+                     && lastSfxSummonStage != AirWeavingCircleSummoner.SummonStage.Idle
+                     && curGateType != lastSfxSummonGateType)
+            {
+                spatialSfx.PlaySummonPoseShift(lastSfxSummonWorldPos);
+                lastSfxSummonGateType = curGateType;
+            }
+
+            if (curStage == AirWeavingCircleSummoner.SummonStage.Ready
+                && lastSfxSummonStage != AirWeavingCircleSummoner.SummonStage.Ready)
+            {
+                spatialSfx.PlaySummonChargeReady(lastSfxSummonWorldPos);
+                lastSfxSummonGateType = curGateType;
+                lastSfxSummonChargeStep = 4;
+            }
+            else if (curStage == AirWeavingCircleSummoner.SummonStage.Charging)
+            {
+                float prog = circleSummoner.ChargeProgress;
+                int desiredStep = prog >= 0.75f ? 3 : (prog >= 0.50f ? 2 : (prog >= 0.25f ? 1 : 0));
+                if (desiredStep > lastSfxSummonChargeStep)
+                {
+                    if (!enteredChargingFromIdle || desiredStep >= 2)
+                    {
+                        spatialSfx.PlaySummonChargeStep(desiredStep - 1, lastSfxSummonWorldPos);
+                    }
+                    lastSfxSummonChargeStep = desiredStep;
+                }
+            }
+            else if (curStage == AirWeavingCircleSummoner.SummonStage.Idle)
+            {
+                bool cancelledByFist = circleSummoner.ConsumedFistCancelThisFrame;
+                bool expiredFromReady = lastSfxSummonStage == AirWeavingCircleSummoner.SummonStage.Ready
+                                        && !circleSummoner.BloomJustTriggeredThisFrame;
+                if (cancelledByFist || expiredFromReady)
+                {
+                    spatialSfx.PlaySoftReject(lastSfxSummonWorldPos);
+                }
+                lastSfxSummonChargeStep = 0;
+            }
+        }
+        else if (curStage == AirWeavingCircleSummoner.SummonStage.Idle)
+        {
+            lastSfxSummonChargeStep = 0;
+        }
+
+        lastSfxSummonStage = curStage;
     }
 
     private void HandleCircleSummonBloomDeploy(Camera mainCam, float aspectScale, NodeType gateType, Vector2 deployLocalXY)
@@ -2481,6 +2908,10 @@ public class AirWeavingController : MonoBehaviour
         {
             targetSlot.node.TriggerTapFeedback();
             summonVisual?.TriggerBloomBurst(targetSlot.node.transform.position, isAmberNotice: true);
+            if (spatialSfx != null)
+            {
+                spatialSfx.PlaySoftReject(targetSlot.node.transform.position);
+            }
             SetFeedbackImmediate($"Gerbang {gateType} sudah terpasang di papan!", FeedbackWaitingColor, 2.2f);
             return;
         }
@@ -2499,6 +2930,10 @@ public class AirWeavingController : MonoBehaviour
         targetSlot.node.SetExternalSpatialPose(true, worldPos, worldRot);
         targetSlot.node.TriggerTapFeedback();
         summonVisual?.TriggerBloomBurst(worldPos, isAmberNotice: false);
+        if (spatialSfx != null)
+        {
+            spatialSfx.PlayBloomSpawn(worldPos);
+        }
         postDropLockoutTimer = PostDropOutputLockoutSeconds;
         SetFeedbackImmediate($"Gerbang {gateType} dipanggil ke zona rakit!", FeedbackPinchColor, 1.8f);
     }
@@ -2534,7 +2969,7 @@ public class AirWeavingController : MonoBehaviour
             ? outputNode.transform.position
             : mainCam.transform.TransformPoint(new Vector3(outputLocalXY.x, outputLocalXY.y, WorkbenchDepth));
 
-        OutputDebugGuidanceState guidanceState = EvaluateOutputDebugGuidance(out int passedRowCount);
+        OutputDebugGuidanceState guidanceState = EvaluateOutputDebugGuidance(outputWorldPos, out int passedRowCount);
 
         outputTrigger.Tick(mainCam, dt, isAirWeavingActive,
             levelManager != null && levelManager.IsSandboxMode,
@@ -2551,6 +2986,25 @@ public class AirWeavingController : MonoBehaviour
             postDropLockoutTimer,
             guidanceState,
             passedRowCount);
+
+        // Detak progresif bernada naik (25% / 50% / 75%) saat menahan kepal di Output pasca-lulus untuk lanjut level Zero-Touch
+        float holdProg = outputTrigger.ChargeProgress;
+        if (holdProg <= 0.01f)
+        {
+            lastOutputHoldSfxStep = 0;
+        }
+        else
+        {
+            int desiredHoldStep = holdProg >= 0.75f ? 3 : (holdProg >= 0.50f ? 2 : (holdProg >= 0.25f ? 1 : 0));
+            if (desiredHoldStep > lastOutputHoldSfxStep)
+            {
+                if (spatialSfx != null && isAirWeavingActive)
+                {
+                    spatialSfx.PlayOutputHoldStep(desiredHoldStep - 1, outputWorldPos);
+                }
+                lastOutputHoldSfxStep = desiredHoldStep;
+            }
+        }
     }
 
     private void ResetLiveDebugMirror()
@@ -2562,9 +3016,12 @@ public class AirWeavingController : MonoBehaviour
         lastDebugWireCount = -1;
         lastDebugTopologyVersion = -1;
         lastDebugCircuitComplete = false;
+        lastSfxPassedRowMask = 0;
+        lastSfxFailedRowMask = 0;
+        lastSfxGuidanceState = OutputDebugGuidanceState.ConnectToOutput;
     }
 
-    private OutputDebugGuidanceState EvaluateOutputDebugGuidance(out int passedRowCount)
+    private OutputDebugGuidanceState EvaluateOutputDebugGuidance(Vector3 outputWorldPos, out int passedRowCount)
     {
         passedRowCount = 0;
 
@@ -2587,6 +3044,12 @@ public class AirWeavingController : MonoBehaviour
         {
             debugPassedRowMask = 0;
             debugFailedRowMask = 0;
+            lastSfxPassedRowMask = 0;
+            lastSfxFailedRowMask = 0;
+            if (!isComplete || curLevelIdx != lastDebugLevelIndex)
+            {
+                lastSfxGuidanceState = OutputDebugGuidanceState.ConnectToOutput;
+            }
             lastDebugLevelIndex = curLevelIdx;
             lastDebugActiveGates = activeGates;
             lastDebugWireCount = wireCount;
@@ -2596,17 +3059,20 @@ public class AirWeavingController : MonoBehaviour
 
         if (isSandbox || !isComplete)
         {
+            lastSfxGuidanceState = OutputDebugGuidanceState.ConnectToOutput;
             return OutputDebugGuidanceState.ConnectToOutput;
         }
 
         if (levelManager == null || levelManager.levels == null || levelManager.levels.Count == 0)
         {
+            lastSfxGuidanceState = OutputDebugGuidanceState.ConnectToOutput;
             return OutputDebugGuidanceState.ConnectToOutput;
         }
 
         LevelScenario currentLevel = levelManager.levels[Mathf.Clamp(curLevelIdx, 0, levelManager.levels.Count - 1)];
         if (currentLevel == null || currentLevel.expectedTruthTable == null || currentLevel.expectedTruthTable.Length < 4)
         {
+            lastSfxGuidanceState = OutputDebugGuidanceState.ConnectToOutput;
             return OutputDebugGuidanceState.ConnectToOutput;
         }
 
@@ -2641,23 +3107,61 @@ public class AirWeavingController : MonoBehaviour
         }
         passedRowCount = passed;
 
+        OutputDebugGuidanceState resultState;
         if (isOverQuota)
         {
-            return OutputDebugGuidanceState.ReduceGates;
+            resultState = OutputDebugGuidanceState.ReduceGates;
         }
-
-        if (debugFailedRowMask != 0)
+        else if (debugFailedRowMask != 0)
         {
-            return OutputDebugGuidanceState.CheckRedCells;
+            resultState = OutputDebugGuidanceState.CheckRedCells;
         }
-
-        if (isReadyNext || passed >= 4)
+        else if (isReadyNext || passed >= 4)
         {
             passedRowCount = 4;
-            return OutputDebugGuidanceState.PassedAllFour;
+            resultState = OutputDebugGuidanceState.PassedAllFour;
+        }
+        else
+        {
+            resultState = OutputDebugGuidanceState.TestSwitches;
         }
 
-        return OutputDebugGuidanceState.TestSwitches;
+        TriggerTruthPodDebugSfx(resultState, passedRowCount, outputWorldPos);
+        return resultState;
+    }
+
+    private void TriggerTruthPodDebugSfx(OutputDebugGuidanceState resultState, int passedRowCount, Vector3 outputWorldPos)
+    {
+        int newlyPassedBits = debugPassedRowMask & ~lastSfxPassedRowMask;
+        int newlyFailedBits = debugFailedRowMask & ~lastSfxFailedRowMask;
+
+        if (spatialSfx != null && isAirWeavingActive)
+        {
+            if (resultState == OutputDebugGuidanceState.ReduceGates
+                && lastSfxGuidanceState != OutputDebugGuidanceState.ReduceGates)
+            {
+                spatialSfx.PlaySoftReject(outputWorldPos);
+            }
+            else if (resultState == OutputDebugGuidanceState.PassedAllFour
+                     && lastSfxGuidanceState != OutputDebugGuidanceState.PassedAllFour)
+            {
+                spatialSfx.PlayTruthPodPassAllFour(outputWorldPos);
+            }
+            else if (resultState != OutputDebugGuidanceState.ReduceGates && newlyFailedBits != 0)
+            {
+                spatialSfx.PlayTruthPodRedWarning(outputWorldPos);
+            }
+            else if (resultState != OutputDebugGuidanceState.ReduceGates
+                     && resultState != OutputDebugGuidanceState.PassedAllFour
+                     && newlyPassedBits != 0)
+            {
+                spatialSfx.PlayTruthPodStep(passedRowCount, outputWorldPos);
+            }
+        }
+
+        lastSfxPassedRowMask = debugPassedRowMask;
+        lastSfxFailedRowMask = debugFailedRowMask;
+        lastSfxGuidanceState = resultState;
     }
 
     private void UpdateAirWeavingStatusFeedback()
@@ -2783,22 +3287,42 @@ public class AirWeavingController : MonoBehaviour
         workbenchVisualRootObj = new GameObject("AR_AirWeavingWorkbenchGuides");
         workbenchVisualRootObj.transform.SetParent(transform, false);
 
-        workbenchFrameMat = CreateSafeSpritesMaterial(WorkbenchFrameColor, 2988);
-        rackFrameMat = CreateSafeSpritesMaterial(RackFrameColor, 2989);
-        hoverRingMat = CreateSafeSpritesMaterial(HoverGateRingColor, 3016);
-        airDrawStrokeMat = CreateSafeSpritesMaterial(Color.white, 3017);
+        workbenchFrameShadowMat = CreateSafeSpritesMaterial(WorkbenchFrameShadowColor, 2980);
+        workbenchFrameMat = CreateSafeSpritesMaterial(WorkbenchFrameColor, 2981);
+        hoverRingMat = CreateSafeSpritesMaterial(HoverGateRingColor, 2992);
+        airDrawStrokeMat = CreateSafeSpritesMaterial(Color.white, 2993);
 
-        // 1. 4 siku sudut (corner brackets) tipis samar untuk AssemblyZone (hilangkan kotak 2D permanen)
+        // 1. 4 siku sudut (corner brackets) dengan garis bayangan gelap di belakangnya agar kontras tajam di latar webcam terang
+        assemblyCornerShadowRenderers = new LineRenderer[4];
         assemblyCornerBracketRenderers = new LineRenderer[4];
         for (int c = 0; c < 4; c++)
         {
+            GameObject shadowObj = new GameObject($"Workbench_AssemblyCornerShadow_{c}");
+            shadowObj.transform.SetParent(workbenchVisualRootObj.transform, false);
+            LineRenderer slr = shadowObj.AddComponent<LineRenderer>();
+            slr.useWorldSpace = true;
+            slr.loop = false;
+            slr.positionCount = 3;
+            slr.widthMultiplier = 0.0115f;
+            slr.numCornerVertices = 2;
+            slr.numCapVertices = 2;
+            slr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            slr.receiveShadows = false;
+            slr.startColor = WorkbenchFrameShadowColor;
+            slr.endColor = WorkbenchFrameShadowColor;
+            if (workbenchFrameShadowMat != null)
+            {
+                slr.sharedMaterial = workbenchFrameShadowMat;
+            }
+            assemblyCornerShadowRenderers[c] = slr;
+
             GameObject cornerObj = new GameObject($"Workbench_AssemblyCorner_{c}");
             cornerObj.transform.SetParent(workbenchVisualRootObj.transform, false);
             LineRenderer lr = cornerObj.AddComponent<LineRenderer>();
             lr.useWorldSpace = true;
             lr.loop = false;
             lr.positionCount = 3;
-            lr.widthMultiplier = 0.0055f;
+            lr.widthMultiplier = 0.0070f;
             lr.numCornerVertices = 2;
             lr.numCapVertices = 2;
             lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -2812,21 +3336,7 @@ public class AirWeavingController : MonoBehaviour
             assemblyCornerBracketRenderers[c] = lr;
         }
 
-        // 2. Garis pemisah Rak Parkir Gerbang Atas yang minimalis & tegas
-        GameObject rackObj = new GameObject("Workbench_RackShelfLine");
-        rackObj.transform.SetParent(workbenchVisualRootObj.transform, false);
-        rackDividerRenderer = rackObj.AddComponent<LineRenderer>();
-        rackDividerRenderer.useWorldSpace = true;
-        rackDividerRenderer.positionCount = 2;
-        rackDividerRenderer.widthMultiplier = 0.0085f;
-        rackDividerRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        rackDividerRenderer.receiveShadows = false;
-        rackDividerRenderer.startColor = RackFrameColor;
-        rackDividerRenderer.endColor = RackFrameColor;
-        if (rackFrameMat != null)
-        {
-            rackDividerRenderer.sharedMaterial = rackFrameMat;
-        }
+        // 2. Garis pemisah Rak Parkir dihapus agar tidak ada garis melayang terpotong di tepi kanan layar
 
         // 3. Cincin Hover / Grab Highlight ramping di sekitar alas target gerbang atau terminal Input
         GameObject hoverObj = new GameObject("AR_HoverHighlightRing");
@@ -2877,6 +3387,12 @@ public class AirWeavingController : MonoBehaviour
         if (cableRouter == null)
         {
             cableRouter = GetComponent<AirWeavingCableRouter>() ?? gameObject.AddComponent<AirWeavingCableRouter>();
+            cableRouter.OnWireGrabbedSfx += HandleCableGrabSfx;
+            cableRouter.OnWireTargetLockSfx += HandleCableTargetLockSfx;
+            cableRouter.OnWireTargetUnlockSfx += HandleCableTargetUnlockSfx;
+            cableRouter.OnWireConnectedSfx += HandleCableConnectSfx;
+            cableRouter.OnWireDisconnectedSfx += HandleCableDetachSfx;
+            cableRouter.OnWireRejectSfx += HandleCableRejectSfx;
         }
         cableRouter.EnsureVisualsCreated();
         if (summonVisual == null)
@@ -2884,6 +3400,12 @@ public class AirWeavingController : MonoBehaviour
             summonVisual = GetComponent<AirWeavingSummonVisual>() ?? gameObject.AddComponent<AirWeavingSummonVisual>();
         }
         summonVisual.EnsureVisualsCreated();
+        if (spatialSfx == null)
+        {
+            spatialSfx = GetComponent<AirWeavingSpatialSfx>() ?? gameObject.AddComponent<AirWeavingSpatialSfx>();
+        }
+        spatialSfx.EnsureInitialized();
+        spatialSfx.Configure(levelManager, ResolveMainCamera());
 
         workbenchVisualRootObj.SetActive(false);
     }
@@ -2908,9 +3430,10 @@ public class AirWeavingController : MonoBehaviour
             float armX = AssemblyBracketArmLength * aspectScale;
             float armY = AssemblyBracketArmLength;
 
-            // Siku tipis samar saat idle; menyala tegas saat menyeret gerbang mendekati/keluar batas buang
-            Color bracketCol = new Color(WorkbenchFrameColor.r, WorkbenchFrameColor.g, WorkbenchFrameColor.b, 0.22f);
-            float bracketWidth = 0.0055f;
+            // Siku tegas berkontras gelap-sian agar tetap jelas di dinding terang; menyala tegas saat menyeret gerbang mendekati/keluar batas buang
+            Color bracketCol = WorkbenchFrameColor;
+            Color shadowCol = WorkbenchFrameShadowColor;
+            float bracketWidth = 0.0070f;
 
             if (grabbedGateSlotIndex >= 0 && grabbedGateSlotIndex < gateSlots.Count && gateSlots[grabbedGateSlotIndex] != null)
             {
@@ -2918,8 +3441,9 @@ public class AirWeavingController : MonoBehaviour
                 if (IsOutsideAssemblyZone(gPos, aspectScale))
                 {
                     float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 9.0f));
-                    bracketCol = new Color(1.00f, 0.26f, 0.22f, 0.78f + (0.20f * pulse));
-                    bracketWidth = 0.0095f;
+                    bracketCol = new Color(1.00f, 0.26f, 0.22f, 0.84f + (0.16f * pulse));
+                    shadowCol = new Color(0.18f, 0.02f, 0.02f, 0.72f);
+                    bracketWidth = 0.0100f;
                 }
                 else
                 {
@@ -2927,15 +3451,30 @@ public class AirWeavingController : MonoBehaviour
                         Mathf.Min(gPos.x - leftX, rightX - gPos.x),
                         Mathf.Min(gPos.y - botY, topY - gPos.y));
                     float nearT = 1f - Mathf.Clamp01(minEdgeDist / 0.24f);
-                    float alpha = Mathf.Lerp(0.42f, 0.88f, nearT);
-                    bracketCol = new Color(0.28f, 0.94f, 1.00f, alpha);
-                    bracketWidth = Mathf.Lerp(0.0065f, 0.0090f, nearT);
+                    float alpha = Mathf.Lerp(0.56f, 0.94f, nearT);
+                    bracketCol = new Color(0.24f, 0.94f, 1.00f, alpha);
+                    shadowCol = new Color(0.02f, 0.06f, 0.12f, Mathf.Lerp(0.58f, 0.72f, nearT));
+                    bracketWidth = Mathf.Lerp(0.0075f, 0.0098f, nearT);
                 }
             }
 
+            if (workbenchFrameShadowMat != null)
+            {
+                workbenchFrameShadowMat.color = shadowCol;
+            }
             if (workbenchFrameMat != null)
             {
                 workbenchFrameMat.color = bracketCol;
+            }
+
+            float shadowWidth = bracketWidth + 0.0048f;
+            float shadowZ = guideZ + 0.004f;
+            if (assemblyCornerShadowRenderers != null && assemblyCornerShadowRenderers.Length == 4)
+            {
+                SetCornerBracket(assemblyCornerShadowRenderers[0], camT, leftX, botY + armY, leftX, botY, leftX + armX, botY, shadowZ, shadowCol, shadowWidth);
+                SetCornerBracket(assemblyCornerShadowRenderers[1], camT, rightX - armX, botY, rightX, botY, rightX, botY + armY, shadowZ, shadowCol, shadowWidth);
+                SetCornerBracket(assemblyCornerShadowRenderers[2], camT, rightX, topY - armY, rightX, topY, rightX - armX, topY, shadowZ, shadowCol, shadowWidth);
+                SetCornerBracket(assemblyCornerShadowRenderers[3], camT, leftX + armX, topY, leftX, topY, leftX, topY - armY, shadowZ, shadowCol, shadowWidth);
             }
 
             // 0: Bawah-Kiri, 1: Bawah-Kanan, 2: Atas-Kanan, 3: Atas-Kiri
@@ -2943,16 +3482,6 @@ public class AirWeavingController : MonoBehaviour
             SetCornerBracket(assemblyCornerBracketRenderers[1], camT, rightX - armX, botY, rightX, botY, rightX, botY + armY, guideZ, bracketCol, bracketWidth);
             SetCornerBracket(assemblyCornerBracketRenderers[2], camT, rightX, topY - armY, rightX, topY, rightX - armX, topY, guideZ, bracketCol, bracketWidth);
             SetCornerBracket(assemblyCornerBracketRenderers[3], camT, leftX + armX, topY, leftX, topY, leftX, topY - armY, guideZ, bracketCol, bracketWidth);
-        }
-
-        if (rackDividerRenderer != null)
-        {
-            float rackLeftX = (ParkingSlotBaseX[0] - 0.34f) * aspectScale;
-            float rackRightX = (ParkingSlotBaseX[ParkingSlotBaseX.Length - 1] + 0.34f) * aspectScale;
-            float shelfY = ParkReturnThresholdY + 0.04f;
-            rackLinePoints[0] = camT.TransformPoint(new Vector3(rackLeftX, shelfY, guideZ));
-            rackLinePoints[1] = camT.TransformPoint(new Vector3(rackRightX, shelfY, guideZ));
-            rackDividerRenderer.SetPositions(rackLinePoints);
         }
     }
 
@@ -2986,19 +3515,20 @@ public class AirWeavingController : MonoBehaviour
         handRigRootObj = new GameObject("AR_AirWeavingHandRig");
         handRigRootObj.transform.SetParent(transform, false);
 
-        jointBaseMat = CreateSafeSpritesMaterial(NeonJointBaseColor, 3010);
-        jointTipMat = CreateSafeSpritesMaterial(NeonJointTipColor, 3012);
-        boneMat = CreateSafeSpritesMaterial(NeonCyanBoneColor, 3008);
-        trailMat = CreateSafeSpritesMaterial(Color.white, 3015);
+        // RenderQueue 2994..2996: berada di bawah pil & teks label 3D (2998..3000) agar titik jari tidak menutupi teks
+        boneMat = CreateSafeSpritesMaterial(NeonCyanBoneColor, 2994);
+        jointBaseMat = CreateSafeSpritesMaterial(NeonJointBaseColor, 2995);
+        jointTipMat = CreateSafeSpritesMaterial(NeonJointTipColor, 2996);
+        trailMat = CreateSafeSpritesMaterial(Color.white, 2996);
         pinchRingMat = CreateSafeSpritesMaterial(PinchIdleColor, 3018);
 
-        // Skala sendi & garis tulang diselaraskan dengan WorkbenchDepth (3.60f) agar tajam proporsional
+        // Skala sendi & garis tulang dibuat ramping & halus (~65% lebih kecil) agar tidak membebani visual papan kerja
         jointSphereObjs = new GameObject[LandmarkCount];
         for (int i = 0; i < LandmarkCount; i++)
         {
             bool isTip = (i == 4 || i == 8 || i == 12 || i == 16 || i == 20);
             bool isWrist = (i == 0);
-            float diameter = isTip ? 0.052f : (isWrist ? 0.056f : 0.036f);
+            float diameter = isTip ? 0.022f : (isWrist ? 0.024f : 0.015f);
 
             GameObject jointObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             jointObj.name = $"Joint_{i}";
@@ -3032,7 +3562,7 @@ public class AirWeavingController : MonoBehaviour
             LineRenderer lr = boneObj.AddComponent<LineRenderer>();
             lr.useWorldSpace = true;
             lr.positionCount = 2;
-            lr.widthMultiplier = 0.015f;
+            lr.widthMultiplier = 0.0075f;
             lr.numCapVertices = 2;
             lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             lr.receiveShadows = false;
@@ -3153,6 +3683,18 @@ public class AirWeavingController : MonoBehaviour
         hologramVisual?.HideImmediate();
         cableRouter?.HideImmediate();
         circleSummoner.Reset();
+        lastSfxSummonStage = AirWeavingCircleSummoner.SummonStage.Idle;
+        lastSfxSummonChargeStep = 0;
+        wasGrabbedGateInDeleteZone = false;
+        lastOutputHoldSfxStep = 0;
+        handAbsentForWakeSeconds = 0f;
+        wasHandDetectedForWakeSfx = false;
+        ResetHoverSfxTracking();
+        ResetLiveDebugMirror();
+        if (spatialSfx != null)
+        {
+            spatialSfx.StopAllImmediate();
+        }
         summonVisual?.HideImmediate();
 
         if (workbenchVisualRootObj != null && workbenchVisualRootObj.activeSelf)
@@ -3259,8 +3801,8 @@ public class AirWeavingController : MonoBehaviour
             Destroy(workbenchVisualRootObj);
             workbenchVisualRootObj = null;
         }
+        assemblyCornerShadowRenderers = null;
         assemblyCornerBracketRenderers = null;
-        rackDividerRenderer = null;
         hoverHighlightRingRenderer = null;
         airDrawStrokeRenderer = null;
 
@@ -3290,9 +3832,95 @@ public class AirWeavingController : MonoBehaviour
         trailMat = null;
         pinchRingMat = null;
         hoverRingMat = null;
+        workbenchFrameShadowMat = null;
         workbenchFrameMat = null;
-        rackFrameMat = null;
         airDrawStrokeMat = null;
+    }
+
+    /// <summary>
+    /// Meninggikan posisi Label_Status3D, mempertegas pil gelap AR_LabelBackdrop, & mengangkat renderQueue (2998..3000)
+    /// di atas kabel (2987..2993) dan skeleton tangan (2994..2996) khusus selama Mode Udara aktif (0 diff label di GateNode.cs).
+    /// </summary>
+    private void ApplyAirWeavingLabelReadabilityStyles()
+    {
+        RestoreAirWeavingLabelReadabilityStyles();
+
+        for (int i = 0; i < cachedGateNodes.Count; i++)
+        {
+            GateNode node = cachedGateNodes[i];
+            if (node == null || node.statusLabel == null)
+            {
+                continue;
+            }
+
+            Transform labelT = node.statusLabel.transform;
+            MeshRenderer labelMr = node.statusLabel.GetComponent<MeshRenderer>();
+            Transform backdropT = labelT.Find("AR_LabelBackdrop");
+            Renderer backdropRend = backdropT != null ? backdropT.GetComponent<Renderer>() : null;
+            Material backdropMat = backdropRend != null ? backdropRend.sharedMaterial : null;
+            Transform pipT = labelT.Find("AR_LabelIdentityPip");
+            Renderer pipRend = pipT != null ? pipT.GetComponent<Renderer>() : null;
+            Material pipMat = pipRend != null ? pipRend.sharedMaterial : null;
+
+            SavedNodeLabelStyle saved = new SavedNodeLabelStyle
+            {
+                node = node,
+                originalLocalPos = labelT.localPosition,
+                labelMeshRenderer = labelMr,
+                originalSortingOrder = labelMr != null ? labelMr.sortingOrder : 0,
+                backdropMat = backdropMat,
+                originalBackdropColor = backdropMat != null ? backdropMat.color : Color.black,
+                originalBackdropQueue = backdropMat != null ? backdropMat.renderQueue : 2995,
+                pipMat = pipMat,
+                originalPipQueue = pipMat != null ? pipMat.renderQueue : 2996
+            };
+            savedNodeLabelStyles.Add(saved);
+
+            bool isLogicGate = node.nodeType != NodeType.InputSource && node.nodeType != NodeType.OutputActuator;
+            Vector3 liftedPos = saved.originalLocalPos;
+            liftedPos.y += isLogicGate ? 0.125f : 0.060f;
+            labelT.localPosition = liftedPos;
+
+            if (labelMr != null)
+            {
+                labelMr.sortingOrder = 20;
+            }
+            if (backdropMat != null)
+            {
+                backdropMat.color = AirWeavingLabelPillColor;
+                backdropMat.renderQueue = 2998;
+            }
+            if (pipMat != null)
+            {
+                pipMat.renderQueue = 2999;
+            }
+        }
+    }
+
+    private void RestoreAirWeavingLabelReadabilityStyles()
+    {
+        for (int i = 0; i < savedNodeLabelStyles.Count; i++)
+        {
+            SavedNodeLabelStyle s = savedNodeLabelStyles[i];
+            if (s.node != null && s.node.statusLabel != null)
+            {
+                s.node.statusLabel.transform.localPosition = s.originalLocalPos;
+            }
+            if (s.labelMeshRenderer != null)
+            {
+                s.labelMeshRenderer.sortingOrder = s.originalSortingOrder;
+            }
+            if (s.backdropMat != null)
+            {
+                s.backdropMat.color = s.originalBackdropColor;
+                s.backdropMat.renderQueue = s.originalBackdropQueue;
+            }
+            if (s.pipMat != null)
+            {
+                s.pipMat.renderQueue = s.originalPipQueue;
+            }
+        }
+        savedNodeLabelStyles.Clear();
     }
 
     // =========================================================================

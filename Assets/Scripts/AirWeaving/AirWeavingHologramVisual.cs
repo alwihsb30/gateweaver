@@ -86,8 +86,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         for (int i = 0; i < MaxNodeSlots; i++)
         {
-            nodeOuterMats[i] = CreateSafeSpritesMat(GateBodyHoverColor, 3006);
-            nodeInnerMats[i] = CreateSafeSpritesMat(GateBodyHoverColor, 3005);
+            nodeOuterMats[i] = CreateSafeSpritesMat(GateBodyHoverColor, 2986);
+            nodeInnerMats[i] = CreateSafeSpritesMat(GateBodyHoverColor, 2985);
             nodeOuterRings[i] = CreateLoopLine($"Holo_NodeAuraOuter_{i}", AuraSegments, 0.007f, nodeOuterMats[i]);
             nodeInnerRings[i] = CreateLoopLine($"Holo_NodeAuraInner_{i}", AuraSegments, 0.004f, nodeInnerMats[i]);
         }

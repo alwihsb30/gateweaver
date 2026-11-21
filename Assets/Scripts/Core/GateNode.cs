@@ -2806,7 +2806,7 @@ public class GateNode : MonoBehaviour
         SetTotemActive(showModelVisual);
         SetOutputDioramaActive(isTracked);
         SetOutputTruthPodVisible(isTracked);
-        SetInputPinsActive(isTracked);
+        SetInputPinsActive(isTracked && !useExternalSpatialPose);
         if (isTracked)
         {
             UpdateTotemColors();
@@ -3558,7 +3558,8 @@ public class GateNode : MonoBehaviour
             baseTileRootObj.SetActive(active);
         }
 
-        // v7.0 Fase 3: Di Mode Udara (hologram melayang), matikan komponen Renderer pada AR_BaseTile3D & AR_ContactShadow tanpa mengubah hierarki SetActive
+        // v7.0 Fase 3 + v7.5: Di Mode Udara (hologram melayang), matikan Renderer alas & seluruh visual port bawaan GateNode
+        // tanpa menonaktifkan Transform port agar GetInputPortWorldPosition/GetOutputPortWorldPosition tetap akurat.
         SetGroundRenderersEnabled(!useExternalSpatialPose);
 
         bool portsActive = active && showPorts;
@@ -3586,18 +3587,38 @@ public class GateNode : MonoBehaviour
             return;
         }
 
-        Renderer[] tileRends = baseTileRootObj != null ? baseTileRootObj.GetComponentsInChildren<Renderer>(true) : null;
-        Renderer[] shadowRends = contactShadowObj != null ? contactShadowObj.GetComponentsInChildren<Renderer>(true) : null;
-        int tileLen = tileRends != null ? tileRends.Length : 0;
-        int shadowLen = shadowRends != null ? shadowRends.Length : 0;
-        cachedGroundHideRenderers = new Renderer[tileLen + shadowLen];
-        for (int i = 0; i < tileLen; i++)
+        List<Renderer> hideList = new List<Renderer>(16);
+        CollectChildRenderers(hideList, baseTileRootObj);
+        CollectChildRenderers(hideList, contactShadowObj);
+        CollectChildRenderers(hideList, portInATransform != null ? portInATransform.gameObject : null);
+        CollectChildRenderers(hideList, portInBTransform != null ? portInBTransform.gameObject : null);
+        CollectChildRenderers(hideList, portOutTransform != null ? portOutTransform.gameObject : null);
+        CollectChildRenderers(hideList, sourceSocketObj);
+        CollectChildRenderers(hideList, targetSocketObj);
+        if (inputPinObjs != null)
         {
-            cachedGroundHideRenderers[i] = tileRends[i];
+            for (int i = 0; i < inputPinObjs.Length; i++)
+            {
+                CollectChildRenderers(hideList, inputPinObjs[i]);
+            }
         }
-        for (int i = 0; i < shadowLen; i++)
+        cachedGroundHideRenderers = hideList.ToArray();
+    }
+
+    private static void CollectChildRenderers(List<Renderer> destination, GameObject targetObj)
+    {
+        if (targetObj == null)
         {
-            cachedGroundHideRenderers[tileLen + i] = shadowRends[i];
+            return;
+        }
+
+        Renderer[] rends = targetObj.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < rends.Length; i++)
+        {
+            if (rends[i] != null)
+            {
+                destination.Add(rends[i]);
+            }
         }
     }
 

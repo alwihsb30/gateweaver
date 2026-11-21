@@ -36,6 +36,19 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private const int BezierSegments = 18;
     private const int PortRingSegments = 16;
 
+    // Pool Zero-GC Pulsing Signal Packets (butiran energi ramping adaptif: 1-2 pada kabel pendek, 3 pada kabel panjang)
+    private const int PacketsPerCable = 3;
+    private const int TotalPacketPoolSize = MaxCableBeams * PacketsPerCable;
+    private const float PacketHighSpeed = 1.12f;
+    private const float PacketLowSpeed = 0.34f;
+    private const float PacketHighDiameter = 0.019f;
+    private const float PacketHighHalfLength = 0.019f;
+    private const float PacketLowDiameter = 0.0135f;
+    private const float PacketLowHalfLength = 0.0125f;
+    private const float PacketLongCableThreshold = 1.15f;
+    private const float PacketEdgeFadeMargin = 0.12f;
+    private static readonly int ColorPropId = Shader.PropertyToID("_Color");
+
     private static readonly Color PortOutIdleColor = new Color(0.24f, 0.92f, 1.00f, 0.92f);
     private static readonly Color PortInEmptyColor = new Color(0.76f, 0.90f, 1.00f, 0.88f);
     private static readonly Color PortInConnectedColor = new Color(0.22f, 0.96f, 0.62f, 0.92f);
@@ -46,10 +59,12 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private static readonly Color PortSnapLockColor = new Color(0.84f, 1.00f, 0.30f, 1.00f);
     private static readonly Color DragBeamFreeColor = new Color(0.32f, 0.96f, 1.00f, 0.96f);
     private static readonly Color DragBeamSnappedColor = new Color(0.28f, 1.00f, 0.54f, 0.98f);
-    private static readonly Color CableHighCoreColor = new Color(0.20f, 0.96f, 1.00f, 0.98f);
-    private static readonly Color CableHighGlowColor = new Color(0.16f, 0.90f, 1.00f, 0.30f);
-    private static readonly Color CableLowCoreColor = new Color(1.00f, 0.38f, 0.16f, 0.96f);
-    private static readonly Color CableLowGlowColor = new Color(1.00f, 0.28f, 0.12f, 0.26f);
+    private static readonly Color CableHighCoreColor = new Color(0.20f, 0.94f, 1.00f, 0.92f);
+    private static readonly Color CableHighGlowColor = new Color(0.16f, 0.88f, 1.00f, 0.26f);
+    private static readonly Color CableLowCoreColor = new Color(1.00f, 0.40f, 0.16f, 0.90f);
+    private static readonly Color CableLowGlowColor = new Color(1.00f, 0.30f, 0.12f, 0.22f);
+    private static readonly Color PacketHighColor = new Color(0.38f, 0.96f, 1.00f, 0.82f);
+    private static readonly Color PacketLowColor = new Color(1.00f, 0.54f, 0.22f, 0.56f);
     private static readonly Color StubLineColor = new Color(0.26f, 0.88f, 1.00f, 0.48f);
 
     private struct ActivePortEntry
@@ -64,8 +79,14 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         public bool isConnected;
     }
 
+    public event Action OnWireGrabbedSfx;
+    public event Action OnWireTargetLockSfx;
+    public event Action OnWireTargetUnlockSfx;
     public event Action OnWireConnectedSfx;
     public event Action OnWireDisconnectedSfx;
+    public event Action OnWireRejectSfx;
+
+    public Vector3 LastSfxWorldPosition { get; private set; }
 
     private readonly List<ManualConnectionEdge> wires = new List<ManualConnectionEdge>(MaxCableBeams);
     private readonly List<ActivePortEntry> activePorts = new List<ActivePortEntry>(MaxPortVisuals);
@@ -83,6 +104,14 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private Material[] cableCoreMats;
     private LineRenderer[] cableGlowBeams;
     private Material[] cableGlowMats;
+
+    // Pool Zero-GC paket sinyal Bezier (1 shared material + 1 MaterialPropertyBlock)
+    private Transform[] packetTransforms;
+    private MeshRenderer[] packetRenderers;
+    private Material packetSharedMat;
+    private MaterialPropertyBlock packetMpb;
+    private float[] cablePacketPhases;
+    private int lastPacketAdvanceFrame = -1;
 
     private readonly Vector3[] ringPointsBuffer = new Vector3[PortRingSegments];
     private readonly Vector3[] bezierBuffer = new Vector3[BezierSegments];
@@ -104,6 +133,12 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private Vector2 latchedTargetLocalXY = Vector2.zero;
     private float lastSnapUnscaledTime = -10f;
 
+    // Edge-tracking target port yang terkunci selama drag kabel (Zero-GC, untuk ping Lock/Unlock tepat 1x per transisi)
+    private GateNode lastLockedTargetNode = null;
+    private bool lastLockedTargetIsOutput = false;
+    private int lastLockedTargetSlot = -1;
+    private Vector3 lastLockedTargetWorldPos = Vector3.zero;
+
     public bool IsHoveringPort => hoveredPortIndex >= 0 && hoveredPortIndex < activePorts.Count;
     public bool IsDraggingCable => isDraggingCable;
     public bool IsSnappedTargetPort => isDraggingCable && snappedTargetPortIndex >= 0 && snappedTargetPortIndex < activePorts.Count;
@@ -111,6 +146,56 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     public bool IsHoveringOutputNodePort => IsHoveringPort && activePorts[hoveredPortIndex].node != null && activePorts[hoveredPortIndex].node.nodeType == NodeType.OutputActuator;
     public int ActiveWireCount => wires.Count;
     public int TopologyVersion { get; private set; }
+
+    /// <summary>
+    /// Mengembalikan identitas stabil & posisi dunia orb port yang sedang di-hover (Zero-GC, untuk edge-triggered Hover Tick).
+    /// </summary>
+    public bool TryGetHoveredPortInfo(out GateNode portNode, out bool isOutput, out int slotIndex, out Vector3 handleWorldPos)
+    {
+        if (!isDraggingCable && hoveredPortIndex >= 0 && hoveredPortIndex < activePorts.Count)
+        {
+            ActivePortEntry p = activePorts[hoveredPortIndex];
+            if (p.node != null)
+            {
+                portNode = p.node;
+                isOutput = p.isOutput;
+                slotIndex = p.slotIndex;
+                handleWorldPos = p.handleWorldPos;
+                return true;
+            }
+        }
+
+        portNode = null;
+        isOutput = false;
+        slotIndex = 0;
+        handleWorldPos = Vector3.zero;
+        return false;
+    }
+
+    /// <summary>
+    /// Mengembalikan posisi ujung seret, panjang kabel aktif, & status kunci port sasaran untuk continuous CableDragHum (Zero-GC).
+    /// </summary>
+    public bool TryGetActiveDragFeedback(out Vector3 tipWorldPos, out float dragLength, out bool isLockedTarget)
+    {
+        if (isDraggingCable && dragOriginNode != null)
+        {
+            isLockedTarget = snappedTargetPortIndex >= 0 && snappedTargetPortIndex < activePorts.Count;
+            tipWorldPos = isLockedTarget
+                ? activePorts[snappedTargetPortIndex].handleWorldPos
+                : (hasLastValidPinchWorld ? lastValidPinchWorldPos : dragOriginNode.transform.position);
+
+            Vector3 startWorld = TryGetPortHandleWorldPos(dragOriginNode, dragFromOutput, dragOriginSlot, out Vector3 originHandle)
+                ? originHandle
+                : dragOriginNode.transform.position;
+            dragLength = Vector3.Distance(startWorld, tipWorldPos);
+            return true;
+        }
+
+        tipWorldPos = Vector3.zero;
+        dragLength = 0f;
+        isLockedTarget = false;
+        return false;
+    }
 
     public void EnsureVisualsCreated()
     {
@@ -122,35 +207,72 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         rootObj = new GameObject("AR_AirWeavingCableRouter");
         rootObj.transform.SetParent(transform, false);
 
-        stubSharedMat = CreateSafeSpritesMat(StubLineColor, 3007);
+        // RenderQueue 2987..2993: tepat di bawah label 3D (2998..3000) agar kabel/pulsa tidak pernah menutupi teks label gerbang
+        stubSharedMat = CreateSafeSpritesMat(StubLineColor, 2987);
         portOrbRings = new LineRenderer[MaxPortVisuals];
         portStubLines = new LineRenderer[MaxPortVisuals];
         portOrbMats = new Material[MaxPortVisuals];
 
         for (int i = 0; i < MaxPortVisuals; i++)
         {
-            portOrbMats[i] = CreateSafeSpritesMat(PortOutIdleColor, 3013);
+            portOrbMats[i] = CreateSafeSpritesMat(PortOutIdleColor, 2991);
             portOrbRings[i] = CreateLine($"Holo_PortOrb_{i}", PortRingSegments, loop: true, width: 0.011f, mat: portOrbMats[i]);
-            portStubLines[i] = CreateLine($"Holo_PortStub_{i}", 2, loop: false, width: 0.0045f, mat: stubSharedMat);
+            portStubLines[i] = CreateLine($"Holo_PortStub_{i}", 2, loop: false, width: 0.0040f, mat: stubSharedMat);
         }
 
-        hoverTargetMat = CreateSafeSpritesMat(PortHoverColor, 3019);
+        hoverTargetMat = CreateSafeSpritesMat(PortHoverColor, 2992);
         hoverTargetRing = CreateLine("Holo_PortHoverRing", PortRingSegments, loop: true, width: 0.0075f, mat: hoverTargetMat);
 
-        dragBeamMat = CreateSafeSpritesMat(DragBeamFreeColor, 3020);
-        dragBeamRenderer = CreateLine("Holo_LiveDragCable", BezierSegments, loop: false, width: 0.015f, mat: dragBeamMat);
+        dragBeamMat = CreateSafeSpritesMat(DragBeamFreeColor, 2993);
+        dragBeamRenderer = CreateLine("Holo_LiveDragCable", BezierSegments, loop: false, width: 0.014f, mat: dragBeamMat);
 
         // Pool 20 kabel Bezier seragam (inti plasma + pendar luar) untuk 100% koneksi Mode Udara
         cableCoreBeams = new LineRenderer[MaxCableBeams];
         cableCoreMats = new Material[MaxCableBeams];
         cableGlowBeams = new LineRenderer[MaxCableBeams];
         cableGlowMats = new Material[MaxCableBeams];
+        cablePacketPhases = new float[MaxCableBeams];
         for (int i = 0; i < MaxCableBeams; i++)
         {
-            cableGlowMats[i] = CreateSafeSpritesMat(CableLowGlowColor, 3009);
-            cableGlowBeams[i] = CreateLine($"Holo_UniformCableGlow_{i}", BezierSegments, loop: false, width: 0.032f, mat: cableGlowMats[i]);
-            cableCoreMats[i] = CreateSafeSpritesMat(CableLowCoreColor, 3011);
-            cableCoreBeams[i] = CreateLine($"Holo_UniformCableCore_{i}", BezierSegments, loop: false, width: 0.0135f, mat: cableCoreMats[i]);
+            cableGlowMats[i] = CreateSafeSpritesMat(CableLowGlowColor, 2988);
+            cableGlowBeams[i] = CreateLine($"Holo_UniformCableGlow_{i}", BezierSegments, loop: false, width: 0.028f, mat: cableGlowMats[i]);
+            cableCoreMats[i] = CreateSafeSpritesMat(CableLowCoreColor, 2989);
+            cableCoreBeams[i] = CreateLine($"Holo_UniformCableCore_{i}", BezierSegments, loop: false, width: 0.012f, mat: cableCoreMats[i]);
+            cablePacketPhases[i] = Mathf.Repeat(i * 0.23f, 1f);
+        }
+
+        // Pool Zero-GC 60 butiran pulsa sinyal ramping — renderQueue 2990 tepat di atas inti kabel & di bawah label 3D
+        packetSharedMat = CreateSafeSpritesMat(Color.white, 2990);
+        packetMpb = new MaterialPropertyBlock();
+        packetTransforms = new Transform[TotalPacketPoolSize];
+        packetRenderers = new MeshRenderer[TotalPacketPoolSize];
+        for (int i = 0; i < TotalPacketPoolSize; i++)
+        {
+            GameObject pktObj = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            pktObj.name = $"Holo_SignalPacket_{i}";
+            pktObj.transform.SetParent(rootObj.transform, false);
+            pktObj.transform.localScale = Vector3.one * PacketLowDiameter;
+
+            Collider col = pktObj.GetComponent<Collider>();
+            if (col != null)
+            {
+                Destroy(col);
+            }
+
+            MeshRenderer mr = pktObj.GetComponent<MeshRenderer>();
+            if (mr != null)
+            {
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                mr.receiveShadows = false;
+                if (packetSharedMat != null)
+                {
+                    mr.sharedMaterial = packetSharedMat;
+                }
+                mr.enabled = false;
+            }
+
+            packetTransforms[i] = pktObj.transform;
+            packetRenderers[i] = mr;
         }
 
         isInitialized = true;
@@ -181,6 +303,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         CancelActiveDrag();
         wires.Clear();
         TopologyVersion++;
+        DisableCableBeamsAndPacketsFrom(0);
         if (circuitManager != null)
         {
             circuitManager.SetManualConnections(wires);
@@ -212,6 +335,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         if (removedAny)
         {
             TopologyVersion++;
+            DisableCableBeamsAndPacketsFrom(wires.Count);
             if (circuitManager != null)
             {
                 NormalizeAllTwoInputGateSlots();
@@ -229,6 +353,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         latchedTargetNode = null;
         latchedTargetSlot = 0;
         lastSnapUnscaledTime = -10f;
+        lastLockedTargetNode = null;
+        lastLockedTargetIsOutput = false;
+        lastLockedTargetSlot = -1;
         if (dragBeamRenderer != null)
         {
             dragBeamRenderer.enabled = false;
@@ -330,7 +457,38 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 snappedTargetPortIndex = -1;
             }
 
-            if (pinchJustEnded || !isPinchActive)
+            bool endingDragThisFrame = pinchJustEnded || !isPinchActive;
+            if (!endingDragThisFrame)
+            {
+                if (snappedTargetPortIndex >= 0 && snappedTargetPortIndex < activePorts.Count)
+                {
+                    ActivePortEntry curTarget = activePorts[snappedTargetPortIndex];
+                    if (curTarget.node != lastLockedTargetNode
+                        || curTarget.isOutput != lastLockedTargetIsOutput
+                        || curTarget.slotIndex != lastLockedTargetSlot)
+                    {
+                        lastLockedTargetNode = curTarget.node;
+                        lastLockedTargetIsOutput = curTarget.isOutput;
+                        lastLockedTargetSlot = curTarget.slotIndex;
+                        lastLockedTargetWorldPos = curTarget.handleWorldPos;
+                        LastSfxWorldPosition = curTarget.handleWorldPos;
+                        OnWireTargetLockSfx?.Invoke();
+                    }
+                    else
+                    {
+                        lastLockedTargetWorldPos = curTarget.handleWorldPos;
+                    }
+                }
+                else if (lastLockedTargetNode != null)
+                {
+                    LastSfxWorldPosition = lastLockedTargetWorldPos;
+                    lastLockedTargetNode = null;
+                    lastLockedTargetIsOutput = false;
+                    lastLockedTargetSlot = -1;
+                    OnWireTargetUnlockSfx?.Invoke();
+                }
+            }
+            else
             {
                 CompleteOrCancelCableDrag(circuitManager, isHandDetected, livePinchLocalXY);
             }
@@ -414,6 +572,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             latchedTargetNode = null;
             lastSnapUnscaledTime = -10f;
             port.node.TriggerTapFeedback();
+            LastSfxWorldPosition = port.handleWorldPos;
+            OnWireGrabbedSfx?.Invoke();
             return;
         }
 
@@ -425,6 +585,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             wires.RemoveAt(existingIdx);
             TopologyVersion++;
             NormalizeSingleWireSlotOnGate(port.node);
+            DisableCableBeamsAndPacketsFrom(wires.Count);
             if (circuitManager != null)
             {
                 circuitManager.SetManualConnections(wires);
@@ -437,7 +598,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             snappedTargetPortIndex = -1;
             latchedTargetNode = null;
             lastSnapUnscaledTime = -10f;
-            OnWireDisconnectedSfx?.Invoke();
+            port.node.TriggerTapFeedback();
+            LastSfxWorldPosition = port.handleWorldPos;
+            OnWireGrabbedSfx?.Invoke();
             return;
         }
 
@@ -450,6 +613,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         latchedTargetNode = null;
         lastSnapUnscaledTime = -10f;
         port.node.TriggerTapFeedback();
+        LastSfxWorldPosition = port.handleWorldPos;
+        OnWireGrabbedSfx?.Invoke();
     }
 
     private void CompleteOrCancelCableDrag(CircuitManager circuitManager, bool isHandDetected, Vector2 releaseCursorLocalXY)
@@ -507,16 +672,46 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
 
                 dstNode.TriggerInputPortSnapFlash(finalSlot, dstNode.GetInputPortWorldPosition(finalSlot));
                 srcNode.TriggerTapFeedback();
+                LastSfxWorldPosition = TryGetPortHandleWorldPos(dstNode, false, finalSlot, out Vector3 snapPos)
+                    ? snapPos
+                    : dstNode.transform.position;
                 OnWireConnectedSfx?.Invoke();
             }
             else
             {
-                OnWireDisconnectedSfx?.Invoke();
+                LastSfxWorldPosition = hasLastValidPinchWorld ? lastValidPinchWorldPos : dstNode.transform.position;
+                OnWireRejectSfx?.Invoke();
             }
         }
         else
         {
-            OnWireDisconnectedSfx?.Invoke();
+            // Cek apakah pemain melepas kabel pada port lain yang tidak kompatibel (arah salah / siklus / duplikat)
+            int droppedPortIdx = isHandDetected ? FindNearestPortIndex(releaseCursorLocalXY) : -1;
+            bool droppedOnIncompatiblePort = false;
+            if (droppedPortIdx >= 0 && droppedPortIdx < activePorts.Count)
+            {
+                ActivePortEntry droppedPort = activePorts[droppedPortIdx];
+                bool isSameOriginPort = droppedPort.node == dragOriginNode
+                                        && droppedPort.isOutput == dragFromOutput
+                                        && (dragFromOutput || droppedPort.slotIndex == dragOriginSlot);
+                if (!isSameOriginPort)
+                {
+                    droppedOnIncompatiblePort = true;
+                    LastSfxWorldPosition = droppedPort.handleWorldPos;
+                }
+            }
+
+            if (droppedOnIncompatiblePort)
+            {
+                OnWireRejectSfx?.Invoke();
+            }
+            else
+            {
+                LastSfxWorldPosition = hasLastValidPinchWorld
+                    ? lastValidPinchWorldPos
+                    : (dragOriginNode != null ? dragOriginNode.transform.position : Vector3.zero);
+                OnWireDisconnectedSfx?.Invoke();
+            }
         }
 
         CancelActiveDrag();
@@ -1023,7 +1218,16 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         int beamCursor = 0;
         Vector3 camForward = camT.forward;
         Vector3 camUp = camT.up;
-        float highPulse = 1f + (0.08f * Mathf.Sin(Time.unscaledTime * 8.0f));
+        float timeNow = Time.unscaledTime;
+        float highPulse = 1f + (0.08f * Mathf.Sin(timeNow * 8.0f));
+
+        // Integrasikan fase paket sinyal tepat 1x per frame (RenderAllUniformCables dipanggil di Tick & SyncVisualsAfterPoseUpdate)
+        bool advancePhasesThisCall = Time.frameCount != lastPacketAdvanceFrame;
+        float packetDt = advancePhasesThisCall ? Mathf.Min(Time.unscaledDeltaTime, 0.05f) : 0f;
+        if (advancePhasesThisCall)
+        {
+            lastPacketAdvanceFrame = Time.frameCount;
+        }
 
         for (int i = 0; i < wires.Count && beamCursor < MaxCableBeams; i++)
         {
@@ -1041,8 +1245,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
 
             float dist = Vector3.Distance(p0, p2);
-            float archUp = Mathf.Lerp(0.06f, 0.22f, Mathf.Clamp01((dist - 0.25f) / 1.50f));
-            Vector3 p1 = ((p0 + p2) * 0.5f) - (camForward * 0.08f) + (camUp * archUp);
+            // Pelengkungan lembut & sedikit mundur ke sumbu +camForward agar kabel tidak menampar wajah teks label gerbang
+            float archUp = Mathf.Lerp(0.025f, 0.095f, Mathf.Clamp01((dist - 0.25f) / 1.65f));
+            Vector3 p1 = ((p0 + p2) * 0.5f) + (camForward * 0.025f) + (camUp * archUp);
 
             for (int s = 0; s < BezierSegments; s++)
             {
@@ -1054,8 +1259,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             bool isHigh = edge.source.currentOutputValue;
             Color coreCol = isHigh ? CableHighCoreColor : CableLowCoreColor;
             Color glowCol = isHigh ? CableHighGlowColor : CableLowGlowColor;
-            float coreWidth = isHigh ? (0.0145f * highPulse) : 0.0125f;
-            float glowWidth = isHigh ? (0.034f * highPulse) : 0.028f;
+            float coreWidth = isHigh ? (0.0130f * highPulse) : 0.0110f;
+            float glowWidth = isHigh ? (0.0290f * highPulse) : 0.0240f;
 
             LineRenderer glowLr = cableGlowBeams[beamCursor];
             if (cableGlowMats[beamCursor] != null)
@@ -1079,18 +1284,121 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             coreLr.endColor = coreCol;
             coreLr.SetPositions(bezierBuffer);
 
+            if (cablePacketPhases != null)
+            {
+                if (advancePhasesThisCall)
+                {
+                    float speed = isHigh ? PacketHighSpeed : PacketLowSpeed;
+                    cablePacketPhases[beamCursor] = Mathf.Repeat(cablePacketPhases[beamCursor] + (packetDt * speed), 1f);
+                }
+                int activePackets = dist >= PacketLongCableThreshold ? 3 : 2;
+                RenderCableSignalPackets(beamCursor, p0, p1, p2, camForward, isHigh, activePackets, cablePacketPhases[beamCursor], timeNow);
+            }
+
             beamCursor++;
         }
 
-        for (int b = beamCursor; b < MaxCableBeams; b++)
+        DisableCableBeamsAndPacketsFrom(beamCursor);
+    }
+
+    private void RenderCableSignalPackets(
+        int beamIndex,
+        Vector3 p0,
+        Vector3 p1,
+        Vector3 p2,
+        Vector3 camForward,
+        bool isHigh,
+        int activePacketCount,
+        float basePhase,
+        float timeNow)
+    {
+        if (packetTransforms == null || packetRenderers == null || packetMpb == null)
         {
-            if (cableCoreBeams[b] != null && cableCoreBeams[b].enabled)
+            return;
+        }
+
+        int poolBase = beamIndex * PacketsPerCable;
+        int clampedCount = Mathf.Clamp(activePacketCount, 1, PacketsPerCable);
+        Color baseCol = isHigh ? PacketHighColor : PacketLowColor;
+        float baseDiam = isHigh ? PacketHighDiameter : PacketLowDiameter;
+        float baseHalfLen = isHigh ? PacketHighHalfLength : PacketLowHalfLength;
+        float pulseFreq = isHigh ? 9.5f : 3.8f;
+        float pulseAmp = isHigh ? 0.12f : 0.06f;
+
+        for (int p = 0; p < PacketsPerCable; p++)
+        {
+            int slot = poolBase + p;
+            if (slot < 0 || slot >= TotalPacketPoolSize)
+            {
+                continue;
+            }
+
+            MeshRenderer rend = packetRenderers[slot];
+            Transform tr = packetTransforms[slot];
+            if (rend == null || tr == null)
+            {
+                continue;
+            }
+
+            if (p >= clampedCount)
+            {
+                if (rend.enabled)
+                {
+                    rend.enabled = false;
+                }
+                continue;
+            }
+
+            float t = Mathf.Repeat(basePhase + (p / (float)clampedCount), 1f);
+            float u = 1f - t;
+            Vector3 pos = (u * u * p0) + (2f * u * t * p1) + (t * t * p2) - (camForward * 0.002f);
+            Vector3 tangent = (2f * u * (p1 - p0)) + (2f * t * (p2 - p1));
+
+            float edgeFade = Mathf.Clamp01(t / PacketEdgeFadeMargin) * Mathf.Clamp01((1f - t) / PacketEdgeFadeMargin);
+            float pulse = 1f + (pulseAmp * Mathf.Sin((timeNow * pulseFreq) + (p * 2.094395f) + (beamIndex * 0.7f)));
+            float scaleEnv = Mathf.Lerp(0.32f, 1.0f, edgeFade) * pulse;
+
+            tr.position = pos;
+            if (tangent.sqrMagnitude > 0.000001f)
+            {
+                tr.rotation = Quaternion.FromToRotation(Vector3.up, tangent.normalized);
+            }
+            tr.localScale = new Vector3(baseDiam * scaleEnv, baseHalfLen * scaleEnv, baseDiam * scaleEnv);
+
+            Color pktCol = new Color(baseCol.r, baseCol.g, baseCol.b, baseCol.a * edgeFade);
+            packetMpb.SetColor(ColorPropId, pktCol);
+            rend.SetPropertyBlock(packetMpb);
+            if (!rend.enabled)
+            {
+                rend.enabled = true;
+            }
+        }
+    }
+
+    private void DisableCableBeamsAndPacketsFrom(int startBeamIndex)
+    {
+        int start = Mathf.Max(0, startBeamIndex);
+        for (int b = start; b < MaxCableBeams; b++)
+        {
+            if (cableCoreBeams != null && b < cableCoreBeams.Length && cableCoreBeams[b] != null && cableCoreBeams[b].enabled)
             {
                 cableCoreBeams[b].enabled = false;
             }
-            if (cableGlowBeams[b] != null && cableGlowBeams[b].enabled)
+            if (cableGlowBeams != null && b < cableGlowBeams.Length && cableGlowBeams[b] != null && cableGlowBeams[b].enabled)
             {
                 cableGlowBeams[b].enabled = false;
+            }
+            if (packetRenderers != null)
+            {
+                int poolBase = b * PacketsPerCable;
+                for (int p = 0; p < PacketsPerCable; p++)
+                {
+                    int slot = poolBase + p;
+                    if (slot < packetRenderers.Length && packetRenderers[slot] != null && packetRenderers[slot].enabled)
+                    {
+                        packetRenderers[slot].enabled = false;
+                    }
+                }
             }
         }
     }
@@ -1149,6 +1457,13 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             for (int i = 0; i < cableGlowBeams.Length; i++)
             {
                 if (cableGlowBeams[i] != null) cableGlowBeams[i].enabled = false;
+            }
+        }
+        if (packetRenderers != null)
+        {
+            for (int i = 0; i < packetRenderers.Length; i++)
+            {
+                if (packetRenderers[i] != null) packetRenderers[i].enabled = false;
             }
         }
     }
@@ -1223,5 +1538,10 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         cableCoreMats = null;
         cableGlowBeams = null;
         cableGlowMats = null;
+        packetTransforms = null;
+        packetRenderers = null;
+        packetSharedMat = null;
+        packetMpb = null;
+        cablePacketPhases = null;
     }
 }
