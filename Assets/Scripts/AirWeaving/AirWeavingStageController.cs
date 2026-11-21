@@ -25,8 +25,16 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     public const float MaxPanOffsetX = 2.50f;
     public const float MaxPanOffsetY = 1.75f;
-    public const float MaxPanDepthPullCloserZ = 2.25f;
-    public const float MaxPanDepthPushFartherZ = 2.80f;
+    private const float MinDynamicPanOffsetX = 0.85f;
+    private const float MinDynamicPanOffsetY = 0.65f;
+    public const float MinStageDepthZ = 1.55f;
+    public const float MaxStageDepthZ = 6.20f;
+    public const float MaxPanDepthPullCloserZ = 2.27f;
+    public const float MaxPanDepthPushFartherZ = 2.38f;
+
+    public const float ReferencePalmScale = AirWeavingHandGestureDetector.DefaultComfortPalmSpan;
+    public const float MinSafePalmScale = 0.055f;
+    private const float MaxSafePalmScale = 0.620f;
 
     public const float MaxParallaxYawDeg = 7.0f;
     public const float MaxParallaxPitchDeg = 4.0f;
@@ -44,18 +52,21 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private const float PanSpringOmega = 14.0f;
     private const float ParallaxSpringOmega = 7.5f;
 
-    // Parameter Anchor Kedalaman Z Halus pada Mode 2 Tangan Both Pinch (differential-depth twist dimatikan agar orbit Arcball tetap presisi)
-    private const float TwoHandOrbitDepthDeadzone = 0.065f;
-    private const float TwoHandOrbitDepthGain = 0.42f;
-    private const float TwoHandOrbitDepthSpanMeters = 0.65f;
+    // Parameter True Z-Axis Push/Pull 2 Tangan (terpisah dari Zoom skala & Anchor 2D; estDepth = ReferencePalmScale / avgPalmScale)
+    private const float TwoHandDepthMinDeadzone = 0.018f;
+    private const float TwoHandDepthRelativeDeadzone = 0.022f;
+    public const float TwoHandOrbitDepthGainMeters = 4.20f;
+    public const float TwoHandFreePanDepthGainMeters = 4.45f;
+    private const float MaxTwoHandDepthSpeedMetersPerSec = 5.50f;
 
-    // Parameter Inertial Coasting Quaternion Anti-Kick (ring-buffer tertunda 55-130 ms + deadzone lepas tenang)
+    // Parameter Inertial Coasting Quaternion Anti-Kick (ring-buffer tertunda 55-130 ms + deadzone lepas tenang terpisah XY vs Z)
     private const float StageCoastDamping = 6.2f;
     private const float StageVelocityTrackRate = 12.0f;
     private const float MaxCoastAngularSpeedDegPerSec = 140.0f;
     private const float CoastAngularStopSpeedDegPerSec = 0.25f;
     private const float MaxCoastZoomPerSec = 0.75f;
     private const float MaxCoastPanUnitsPerSec = 1.25f;
+    private const float MaxCoastDepthMetersPerSec = 1.10f;
     private const float StageCoastStopEpsilon = 0.0005f;
     private const int VelocityHistoryCapacity = 16;
     private const float CoastDelayedWindowMinAgeSeconds = 0.055f;
@@ -65,6 +76,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private const float CoastReleaseAngularDeadzoneDegPerSec = 18.0f;
     private const float CoastReleaseZoomDeadzonePerSec = 0.18f;
     private const float CoastReleasePanDeadzoneUnitsPerSec = 0.20f;
+    private const float CoastReleaseDepthDeadzoneMetersPerSec = 0.32f;
 
     private const int GridInternalVerticalLines = 9;
     private const int GridInternalHorizontalLines = 7;
@@ -170,8 +182,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     private bool isTwoHandManipulationActive = false;
     private bool wasTwoHandManipulationActive = false;
-    private bool hasTwoHandOrbitDepthAnchor = false;
-    private float twoHandAnchorAvgSpan = 0.172f;
+    private bool hasTwoHandDepthAnchor = false;
+    private float twoHandAnchorEstDepth = 1.0f;
     private float twoHandAnchorPanZ = 0f;
 
     // State Inertial Coasting Quaternion Anti-Kick 2 Tangan (ring-buffer kecepatan tertunda + freeze gate)
@@ -197,6 +209,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private float dynamicMaxPanX = MaxPanOffsetX;
     private float dynamicMinPanY = -MaxPanOffsetY;
     private float dynamicMaxPanY = MaxPanOffsetY;
+    private float dynamicMinStageDepthZ = MinStageDepthZ;
+    private float dynamicMaxStageDepthZ = MaxStageDepthZ;
+    private float dynamicMinPanZ = -MaxPanDepthPullCloserZ;
+    private float dynamicMaxPanZ = MaxPanDepthPushFartherZ;
     private Camera lastKnownMainCam;
     private float lastKnownWorkbenchDepth = 3.82f;
 
@@ -205,6 +221,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
     public float TargetZoomScale => targetZoomScale;
     public Vector3 CurrentPanOffset => currentPanOffset;
     public Vector3 TargetPanOffset => targetPanOffset;
+    public float CurrentStageDepthZ => Mathf.Clamp(lastKnownWorkbenchDepth + currentPanOffset.z, dynamicMinStageDepthZ, dynamicMaxStageDepthZ);
+    public float TargetStageDepthZ => Mathf.Clamp(lastKnownWorkbenchDepth + targetPanOffset.z, dynamicMinStageDepthZ, dynamicMaxStageDepthZ);
     public Quaternion TargetOrbitRotation => targetOrbitRotation;
     public Quaternion CurrentOrbitRotation => currentOrbitRotation;
     public bool IsTwoHandManipulationActive => isTwoHandManipulationActive;
@@ -371,7 +389,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
     {
         isTwoHandManipulationActive = false;
         wasTwoHandManipulationActive = false;
-        hasTwoHandOrbitDepthAnchor = false;
+        hasTwoHandDepthAnchor = false;
         ClearInertialCoastVelocities();
 
         if (!isInitialized)
@@ -402,7 +420,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
         targetPanOffset = Vector3.zero;
         isTwoHandManipulationActive = false;
         wasTwoHandManipulationActive = false;
-        hasTwoHandOrbitDepthAnchor = false;
+        hasTwoHandDepthAnchor = false;
         ClearInertialCoastVelocities();
 
         if (immediate)
@@ -432,7 +450,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
         isTwoHandManipulationActive = active;
         if (!active)
         {
-            hasTwoHandOrbitDepthAnchor = false;
+            hasTwoHandDepthAnchor = false;
             if (!wasTwoHandManipulationActive)
             {
                 isTwoHandReleaseFrozen = false;
@@ -473,42 +491,98 @@ public sealed class AirWeavingStageController : MonoBehaviour
     }
 
     /// <summary>
-    /// Mengunci ulang jangkar kedalaman Z 2 tangan tanpa mereset histori kecepatan saat tangan kembali merapat
-    /// pasca jeda release-freeze singkat. Zero-GC.
+    /// Estimasi jarak relatif kamera 2 tangan berbasis hukum kamera lubang jarum:
+    /// <c>estDepth = ReferencePalmScale / Mathf.Max(avgPalmScale, MinSafePalmScale)</c>.
+    /// Tangan mendekat ke lensa -&gt; <c>avgPalmScale</c> membesar -&gt; <c>estDepth</c> mengecil. Zero-GC.
     /// </summary>
-    public void ReanchorTwoHandOrbitDepth(float leftScreenPalmSpan, float rightScreenPalmSpan)
+    public static float ComputeEstimatedDepth(float avgPalmScale)
     {
-        float safeLeft = Mathf.Max(0.055f, leftScreenPalmSpan);
-        float safeRight = Mathf.Max(0.055f, rightScreenPalmSpan);
-        twoHandAnchorAvgSpan = 0.5f * (safeLeft + safeRight);
-        twoHandAnchorPanZ = targetPanOffset.z;
-        hasTwoHandOrbitDepthAnchor = true;
+        float safePalmScale = (!float.IsNaN(avgPalmScale) && !float.IsInfinity(avgPalmScale))
+            ? Mathf.Clamp(avgPalmScale, MinSafePalmScale, MaxSafePalmScale)
+            : ReferencePalmScale;
+        return ReferencePalmScale / safePalmScale;
     }
 
     /// <summary>
-    /// Mengunci jangkar awal kedalaman 2 tangan saat memasuki mode <c>Both Pinch</c>
-    /// untuk dorong-tarik Z halus &amp; membersihkan histori kecepatan coasting. Zero-GC.
+    /// Mengunci ulang jangkar kedalaman Z absolut 2 tangan tanpa mereset histori kecepatan saat tangan kembali merapat
+    /// pasca jeda release-freeze singkat. Berlaku seragam untuk <c>TwoHandOrbitZoom</c> maupun <c>TwoHandFreePan</c>. Zero-GC.
     /// </summary>
-    public void BeginTwoHandOrbitZoomAnchor(float leftScreenPalmSpan, float rightScreenPalmSpan)
+    public void ReanchorTwoHandDepth(float avgPalmScale)
+    {
+        twoHandAnchorEstDepth = ComputeEstimatedDepth(avgPalmScale);
+        twoHandAnchorPanZ = targetPanOffset.z;
+        hasTwoHandDepthAnchor = true;
+    }
+
+    /// <summary>
+    /// Mengunci jangkar awal kedalaman Z absolut 2 tangan saat memasuki <c>TwoHandOrbitZoom</c> atau <c>TwoHandFreePan</c>
+    /// serta membersihkan histori kecepatan coasting sebelumnya. Zero-GC.
+    /// </summary>
+    public void BeginTwoHandManipulationAnchor(float avgPalmScale)
     {
         isTwoHandManipulationActive = true;
         ClearInertialCoastVelocities();
-        float safeLeft = Mathf.Max(0.055f, leftScreenPalmSpan);
-        float safeRight = Mathf.Max(0.055f, rightScreenPalmSpan);
-        twoHandAnchorAvgSpan = 0.5f * (safeLeft + safeRight);
+        twoHandAnchorEstDepth = ComputeEstimatedDepth(avgPalmScale);
         twoHandAnchorPanZ = targetPanOffset.z;
-        hasTwoHandOrbitDepthAnchor = true;
+        hasTwoHandDepthAnchor = true;
+    }
+
+    private void ApplyAnchoredDepthPushPull(float avgPalmScale, float depthGainMeters, float dt)
+    {
+        float curEstDepth = ComputeEstimatedDepth(avgPalmScale);
+        if (!hasTwoHandDepthAnchor)
+        {
+            twoHandAnchorEstDepth = curEstDepth;
+            twoHandAnchorPanZ = targetPanOffset.z;
+            hasTwoHandDepthAnchor = true;
+            return;
+        }
+
+        // Tangan maju mendekati lensa -> avgPalmScale membesar -> curEstDepth mengecil -> deltaDepth negatif -> Z mengecil (hologram mendekat ke kamera)
+        // Tangan mundur menjauhi lensa -> avgPalmScale mengecil -> curEstDepth membesar -> deltaDepth positif -> Z membesar (hologram menjauh dari kamera)
+        float rawDeltaDepth = curEstDepth - twoHandAnchorEstDepth;
+        float depthDeadzone = Mathf.Max(TwoHandDepthMinDeadzone, twoHandAnchorEstDepth * TwoHandDepthRelativeDeadzone);
+        float effectiveDeltaDepth = 0f;
+        float absDeltaDepth = Mathf.Abs(rawDeltaDepth);
+        if (absDeltaDepth > depthDeadzone)
+        {
+            effectiveDeltaDepth = rawDeltaDepth - (Mathf.Sign(rawDeltaDepth) * depthDeadzone);
+        }
+
+        float rawDesiredPanZ = twoHandAnchorPanZ + (effectiveDeltaDepth * depthGainMeters);
+        float clampedDesiredPanZ = Mathf.Clamp(rawDesiredPanZ, dynamicMinPanZ, dynamicMaxPanZ);
+
+        // Cegah overhang menempel di batas dekat (1.55m) / jauh (6.20m) agar gerakan balik langsung terasa responsif
+        float safeGain = Mathf.Max(0.10f, depthGainMeters);
+        if (rawDesiredPanZ < dynamicMinPanZ)
+        {
+            float overhangDepth = (dynamicMinPanZ - rawDesiredPanZ) / safeGain;
+            twoHandAnchorEstDepth = Mathf.Max(0.20f, twoHandAnchorEstDepth - overhangDepth);
+        }
+        else if (rawDesiredPanZ > dynamicMaxPanZ)
+        {
+            float overhangDepth = (rawDesiredPanZ - dynamicMaxPanZ) / safeGain;
+            twoHandAnchorEstDepth += overhangDepth;
+        }
+
+        float safeDt = Mathf.Clamp(dt, 0.001f, 0.050f);
+        float maxStep = Mathf.Max(0.08f, MaxTwoHandDepthSpeedMetersPerSec * safeDt);
+        float steppedPanZ = Mathf.Clamp(clampedDesiredPanZ, targetPanOffset.z - maxStep, targetPanOffset.z + maxStep);
+        targetPanOffset.z = Mathf.Clamp(steppedPanZ, dynamicMinPanZ, dynamicMaxPanZ);
     }
 
     private void RefreshDynamicPanBounds(Camera mainCam, float workbenchDepth, float zoomScale, float panZ)
     {
         float safeZoom = Mathf.Clamp(zoomScale, MinZoomScale, MaxZoomScale);
-        float zoomApproachZ = safeZoom > 1.0f
-            ? -Mathf.Min(1.15f, (safeZoom - 1.0f) * 0.58f)
-            : Mathf.Min(0.85f, (1.0f - safeZoom) * 0.90f);
         float nearClip = mainCam != null ? mainCam.nearClipPlane : 0.15f;
-        float minSafePivotZ = Mathf.Max(0.95f, nearClip + 0.65f);
-        float effectivePivotZ = Mathf.Clamp(workbenchDepth + panZ + zoomApproachZ, minSafePivotZ, 7.20f);
+        dynamicMinStageDepthZ = Mathf.Max(MinStageDepthZ, nearClip + 0.65f);
+        dynamicMaxStageDepthZ = Mathf.Max(dynamicMinStageDepthZ + 0.50f, MaxStageDepthZ);
+        dynamicMinPanZ = dynamicMinStageDepthZ - workbenchDepth;
+        dynamicMaxPanZ = dynamicMaxStageDepthZ - workbenchDepth;
+
+        // Gunakan kedalaman Z panggung aktual saat ini (murni terpisah dari Zoom skala) agar frustum X/Y ikut menyesuaikan
+        float clampedPanZ = Mathf.Clamp(panZ, dynamicMinPanZ, dynamicMaxPanZ);
+        float effectivePivotZ = Mathf.Clamp(workbenchDepth + clampedPanZ, dynamicMinStageDepthZ, dynamicMaxStageDepthZ);
 
         float halfFovRad = (mainCam != null ? mainCam.fieldOfView : 60f) * 0.5f * Mathf.Deg2Rad;
         float aspect = (mainCam != null && mainCam.aspect > 0.1f) ? mainCam.aspect : (16f / 9f);
@@ -519,11 +593,11 @@ public sealed class AirWeavingStageController : MonoBehaviour
         float stageHalfW = 1.45f * aspectScale * safeZoom;
         float stageHalfH = 0.88f * safeZoom;
 
-        // Perluas area geser ke seluruh bidang layar kamera sesuai FOV & zoom, sambil menjaga minimal ~35% hologram tetap terlihat
+        // Semakin dekat ke kamera -> batas pan X/Y menyempit mengikuti frustum; semakin jauh -> semakin lega (min ~35% hologram tetap terlihat)
         float zoomInspectExtraX = Mathf.Max(0f, (stageHalfW * 0.72f) - (frustumHalfW * 0.35f));
         float zoomInspectExtraY = Mathf.Max(0f, (stageHalfH * 0.72f) - (frustumHalfH * 0.35f));
-        float maxScreenX = Mathf.Clamp((frustumHalfW * 0.88f) + zoomInspectExtraX, MaxPanOffsetX, 8.50f);
-        float maxScreenY = Mathf.Clamp((frustumHalfH * 0.84f) + zoomInspectExtraY, MaxPanOffsetY, 5.50f);
+        float maxScreenX = Mathf.Clamp((frustumHalfW * 0.88f) + zoomInspectExtraX, MinDynamicPanOffsetX, 8.50f);
+        float maxScreenY = Mathf.Clamp((frustumHalfH * 0.84f) + zoomInspectExtraY, MinDynamicPanOffsetY, 5.50f);
 
         dynamicMinPanX = -maxScreenX;
         dynamicMaxPanX = maxScreenX;
@@ -534,18 +608,18 @@ public sealed class AirWeavingStageController : MonoBehaviour
     /// <summary>
     /// Menerapkan delta Quaternion Arcball 360° bebas penuh tanpa pitch clamp dan tanpa gimbal lock
     /// (pre-multiply pada sumbu layar kamera <c>camT.up</c>, <c>camT.right</c>, dan <c>camT.forward</c>),
-    /// target Air-Zoom (<c>desiredZoomScale</c> 0.42x..2.85x) dengan Focal-Point Zoom kalem menuju titik tengah 2 tangan,
-    /// serta dorong-tarik Z halus (differential-depth twist dimatikan agar rotasi tetap presisi dan bebas putaran liar).
+    /// target Air-Zoom (<c>desiredZoomScale</c> 0.42x..2.85x) terkompensasi kedalaman dengan Focal-Point Zoom kalem,
+    /// serta True Z-Axis Push/Pull absolut (<c>avgPalmScale</c>) yang 100% terpisah dari skala Zoom. Zero-GC.
     /// </summary>
     public void ApplyTwoHandOrbitAndZoom(
         float yawDeltaDeg,
         float pitchDeltaDeg,
         float desiredZoomScale,
         Vector2 focalMidpointCameraXY = default,
-        float leftScreenPalmSpan = -1f,
-        float rightScreenPalmSpan = -1f,
+        float avgPalmScale = -1f,
         float rollDeltaDeg = 0f,
-        Transform camTransform = null)
+        Transform camTransform = null,
+        float dt = 0.016f)
     {
         isTwoHandManipulationActive = true;
         if (isTwoHandReleaseFrozen)
@@ -553,32 +627,12 @@ public sealed class AirWeavingStageController : MonoBehaviour
             return;
         }
 
-        // Dorong-Tarik Z Halus (Front-Cam Mirror Depth) tanpa menyuntikkan differential-depth twist liar ke sumbu Yaw
-        if (leftScreenPalmSpan > 0f && rightScreenPalmSpan > 0f)
+        RefreshDynamicPanBounds(lastKnownMainCam, lastKnownWorkbenchDepth, targetZoomScale, targetPanOffset.z);
+
+        // True Z-Axis Push/Pull (tangan maju mendekati lensa -> Z panggung mengecil/mendekat; tangan mundur -> Z membesar/menjauh)
+        if (avgPalmScale > 0f)
         {
-            float safeLeft = Mathf.Max(0.055f, leftScreenPalmSpan);
-            float safeRight = Mathf.Max(0.055f, rightScreenPalmSpan);
-            float curAvgSpan = 0.5f * (safeLeft + safeRight);
-
-            if (!hasTwoHandOrbitDepthAnchor)
-            {
-                twoHandAnchorAvgSpan = curAvgSpan;
-                twoHandAnchorPanZ = targetPanOffset.z;
-                hasTwoHandOrbitDepthAnchor = true;
-            }
-            else
-            {
-                float avgSpanRatio = Mathf.Pow(curAvgSpan / Mathf.Max(0.055f, twoHandAnchorAvgSpan), TwoHandOrbitDepthGain);
-                float deltaRatio = avgSpanRatio - 1.0f;
-                float effectiveDepthDelta = 0f;
-                if (Mathf.Abs(deltaRatio) > TwoHandOrbitDepthDeadzone)
-                {
-                    effectiveDepthDelta = deltaRatio - (Mathf.Sign(deltaRatio) * TwoHandOrbitDepthDeadzone);
-                }
-
-                float desiredPanZ = twoHandAnchorPanZ + (effectiveDepthDelta * TwoHandOrbitDepthSpanMeters);
-                targetPanOffset.z = Mathf.Clamp(desiredPanZ, -MaxPanDepthPullCloserZ, MaxPanDepthPushFartherZ);
-            }
+            ApplyAnchoredDepthPushPull(avgPalmScale, TwoHandOrbitDepthGainMeters, dt);
         }
 
         // Pre-multiply Quaternion Arcball langsung pada sumbu layar kamera (camT.up, camT.right, camT.forward) -> 360° bebas penuh!
@@ -598,10 +652,13 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
         RefreshDynamicPanBounds(lastKnownMainCam, lastKnownWorkbenchDepth, targetZoomScale, targetPanOffset.z);
 
-        // Focal-Point Zoom kalem: clamp jarak fokus agar zoom dari tepi kosong layar tetap nyaman & tidak melempar hologram
+        // Focal-Point Zoom kalem pada kedalaman Z panggung aktual: clamp jarak fokus agar zoom dari tepi kosong layar tetap nyaman
         if (Mathf.Abs(zoomRatio - 1.0f) > 0.0001f)
         {
-            Vector2 focalOffsetFromStage = focalMidpointCameraXY - new Vector2(targetPanOffset.x, targetPanOffset.y);
+            float refDepth = Mathf.Max(0.50f, lastKnownWorkbenchDepth);
+            float curPivotZ = Mathf.Clamp(refDepth + targetPanOffset.z, dynamicMinStageDepthZ, dynamicMaxStageDepthZ);
+            Vector2 focalAtStagePlaneXY = focalMidpointCameraXY * (curPivotZ / refDepth);
+            Vector2 focalOffsetFromStage = focalAtStagePlaneXY - new Vector2(targetPanOffset.x, StagePivotCameraOffsetY + targetPanOffset.y);
             float focalMagSqr = focalOffsetFromStage.sqrMagnitude;
             const float maxFocalOffset = 1.85f;
             if (focalMagSqr > maxFocalOffset * maxFocalOffset)
@@ -616,10 +673,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
     }
 
     /// <summary>
-    /// Menerapkan Free Air-Pan 3D (1 Tangan Pinch + 1 Tangan Fist): menggeser panggung meja bebas ke seluruh area layar kamera
-    /// serta maju/mundur mengikuti kedalaman kedua tangan dengan clamp aman relatif FOV &amp; zoom. Zero-GC.
+    /// Menerapkan Free Air-Pan 3D (1 Tangan Pinch + 1 Tangan Fist): menggeser panggung meja bebas pada sumbu X/Y
+    /// serta True Z-Axis Push/Pull absolut (<c>avgPalmScale</c>) mendekat/menjauh kamera dengan batas frustum aktual. Zero-GC.
     /// </summary>
-    public void ApplyTwoHandFreePan(Vector2 panDeltaXY, float desiredPanZ)
+    public void ApplyTwoHandFreePan(Vector2 panDeltaXY, float avgPalmScale, float dt = 0.016f)
     {
         isTwoHandManipulationActive = true;
         if (isTwoHandReleaseFrozen)
@@ -627,7 +684,12 @@ public sealed class AirWeavingStageController : MonoBehaviour
             return;
         }
 
-        targetPanOffset.z = Mathf.Clamp(desiredPanZ, -MaxPanDepthPullCloserZ, MaxPanDepthPushFartherZ);
+        RefreshDynamicPanBounds(lastKnownMainCam, lastKnownWorkbenchDepth, targetZoomScale, targetPanOffset.z);
+        if (avgPalmScale > 0f)
+        {
+            ApplyAnchoredDepthPushPull(avgPalmScale, TwoHandFreePanDepthGainMeters, dt);
+        }
+
         RefreshDynamicPanBounds(lastKnownMainCam, lastKnownWorkbenchDepth, targetZoomScale, targetPanOffset.z);
         targetPanOffset.x = Mathf.Clamp(targetPanOffset.x + panDeltaXY.x, dynamicMinPanX, dynamicMaxPanX);
         targetPanOffset.y = Mathf.Clamp(targetPanOffset.y + panDeltaXY.y, dynamicMinPanY, dynamicMaxPanY);
@@ -743,30 +805,64 @@ public sealed class AirWeavingStageController : MonoBehaviour
             velocityZoom = 0f;
         }
 
-        // 3. Pan Coasting (deadzone lepas tenang & kunci target = current saat pelan)
-        float panSpeed = delayedPanVel.magnitude;
+        // 3A. Pan XY Coasting terpisah dari sumbu Z (deadzone lepas tenang & kunci target = current saat pelan)
+        Vector2 delayedPanXY = new Vector2(delayedPanVel.x, delayedPanVel.y);
+        float panSpeedXY = delayedPanXY.magnitude;
         if (recentCount > 0)
         {
-            float recentPanSpeed = (recentPanSum / recentCount).magnitude;
-            if (recentPanSpeed < CoastReleasePanDeadzoneUnitsPerSec)
+            float invRecent = 1f / recentCount;
+            Vector2 recentPanXY = new Vector2(recentPanSum.x * invRecent, recentPanSum.y * invRecent);
+            float recentPanSpeedXY = recentPanXY.magnitude;
+            if (recentPanSpeedXY < CoastReleasePanDeadzoneUnitsPerSec)
             {
-                panSpeed = 0f;
+                panSpeedXY = 0f;
             }
             else
             {
-                panSpeed = Mathf.Min(panSpeed, recentPanSpeed);
+                panSpeedXY = Mathf.Min(panSpeedXY, recentPanSpeedXY);
             }
         }
 
-        if (panSpeed >= CoastReleasePanDeadzoneUnitsPerSec && delayedPanVel.sqrMagnitude > 0.00001f)
+        if (panSpeedXY >= CoastReleasePanDeadzoneUnitsPerSec && delayedPanXY.sqrMagnitude > 0.00001f)
         {
-            coastPanVelocity = delayedPanVel.normalized * Mathf.Min(panSpeed, MaxCoastPanUnitsPerSec);
+            Vector2 clampedCoastXY = delayedPanXY.normalized * Mathf.Min(panSpeedXY, MaxCoastPanUnitsPerSec);
+            coastPanVelocity.x = clampedCoastXY.x;
+            coastPanVelocity.y = clampedCoastXY.y;
         }
         else
         {
-            coastPanVelocity = Vector3.zero;
-            targetPanOffset = currentPanOffset;
-            velocityPanOffset = Vector3.zero;
+            coastPanVelocity.x = 0f;
+            coastPanVelocity.y = 0f;
+            targetPanOffset.x = currentPanOffset.x;
+            targetPanOffset.y = currentPanOffset.y;
+            velocityPanOffset.x = 0f;
+            velocityPanOffset.y = 0f;
+        }
+
+        // 3B. Depth Z Coasting independen dengan Anti-Kick ketat agar melepas cubitan pasca tarik/dorong Z tidak menghentak
+        float absDepthVel = Mathf.Abs(delayedPanVel.z);
+        if (recentCount > 0)
+        {
+            float recentAbsDepthVel = Mathf.Abs(recentPanSum.z / recentCount);
+            if (recentAbsDepthVel < CoastReleaseDepthDeadzoneMetersPerSec)
+            {
+                absDepthVel = 0f;
+            }
+            else
+            {
+                absDepthVel = Mathf.Min(absDepthVel, recentAbsDepthVel);
+            }
+        }
+
+        if (absDepthVel >= CoastReleaseDepthDeadzoneMetersPerSec)
+        {
+            coastPanVelocity.z = Mathf.Sign(delayedPanVel.z) * Mathf.Min(absDepthVel, MaxCoastDepthMetersPerSec);
+        }
+        else
+        {
+            coastPanVelocity.z = 0f;
+            targetPanOffset.z = currentPanOffset.z;
+            velocityPanOffset.z = 0f;
         }
     }
 
@@ -860,23 +956,28 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 }
 
                 float instZoomVel = Mathf.Clamp((targetZoomScale - prevManipTargetZoomScale) * invDt, -MaxCoastZoomPerSec, MaxCoastZoomPerSec);
-                Vector3 instPanVel = (targetPanOffset - prevManipTargetPanOffset) * invDt;
-                float instPanMagSqr = instPanVel.sqrMagnitude;
-                if (instPanMagSqr > MaxCoastPanUnitsPerSec * MaxCoastPanUnitsPerSec)
+                Vector2 instPanXY = new Vector2(targetPanOffset.x - prevManipTargetPanOffset.x, targetPanOffset.y - prevManipTargetPanOffset.y) * invDt;
+                float instPanXYMagSqr = instPanXY.sqrMagnitude;
+                if (instPanXYMagSqr > MaxCoastPanUnitsPerSec * MaxCoastPanUnitsPerSec)
                 {
-                    instPanVel *= MaxCoastPanUnitsPerSec / Mathf.Sqrt(instPanMagSqr);
+                    instPanXY *= MaxCoastPanUnitsPerSec / Mathf.Sqrt(instPanXYMagSqr);
                 }
+                float instPanZ = Mathf.Clamp((targetPanOffset.z - prevManipTargetPanOffset.z) * invDt, -MaxCoastDepthMetersPerSec, MaxCoastDepthMetersPerSec);
+                Vector3 instPanVel = new Vector3(instPanXY.x, instPanXY.y, instPanZ);
 
                 smoothedManipZoomVel = Mathf.Clamp(
                     Mathf.Lerp(smoothedManipZoomVel, instZoomVel, trackAlpha),
                     -MaxCoastZoomPerSec,
                     MaxCoastZoomPerSec);
                 smoothedManipPanVel = Vector3.Lerp(smoothedManipPanVel, instPanVel, trackAlpha);
-                float panSpeedSqr = smoothedManipPanVel.sqrMagnitude;
-                if (panSpeedSqr > MaxCoastPanUnitsPerSec * MaxCoastPanUnitsPerSec)
+                float smoothPanXYMagSqr = (smoothedManipPanVel.x * smoothedManipPanVel.x) + (smoothedManipPanVel.y * smoothedManipPanVel.y);
+                if (smoothPanXYMagSqr > MaxCoastPanUnitsPerSec * MaxCoastPanUnitsPerSec)
                 {
-                    smoothedManipPanVel *= MaxCoastPanUnitsPerSec / Mathf.Sqrt(panSpeedSqr);
+                    float scaleXY = MaxCoastPanUnitsPerSec / Mathf.Sqrt(smoothPanXYMagSqr);
+                    smoothedManipPanVel.x *= scaleXY;
+                    smoothedManipPanVel.y *= scaleXY;
                 }
+                smoothedManipPanVel.z = Mathf.Clamp(smoothedManipPanVel.z, -MaxCoastDepthMetersPerSec, MaxCoastDepthMetersPerSec);
 
                 velocityHistory[velocityHistoryWriteIdx] = new StageVelocitySample
                 {
@@ -972,14 +1073,14 @@ public sealed class AirWeavingStageController : MonoBehaviour
                     }
 
                     float nextPanZ = targetPanOffset.z + (coastPanVelocity.z * dt);
-                    if (nextPanZ <= -MaxPanDepthPullCloserZ)
+                    if (nextPanZ <= dynamicMinPanZ)
                     {
-                        targetPanOffset.z = -MaxPanDepthPullCloserZ;
+                        targetPanOffset.z = dynamicMinPanZ;
                         coastPanVelocity.z = 0f;
                     }
-                    else if (nextPanZ >= MaxPanDepthPushFartherZ)
+                    else if (nextPanZ >= dynamicMaxPanZ)
                     {
-                        targetPanOffset.z = MaxPanDepthPushFartherZ;
+                        targetPanOffset.z = dynamicMaxPanZ;
                         coastPanVelocity.z = 0f;
                     }
                     else
@@ -999,10 +1100,11 @@ public sealed class AirWeavingStageController : MonoBehaviour
             }
         }
 
-        // Pastikan targetPanOffset tetap aman di dalam batas frustum terkini (mis. pasca zoom-out dari deep inspection)
+        // Perbarui batas frustum X/Y mengikuti kedalaman Z & skala Zoom terkini (termasuk pasca coasting/reset), lalu clamp aman
+        RefreshDynamicPanBounds(mainCam, workbenchDepth, targetZoomScale, targetPanOffset.z);
         targetPanOffset.x = Mathf.Clamp(targetPanOffset.x, dynamicMinPanX, dynamicMaxPanX);
         targetPanOffset.y = Mathf.Clamp(targetPanOffset.y, dynamicMinPanY, dynamicMaxPanY);
-        targetPanOffset.z = Mathf.Clamp(targetPanOffset.z, -MaxPanDepthPullCloserZ, MaxPanDepthPushFartherZ);
+        targetPanOffset.z = Mathf.Clamp(targetPanOffset.z, dynamicMinPanZ, dynamicMaxPanZ);
 
         // 1. Smoothing Quaternion.Slerp eksponensial Air-Orbit 360° + pegas analitik Air-Zoom & Free Air-Pan 3D
         float orbitSlerpAlpha = dt > 0.00001f ? (1f - Mathf.Exp(-OrbitSlerpRate * dt)) : 1f;
@@ -1026,15 +1128,9 @@ public sealed class AirWeavingStageController : MonoBehaviour
         currentParallaxYawDeg = StepCriticallyDampedSpring(currentParallaxYawDeg, desiredParallaxYaw, ref velocityParallaxYaw, ParallaxSpringOmega, dt);
         currentParallaxPitchDeg = StepCriticallyDampedSpring(currentParallaxPitchDeg, desiredParallaxPitch, ref velocityParallaxPitch, ParallaxSpringOmega, dt);
 
-        // 3. Terapkan Transform Pivot HologramStageRoot dengan Quaternion Arcball 360° penuh, Zoom Dekat Ekstrem, & Free Air-Pan 3D:
+        // 3. Terapkan Transform Pivot HologramStageRoot: True Z-Axis (1.55m..6.20m) murni terpisah dari Skala Zoom (0.42x..2.85x)
         Transform camT = mainCam.transform;
-
-        // Saat zoom > 1.0x, majukan juga sedikit pivot Z secara proporsional agar deep inspection terasa benar-benar mendekati objek
-        float zoomApproachZ = currentZoomScale > 1.0f
-            ? -Mathf.Min(1.15f, (currentZoomScale - 1.0f) * 0.58f)
-            : Mathf.Min(0.85f, (1.0f - currentZoomScale) * 0.90f);
-        float minSafePivotZ = Mathf.Max(0.95f, mainCam.nearClipPlane + 0.65f);
-        float effectivePivotZ = Mathf.Clamp(workbenchDepth + currentPanOffset.z + zoomApproachZ, minSafePivotZ, 7.20f);
+        float effectivePivotZ = Mathf.Clamp(workbenchDepth + currentPanOffset.z, dynamicMinStageDepthZ, dynamicMaxStageDepthZ);
 
         stageRootTransform.position = camT.TransformPoint(new Vector3(
             currentPanOffset.x,

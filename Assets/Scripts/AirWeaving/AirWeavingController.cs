@@ -68,7 +68,7 @@ public class AirWeavingController : MonoBehaviour
     private const float MaxHandRigCameraDepth = 5.40f;
     private const float MinNearClipSafeOffsetMeters = 0.28f;
 
-    // Parameter Kontrol 2 Tangan Full Free-View 6-DoF Quaternion Arcball 360° (Both Pinch = Orbit/Roll/Zoom; 1 Pinch + 1 Fist = Free Air-Pan 3D; Both Fist = Reset)
+    // Parameter Kontrol 2 Tangan Full Free-View 6-DoF Quaternion Arcball 360° + True Z-Axis Push/Pull terpisah dari Zoom
     private const float TwoHandOrbitYawDegPerUnit = 60.0f;
     private const float TwoHandOrbitPitchDegPerUnit = 60.0f;
     private const float TwoHandOrbitMaxAxisDeltaPerFrameDeg = 12.0f;
@@ -77,14 +77,20 @@ public class AirWeavingController : MonoBehaviour
     private const float TwoHandOrbitRollMaxDeltaPerFrameDeg = 10.0f;
     private const float TwoHandRollMinSepDist = 0.16f;
     private const float TwoHandRollFullSepDist = 0.46f;
-    private const float TwoHandZoomSensitivity = 0.48f;
+    private const float TwoHandMinPalmScale = AirWeavingStageController.MinSafePalmScale;
+    private const float TwoHandAvgPalmOneEuroMinCutoff = 2.60f;
+    private const float TwoHandAvgPalmOneEuroBeta = 0.45f;
+    private const float TwoHandAvgPalmOneEuroDCutoff = 1.00f;
+    private const float TwoHandAvgPalmOneEuroVelScale = 18.0f;
+    private const float TwoHandZoomSensitivity = 0.65f;
     private const float TwoHandZoomDistEmaRate = 14.0f;
-    private const float TwoHandZoomDistSoftFloor = 0.22f;
+    private const float TwoHandZoomNormSpanSoftFloor = 1.25f;
+    private const float TwoHandZoomNormSpanMinFloor = 0.50f;
+    private const float TwoHandZoomNormSpanInitialFloor = 0.85f;
+    private const float TwoHandZoomRatioMicroDeadzone = 0.025f;
     private const float TwoHandZoomMaxStepRatioPerFrame = 0.06f;
     private const float TwoHandFreePanXYGain = 0.96f;
     private const float TwoHandFreePanMaxDeltaXYPerFrame = 0.20f;
-    private const float TwoHandFreePanDepthGain = 0.65f;
-    private const float TwoHandFreePanDepthSpanMeters = 1.25f;
     private const float TwoHandOrbitConfirmHoldSeconds = 0.040f;
     private const float TwoHandOrbitHoldMaxPinchRatio = 0.66f;
     private const float TwoHandFreePanHoldMinFistBendDeg = 78.0f;
@@ -449,16 +455,15 @@ public class AirWeavingController : MonoBehaviour
     private bool twoHandFreePanPrimaryIsPinch = true;
     private bool twoHandFistResetLatched = false;
     private float twoHandFistResetTimer = 0f;
-    private float twoHandPinchInitialDist = 0.25f;
-    private float twoHandPinchSmoothedDist = 0.25f;
+    private float twoHandPinchInitialNormSpan = 10.0f;
+    private float twoHandPinchSmoothedNormSpan = 10.0f;
     private float twoHandPinchInitialZoom = 1.0f;
     private Vector2 twoHandPinchPrevMidpointXY = Vector2.zero;
     private float twoHandPinchSmoothedLineAngleDeg = 0f;
     private bool wasTwoHandOrbitReleaseFrozen = false;
     private Vector2 twoHandPanPrevMidpointXY = Vector2.zero;
-    private float twoHandPanInitialAvgSpan = AirWeavingHandGestureDetector.DefaultComfortPalmSpan;
-    private float twoHandPanInitialPanZ = 0f;
     private bool wasTwoHandPanReleaseFrozen = false;
+    private OneEuroFilter1D twoHandAvgPalmScaleFilter;
     private float grabStartPalmSpan = AirWeavingHandGestureDetector.DefaultComfortPalmSpan;
     private float grabStartCameraDepth = WorkbenchDepth;
     private bool preGrabWasPlaced = false;
@@ -1531,6 +1536,7 @@ public class AirWeavingController : MonoBehaviour
         twoHandFistResetTimer = 0f;
         wasTwoHandOrbitReleaseFrozen = false;
         wasTwoHandPanReleaseFrozen = false;
+        twoHandAvgPalmScaleFilter.Reset();
         stageController?.SetTwoHandManipulationState(false);
     }
 
@@ -1549,6 +1555,7 @@ public class AirWeavingController : MonoBehaviour
         twoHandFistResetTimer = 0f;
         wasTwoHandOrbitReleaseFrozen = false;
         wasTwoHandPanReleaseFrozen = false;
+        twoHandAvgPalmScaleFilter.Reset();
         stageController?.SetTwoHandManipulationState(false);
     }
 
@@ -1741,7 +1748,7 @@ public class AirWeavingController : MonoBehaviour
                               && (fistDet.IsFistActive || (fistDet.MeanWeightedBendDeg >= TwoHandFreePanHoldMinFistBendDeg && fistDet.FoldedFingerCount >= 2));
             if (holdPinchOk && holdFistOk)
             {
-                StepTwoHandFreePan(twoHandFreePanPrimaryIsPinch, isStarting: false);
+                StepTwoHandFreePan(twoHandFreePanPrimaryIsPinch, dt, isStarting: false);
                 return;
             }
 
@@ -1845,7 +1852,7 @@ public class AirWeavingController : MonoBehaviour
                 activeInteractionHandSlot = -1;
                 if (isRecordingAirDraw) CancelAirDrawStrokeImmediate();
                 if (IsAnyCircleSummonActive) ResetAllCircleSummoners();
-                StepTwoHandFreePan(twoHandFreePanPrimaryIsPinch, isStarting: true);
+                StepTwoHandFreePan(twoHandFreePanPrimaryIsPinch, dt, isStarting: true);
             }
             else
             {
@@ -1899,34 +1906,60 @@ public class AirWeavingController : MonoBehaviour
         stageController?.SetTwoHandManipulationState(false);
     }
 
+    /// <summary>
+    /// Menghitung ukuran telapak rata-rata kedua tangan (<c>avgPalmScale</c>) berbasis <c>FilteredPalmSpan</c> kaku
+    /// dengan penyaringan One-Euro 1D render-rate ringan agar bebas step 30 Hz dan tahan rotasi telapak. Zero-GC.
+    /// </summary>
+    private float SampleSmoothedTwoHandAvgPalmScale(float dt, bool resetFilter)
+    {
+        float span0 = Mathf.Clamp(handGestureDetector.FilteredPalmSpan, TwoHandMinPalmScale, 0.620f);
+        float span1 = Mathf.Clamp(secondaryHandGestureDetector.FilteredPalmSpan, TwoHandMinPalmScale, 0.620f);
+        float rawAvgPalmScale = 0.5f * (span0 + span1);
+        if (resetFilter)
+        {
+            twoHandAvgPalmScaleFilter.Reset();
+        }
+
+        float safeDt = Mathf.Clamp(dt, 0.001f, 0.050f);
+        float smoothed = twoHandAvgPalmScaleFilter.Filter(
+            rawAvgPalmScale,
+            safeDt,
+            TwoHandAvgPalmOneEuroMinCutoff,
+            TwoHandAvgPalmOneEuroBeta,
+            TwoHandAvgPalmOneEuroDCutoff,
+            TwoHandAvgPalmOneEuroVelScale);
+        return Mathf.Clamp(smoothed, TwoHandMinPalmScale, 0.620f);
+    }
+
     private void StepTwoHandOrbitZoom(Camera mainCam, float dt, bool isStarting)
     {
         // Koordinat sudah disatukan pada bidang sinar referensi konsisten (WorkbenchDepth)
         Vector2 p0 = handGestureDetector.PinchPointLocalXY;
         Vector2 p1 = secondaryHandGestureDetector.PinchPointLocalXY;
         Vector2 handVec = p1 - p0;
-        float curDist = Mathf.Max(0.08f, handVec.magnitude);
+        float span2D = Mathf.Max(0.08f, handVec.magnitude);
         Vector2 curMid = (p0 + p1) * 0.5f;
         float curLineAngleDeg = Mathf.Atan2(handVec.y, handVec.x) * Mathf.Rad2Deg;
 
-        float span0 = Mathf.Max(0.055f, handGestureDetector.FilteredPalmSpan);
-        float span1 = Mathf.Max(0.055f, secondaryHandGestureDetector.FilteredPalmSpan);
-        float leftScreenSpan = p0.x <= p1.x ? span0 : span1;
-        float rightScreenSpan = p0.x <= p1.x ? span1 : span0;
+        // Kedalaman absolut 2 tangan (avgPalmScale) terpisah dari Zoom:
+        // normalizedSpan = span2D / avgPalmScale memastikan maju-mundur kedua tangan dengan jarak fisik tetap TIDAK memicu zoom palsu
+        float safeDt = Mathf.Clamp(dt, 0.001f, 0.050f);
+        float avgPalmScale = SampleSmoothedTwoHandAvgPalmScale(safeDt, resetFilter: isStarting);
+        float curNormSpan = span2D / Mathf.Max(avgPalmScale, TwoHandMinPalmScale);
 
         if (isStarting)
         {
-            twoHandPinchInitialDist = Mathf.Max(0.14f, curDist);
-            twoHandPinchSmoothedDist = curDist;
+            twoHandPinchInitialNormSpan = Mathf.Max(TwoHandZoomNormSpanInitialFloor, curNormSpan);
+            twoHandPinchSmoothedNormSpan = curNormSpan;
             twoHandPinchInitialZoom = stageController != null ? stageController.TargetZoomScale : 1f;
             twoHandPinchPrevMidpointXY = curMid;
             twoHandPinchSmoothedLineAngleDeg = curLineAngleDeg;
             wasTwoHandOrbitReleaseFrozen = false;
-            stageController?.BeginTwoHandOrbitZoomAnchor(leftScreenSpan, rightScreenSpan);
+            stageController?.BeginTwoHandManipulationAnchor(avgPalmScale);
         }
         else
         {
-            // Release-Intent Freeze Gate: hentikan seluruh injeksi delta begitu salah satu tangan mulai membuka (>0.50f)
+            // Release-Intent Freeze Gate: hentikan seluruh injeksi delta (Orbit, Roll, Zoom, & Z-Axis) begitu salah satu tangan mulai membuka (>0.50f)
             bool releaseIntentFreeze = !handGestureDetector.IsPinchActive
                                        || !secondaryHandGestureDetector.IsPinchActive
                                        || handGestureDetector.PinchRatio > TwoHandPinchReleaseFreezeRatio
@@ -1945,10 +1978,10 @@ public class AirWeavingController : MonoBehaviour
                 wasTwoHandOrbitReleaseFrozen = false;
                 twoHandPinchPrevMidpointXY = curMid;
                 twoHandPinchSmoothedLineAngleDeg = curLineAngleDeg;
-                twoHandPinchInitialDist = Mathf.Max(0.14f, curDist);
-                twoHandPinchSmoothedDist = curDist;
+                twoHandPinchInitialNormSpan = Mathf.Max(TwoHandZoomNormSpanInitialFloor, curNormSpan);
+                twoHandPinchSmoothedNormSpan = curNormSpan;
                 twoHandPinchInitialZoom = stageController != null ? stageController.TargetZoomScale : 1f;
-                stageController?.ReanchorTwoHandOrbitDepth(leftScreenSpan, rightScreenSpan);
+                stageController?.ReanchorTwoHandDepth(avgPalmScale);
                 stageController?.SetTwoHandReleaseFreeze(false);
                 return;
             }
@@ -1971,9 +2004,8 @@ public class AirWeavingController : MonoBehaviour
 
             // Kemiringan sudut garis antar kedua tangan (roll camT.forward): redaman halus berdasarkan jarak pisah tangan
             // agar tetap stabil saat kedua tangan rapat di satu sisi layar maupun lebar di tepi kiri-kanan.
-            float safeDt = Mathf.Clamp(dt, 0.001f, 0.05f);
             float rollDelta = 0f;
-            float rollSepWeight = Mathf.Clamp01((curDist - TwoHandRollMinSepDist) / (TwoHandRollFullSepDist - TwoHandRollMinSepDist));
+            float rollSepWeight = Mathf.Clamp01((span2D - TwoHandRollMinSepDist) / (TwoHandRollFullSepDist - TwoHandRollMinSepDist));
             if (rollSepWeight > 0.001f)
             {
                 float rollAlpha = 1f - Mathf.Exp(-TwoHandOrbitRollEmaRate * safeDt);
@@ -1990,12 +2022,19 @@ public class AirWeavingController : MonoBehaviour
                 twoHandPinchSmoothedLineAngleDeg = curLineAngleDeg;
             }
 
-            // Zoom kalem & proporsional dengan soft-floor jarak agar mulus baik saat tangan rapat di satu sisi maupun lebar di tepi
+            // Zoom Skala Murni berbasis normalizedSpan terkompensasi kedalaman (span2D / avgPalmScale) + micro-deadzone logaritmik
             float zoomAlpha = 1f - Mathf.Exp(-TwoHandZoomDistEmaRate * safeDt);
-            twoHandPinchSmoothedDist = Mathf.Lerp(twoHandPinchSmoothedDist, curDist, zoomAlpha);
-            float rawZoomRatio = (Mathf.Max(0.08f, twoHandPinchSmoothedDist) + TwoHandZoomDistSoftFloor)
-                                 / (Mathf.Max(0.14f, twoHandPinchInitialDist) + TwoHandZoomDistSoftFloor);
-            float uncappedZoom = twoHandPinchInitialZoom * Mathf.Pow(rawZoomRatio, TwoHandZoomSensitivity);
+            twoHandPinchSmoothedNormSpan = Mathf.Lerp(twoHandPinchSmoothedNormSpan, curNormSpan, zoomAlpha);
+            float rawZoomRatio = (Mathf.Max(TwoHandZoomNormSpanMinFloor, twoHandPinchSmoothedNormSpan) + TwoHandZoomNormSpanSoftFloor)
+                                 / (Mathf.Max(TwoHandZoomNormSpanInitialFloor, twoHandPinchInitialNormSpan) + TwoHandZoomNormSpanSoftFloor);
+            float logZoomRatio = Mathf.Log(Mathf.Max(0.05f, rawZoomRatio));
+            float effectiveLogZoom = 0f;
+            if (Mathf.Abs(logZoomRatio) > TwoHandZoomRatioMicroDeadzone)
+            {
+                effectiveLogZoom = logZoomRatio - (Mathf.Sign(logZoomRatio) * TwoHandZoomRatioMicroDeadzone);
+            }
+
+            float uncappedZoom = twoHandPinchInitialZoom * Mathf.Exp(effectiveLogZoom * TwoHandZoomSensitivity);
             float prevTargetZoom = stageController != null ? Mathf.Max(0.10f, stageController.TargetZoomScale) : twoHandPinchInitialZoom;
             float desiredZoom = Mathf.Clamp(
                 uncappedZoom,
@@ -2007,14 +2046,14 @@ public class AirWeavingController : MonoBehaviour
                 pitchDelta,
                 desiredZoom,
                 curMid,
-                leftScreenSpan,
-                rightScreenSpan,
+                avgPalmScale,
                 rollDelta,
-                mainCam != null ? mainCam.transform : null);
+                mainCam != null ? mainCam.transform : null,
+                safeDt);
         }
     }
 
-    private void StepTwoHandFreePan(bool primaryPinchSecondaryFist, bool isStarting)
+    private void StepTwoHandFreePan(bool primaryPinchSecondaryFist, float dt, bool isStarting)
     {
         Vector2 handA = primaryPinchSecondaryFist
             ? handGestureDetector.PinchPointLocalXY
@@ -2023,23 +2062,22 @@ public class AirWeavingController : MonoBehaviour
             ? secondaryHandGestureDetector.PalmCursorLocalXY
             : secondaryHandGestureDetector.PinchPointLocalXY;
         Vector2 curMid = (handA + handB) * 0.5f;
-        float curAvgSpan = Mathf.Max(
-            0.055f,
-            0.5f * (handGestureDetector.FilteredPalmSpan + secondaryHandGestureDetector.FilteredPalmSpan));
+        float safeDt = Mathf.Clamp(dt, 0.001f, 0.050f);
+        float avgPalmScale = SampleSmoothedTwoHandAvgPalmScale(safeDt, resetFilter: isStarting);
 
         if (isStarting)
         {
             twoHandPanPrevMidpointXY = curMid;
-            twoHandPanInitialAvgSpan = curAvgSpan;
-            twoHandPanInitialPanZ = stageController != null ? stageController.TargetPanOffset.z : 0f;
             wasTwoHandPanReleaseFrozen = false;
-            stageController?.SetTwoHandManipulationState(true);
+            stageController?.BeginTwoHandManipulationAnchor(avgPalmScale);
         }
         else
         {
             AirWeavingHandGestureDetector pinchDet = primaryPinchSecondaryFist ? handGestureDetector : secondaryHandGestureDetector;
             AirWeavingHandGestureDetector fistDet = primaryPinchSecondaryFist ? secondaryHandGestureDetector : handGestureDetector;
-            bool releaseIntentFreeze = pinchDet.PinchRatio > TwoHandPinchReleaseFreezeRatio
+            bool releaseIntentFreeze = !pinchDet.IsPinchActive
+                                       || !fistDet.IsFistActive
+                                       || pinchDet.PinchRatio > TwoHandPinchReleaseFreezeRatio
                                        || pinchDet.IsPinchReleaseIntent
                                        || fistDet.MeanWeightedBendDeg < TwoHandFistReleaseFreezeMaxBendDeg
                                        || fistDet.FoldedFingerCount <= 2;
@@ -2054,25 +2092,27 @@ public class AirWeavingController : MonoBehaviour
             {
                 wasTwoHandPanReleaseFrozen = false;
                 twoHandPanPrevMidpointXY = curMid;
-                twoHandPanInitialAvgSpan = curAvgSpan;
-                twoHandPanInitialPanZ = stageController != null ? stageController.TargetPanOffset.z : 0f;
+                stageController?.ReanchorTwoHandDepth(avgPalmScale);
                 stageController?.SetTwoHandReleaseFreeze(false);
                 return;
             }
 
             stageController?.SetTwoHandReleaseFreeze(false);
 
-            Vector2 panDeltaXY = (curMid - twoHandPanPrevMidpointXY) * TwoHandFreePanXYGain;
+            // Skalakan pan X/Y terhadap kedalaman Z panggung aktual agar geseran 1:1 dengan tangan baik saat dekat (1.55m) maupun jauh (6.20m)
+            float stageDepthRatio = stageController != null
+                ? Mathf.Clamp(stageController.CurrentStageDepthZ / WorkbenchDepth, 0.40f, 1.65f)
+                : 1f;
+            Vector2 panDeltaXY = (curMid - twoHandPanPrevMidpointXY) * (TwoHandFreePanXYGain * stageDepthRatio);
+            float maxDeltaXY = TwoHandFreePanMaxDeltaXYPerFrame * Mathf.Clamp(stageDepthRatio, 0.60f, 1.65f);
             float panDeltaMag = panDeltaXY.magnitude;
-            if (panDeltaMag > TwoHandFreePanMaxDeltaXYPerFrame)
+            if (panDeltaMag > maxDeltaXY)
             {
-                panDeltaXY *= TwoHandFreePanMaxDeltaXYPerFrame / panDeltaMag;
+                panDeltaXY *= maxDeltaXY / panDeltaMag;
             }
             twoHandPanPrevMidpointXY = curMid;
 
-            float spanRatio = Mathf.Pow(curAvgSpan / Mathf.Max(0.055f, twoHandPanInitialAvgSpan), TwoHandFreePanDepthGain);
-            float desiredPanZ = twoHandPanInitialPanZ + ((spanRatio - 1.0f) * TwoHandFreePanDepthSpanMeters);
-            stageController?.ApplyTwoHandFreePan(panDeltaXY, desiredPanZ);
+            stageController?.ApplyTwoHandFreePan(panDeltaXY, avgPalmScale, safeDt);
         }
     }
 
