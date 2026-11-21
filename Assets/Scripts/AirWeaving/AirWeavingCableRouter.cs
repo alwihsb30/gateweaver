@@ -63,6 +63,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private const float SocketBaseRadius = 0.039f;
     private const float SocketScaleBlendSpeed = 16.0f;
     private const float DragColorBlendSpeed = 18.0f;
+    private const float LiveDragTipFreeSpringOmega = 24.0f;
+    private const float LiveDragTipSnapSpringOmega = 34.0f;
 
     // Pool Zero-GC 60 Pulsing Signal Packets 3D (kapsul energi ramping sejajar tangen kurva tabung 3D)
     private const int PacketsPerCable = 3;
@@ -235,6 +237,11 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private int snappedTargetPortIndex = -1;
     private Vector3 lastValidPinchWorldPos = Vector3.zero;
     private bool hasLastValidPinchWorld = false;
+    private Vector3 smoothedLiveDragTipWorld = Vector3.zero;
+    private Vector3 liveDragTipVelocity = Vector3.zero;
+    private bool hasSmoothedLiveDragTip = false;
+    private bool hasUnpluggedEdgeBackup = false;
+    private ManualConnectionEdge unpluggedEdgeBackup;
 
     // Warna transisi dinamis Live Drag Tube (halus tanpa alokasi)
     private Color currentDragAlbedo = DragFreeAlbedo;
@@ -337,16 +344,19 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     }
 
     /// <summary>
-    /// Mengembalikan posisi ujung seret, panjang kabel aktif, &amp; status kunci port sasaran untuk continuous CableDragHum (Zero-GC).
+    /// Mengembalikan posisi ujung seret yang sudah dihaluskan, panjang kabel aktif, &amp; status kunci port sasaran
+    /// untuk continuous CableDragHum (Zero-GC).
     /// </summary>
     public bool TryGetActiveDragFeedback(out Vector3 tipWorldPos, out float dragLength, out bool isLockedTarget)
     {
         if (isDraggingCable && dragOriginNode != null)
         {
             isLockedTarget = snappedTargetPortIndex >= 0 && snappedTargetPortIndex < activePorts.Count;
-            tipWorldPos = isLockedTarget
-                ? activePorts[snappedTargetPortIndex].handleWorldPos
-                : (hasLastValidPinchWorld ? lastValidPinchWorldPos : dragOriginNode.transform.position);
+            tipWorldPos = hasSmoothedLiveDragTip
+                ? smoothedLiveDragTipWorld
+                : (isLockedTarget
+                    ? activePorts[snappedTargetPortIndex].handleWorldPos
+                    : (hasLastValidPinchWorld ? lastValidPinchWorldPos : dragOriginNode.transform.position));
 
             Vector3 startWorld = TryGetPortHandleWorldPos(dragOriginNode, dragFromOutput, dragOriginSlot, out Vector3 originHandle)
                 ? originHandle
@@ -511,10 +521,38 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Membatalkan CableDrag yang baru saja mulai saat pengguna meng-upgrade mulus ke mode 2 tangan,
+    /// sambil mengembalikan kabel yang sempat tercabut (unplug) agar tidak ada kabel hilang. Zero-GC.
+    /// </summary>
+    public void RevertActiveDragForTwoHandUpgrade(CircuitManager circuitManager)
+    {
+        if (isDraggingCable
+            && dragStartedByUnplug
+            && hasUnpluggedEdgeBackup
+            && unpluggedEdgeBackup.source != null
+            && unpluggedEdgeBackup.target != null
+            && unpluggedEdgeBackup.source.isTracked
+            && unpluggedEdgeBackup.target.isTracked
+            && FindWireByTargetSlot(unpluggedEdgeBackup.target, unpluggedEdgeBackup.targetSlotIndex) < 0
+            && wires.Count < MaxCableBeams)
+        {
+            wires.Add(unpluggedEdgeBackup);
+            TopologyVersion++;
+            if (circuitManager != null)
+            {
+                circuitManager.SetManualConnections(wires);
+            }
+        }
+
+        CancelActiveDrag();
+    }
+
     public void CancelActiveDrag()
     {
         isDraggingCable = false;
         dragStartedByUnplug = false;
+        hasUnpluggedEdgeBackup = false;
         isHoveringInvalidTargetDuringDrag = false;
         dragOriginNode = null;
         dragOriginSlot = 0;
@@ -528,6 +566,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         lastLockedTargetNode = null;
         lastLockedTargetIsOutput = false;
         lastLockedTargetSlot = -1;
+        hasSmoothedLiveDragTip = false;
+        liveDragTipVelocity = Vector3.zero;
         if (liveDragTube != null && liveDragTube.meshRenderer != null)
         {
             liveDragTube.meshRenderer.enabled = false;
@@ -764,9 +804,43 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
         }
 
-        // 4. Perbarui seluruh Soket Port 3D, Kabel Tabung 3D Live Drag, & 100% Kabel Tabung 3D Terpasang + Paket Sinyal
+        // 4. Perbarui damping ujung kabel aktif berbasis dt (licin, berat, presisi tanpa teleportasi saat snap/unsnap)
+        if (isDraggingCable)
+        {
+            bool snappedNow = snappedTargetPortIndex >= 0 && snappedTargetPortIndex < activePorts.Count;
+            Vector3 desiredTipWorld = snappedNow
+                ? activePorts[snappedTargetPortIndex].handleWorldPos
+                : (hasLastValidPinchWorld ? lastValidPinchWorldPos : assistedPinchWorldPos);
+            if (!hasSmoothedLiveDragTip)
+            {
+                smoothedLiveDragTipWorld = desiredTipWorld;
+                liveDragTipVelocity = Vector3.zero;
+                hasSmoothedLiveDragTip = true;
+            }
+            else
+            {
+                float safeTipDt = Mathf.Clamp(dt, 0.0001f, 0.050f);
+                float tipOmega = snappedNow ? LiveDragTipSnapSpringOmega : LiveDragTipFreeSpringOmega;
+                smoothedLiveDragTipWorld = StepCriticallyDampedSpring3D(
+                    smoothedLiveDragTipWorld,
+                    desiredTipWorld,
+                    ref liveDragTipVelocity,
+                    tipOmega,
+                    safeTipDt);
+            }
+        }
+        else
+        {
+            hasSmoothedLiveDragTip = false;
+            liveDragTipVelocity = Vector3.zero;
+        }
+
+        // 5. Perbarui seluruh Soket Port 3D, Kabel Tabung 3D Live Drag, & 100% Kabel Tabung 3D Terpasang + Paket Sinyal
+        Vector3 dragRenderTipWorld = hasSmoothedLiveDragTip
+            ? smoothedLiveDragTipWorld
+            : (hasLastValidPinchWorld ? lastValidPinchWorldPos : assistedPinchWorldPos);
         RenderPortSockets(camT, stageRoot, circuitManager, (isHandDetected || hasSecondaryHoverHand) && !hardBlocked, zoomClamp);
-        RenderLiveDragTube(camT, stageRoot, zoomClamp, hasLastValidPinchWorld ? lastValidPinchWorldPos : assistedPinchWorldPos);
+        RenderLiveDragTube(camT, stageRoot, zoomClamp, dragRenderTipWorld);
         RenderAllUniformTubeCables(camT, stageRoot, zoomClamp);
     }
 
@@ -807,8 +881,11 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
         }
 
+        Vector3 dragRenderTipWorld = hasSmoothedLiveDragTip
+            ? smoothedLiveDragTipWorld
+            : (hasLastValidPinchWorld ? lastValidPinchWorldPos : pinchWorldPos);
         RenderPortSockets(camT, stageRoot, circuitManager, allowHoverHighlight, zoomClamp);
-        RenderLiveDragTube(camT, stageRoot, zoomClamp, hasLastValidPinchWorld ? lastValidPinchWorldPos : pinchWorldPos);
+        RenderLiveDragTube(camT, stageRoot, zoomClamp, dragRenderTipWorld);
         RenderAllUniformTubeCables(camT, stageRoot, zoomClamp);
     }
 
@@ -823,6 +900,10 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         currentDragEmission = DragFreeEmission;
         currentDragRadius = TubeRadiusDragFree;
         isHoveringInvalidTargetDuringDrag = false;
+        smoothedLiveDragTipWorld = port.handleWorldPos;
+        liveDragTipVelocity = Vector3.zero;
+        hasSmoothedLiveDragTip = true;
+        hasUnpluggedEdgeBackup = false;
 
         if (port.isOutput)
         {
@@ -846,6 +927,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         if (existingIdx >= 0)
         {
             ManualConnectionEdge oldEdge = wires[existingIdx];
+            unpluggedEdgeBackup = oldEdge;
+            hasUnpluggedEdgeBackup = true;
             wires.RemoveAt(existingIdx);
             TopologyVersion++;
             DisableCableTubesAndPacketsFrom(wires.Count);
@@ -1742,6 +1825,20 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
     }
 
+    private static Vector3 StepCriticallyDampedSpring3D(Vector3 current, Vector3 target, ref Vector3 velocity, float omega, float dt)
+    {
+        if (dt <= 0.00001f)
+        {
+            return current;
+        }
+
+        Vector3 delta = current - target;
+        Vector3 temp = (velocity + (delta * omega)) * dt;
+        float exp = Mathf.Exp(-omega * dt);
+        velocity = (velocity - (temp * omega)) * exp;
+        return target + ((delta + temp) * exp);
+    }
+
     /// <summary>
     /// Merender Kabel Tabung 3D PBR Live Drag (<c>Pinch</c>) dengan transisi warna dinamis:
     /// sian elektrik saat bebas, emas menyala saat mengunci target kompatibel, merah saat target invalid/batal. Zero-GC.
@@ -1774,9 +1871,18 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
 
         bool snapped = snappedTargetPortIndex >= 0 && snappedTargetPortIndex < activePorts.Count;
-        Vector3 endWorld = snapped
-            ? activePorts[snappedTargetPortIndex].handleWorldPos
-            : pinchWorldPos;
+        Vector3 endWorld;
+        if (snapped)
+        {
+            Vector3 targetHandle = activePorts[snappedTargetPortIndex].handleWorldPos;
+            endWorld = (hasSmoothedLiveDragTip && Vector3.SqrMagnitude(pinchWorldPos - targetHandle) > 0.000225f)
+                ? pinchWorldPos
+                : targetHandle;
+        }
+        else
+        {
+            endWorld = pinchWorldPos;
+        }
 
         float dist = Vector3.Distance(startWorld, endWorld);
         if (dist < 0.008f)

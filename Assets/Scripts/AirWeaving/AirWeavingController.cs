@@ -31,7 +31,7 @@ public class AirWeavingController : MonoBehaviour
     private const int RequestedCamWidth = 480;
     private const int RequestedCamHeight = 360;
     private const int RequestedCamFps = 30;
-    private const int MaxInferenceLongEdge = 256;
+    private const int MaxInferenceLongEdge = 384;
     private const int LandmarkCount = 21;
 
     private const float VuforiaReleaseDelaySeconds = 0.45f;
@@ -75,35 +75,44 @@ public class AirWeavingController : MonoBehaviour
     private const float TwoHandOrbitRollGain = 0.65f;
     private const float TwoHandOrbitRollEmaRate = 18.0f;
     private const float TwoHandOrbitRollMaxDeltaPerFrameDeg = 10.0f;
+    private const float TwoHandRollMinSepDist = 0.16f;
+    private const float TwoHandRollFullSepDist = 0.46f;
     private const float TwoHandZoomSensitivity = 0.48f;
     private const float TwoHandZoomDistEmaRate = 14.0f;
+    private const float TwoHandZoomDistSoftFloor = 0.22f;
     private const float TwoHandZoomMaxStepRatioPerFrame = 0.06f;
-    private const float TwoHandFreePanXYGain = 0.85f;
-    private const float TwoHandFreePanMaxDeltaXYPerFrame = 0.14f;
+    private const float TwoHandFreePanXYGain = 0.96f;
+    private const float TwoHandFreePanMaxDeltaXYPerFrame = 0.20f;
     private const float TwoHandFreePanDepthGain = 0.65f;
     private const float TwoHandFreePanDepthSpanMeters = 1.25f;
     private const float TwoHandOrbitConfirmHoldSeconds = 0.040f;
     private const float TwoHandOrbitHoldMaxPinchRatio = 0.66f;
+    private const float TwoHandFreePanHoldMinFistBendDeg = 78.0f;
     private const float TwoHandPinchReleaseFreezeRatio = 0.50f;
     private const float TwoHandFistReleaseFreezeMaxBendDeg = 92.0f;
-    private const float TwoHandFreePanConfirmHoldSeconds = 0.110f;
+    private const float TwoHandFreePanConfirmHoldSeconds = 0.055f;
+    private const float TwoHandIntentGraceMaxSeconds = 0.220f;
+    private const float TwoHandSingleHandUpgradeWindowSeconds = 0.190f;
     private const float TwoHandFistResetHoldSeconds = 0.55f;
 
-    // Parameter Quality Gate, Stabilisasi Dual-Hand, Exclusive Gesture Arbiter, & Velocity Gate (Tahap 5.5 v8.0)
-    private const float MediaPipeMinHandConfidence = 0.65f;
+    // Parameter Quality Gate, Stabilisasi Dual-Hand, Exclusive Gesture Arbiter, & Confidence Bertingkat MediaPipe (Tahap 5.5+)
+    private const float MediaPipeMinHandDetectionConfidence = 0.52f;
+    private const float MediaPipeMinHandPresenceConfidence = 0.50f;
+    private const float MediaPipeMinTrackingConfidence = 0.42f;
     private const float MinCandidateRawPalmScale = 0.035f;
     private const float HandednessConfidenceThreshold = 0.70f;
-    private const float HandAssociationMaxDistNorm = 0.34f;
-    private const float HandAssociationMatchedHandednessMaxDistNorm = 0.45f;
-    private const float HandFrameDropGraceSeconds = 0.100f;
+    private const float HandAssociationMaxDistNorm = 0.36f;
+    private const float HandAssociationMatchedHandednessMaxDistNorm = 0.48f;
+    private const float HandFrameDropGraceSeconds = 0.120f;
     private const float CrossGestureNeutralCooldownSeconds = 0.120f;
     private const float CablePinchEnterMaxSpeed = 1.65f;
     private const float GateGrabEnterMaxSpeed = 1.85f;
     private const float InputSwitchEnterMaxSpeed = 1.25f;
 
-    // Critically Damped Spring-Damper analitik & Elastic Scale Pop (Tahap 4.5 v8.0 + Inertial Coasting Tahap 4.9)
-    private const float GateDragSpringOmega = 30.0f;
-    private const float GateLiftZSpringOmega = 26.0f;
+    // Critically Damped Spring-Damper analitik & Elastic Scale Pop (damping licin, berat, dan konsisten berbasis dt)
+    private const float GateDragSpringOmega = 21.0f;
+    private const float GateDragTargetDampRate = 24.0f;
+    private const float GateLiftZSpringOmega = 19.0f;
     private const float GateScaleSpringOmega = 22.0f;
     private const float GateSettleSpringOmega = 22.0f;
     private const float DragVelocityTiltDegPerUnitSec = 11.5f;
@@ -122,13 +131,7 @@ public class AirWeavingController : MonoBehaviour
     private const float SoftMagnetMaxHandSpeed = InputSwitchEnterMaxSpeed;
     private const float SoftMagnetOffsetBlendSpeed = 18.0f;
 
-    // One-Euro Filter tunggal per-landmark (zero-GC, kalibrasi responsif Tahap 3 v8.0: minCutoff=1.3, beta=0.22, dCutoff=2.0)
-    private const float OneEuroMinCutoff = 1.3f;
-    private const float OneEuroBeta = 0.22f;
-    private const float OneEuroDCutoff = 2.0f;
-    private const float OneEuroCoordScale = 100.0f;
-    private const float OneEuroZMinCutoff = 2.2f;
-    private const float OneEuroZBeta = 0.02f;
+    // Batas dt sampel untuk One-Euro Filter 3D (filter berjalan bersih di AirWeavingHandGestureDetector & AirWeavingHologramVisual)
     private const float OneEuroMinDtSeconds = 0.005f;
     private const float OneEuroMaxDtSeconds = 0.200f;
     private const float TwoPi = 6.283185307f;
@@ -243,63 +246,6 @@ public class AirWeavingController : MonoBehaviour
     private static byte[] cachedModelBytes;
     private static bool protobufLogHandlerActive = false;
 
-    private struct OneEuroScalarFilter
-    {
-        private bool initialized;
-        private float xPrev;
-        private float dxPrev;
-
-        public void Reset()
-        {
-            initialized = false;
-            xPrev = 0f;
-            dxPrev = 0f;
-        }
-
-        public float Filter(float value, float dt, float minCutoff, float beta, float dCutoff)
-        {
-            if (!initialized)
-            {
-                initialized = true;
-                xPrev = value;
-                dxPrev = 0f;
-                return value;
-            }
-
-            float rawDx = (value - xPrev) / dt;
-            float alphaD = ComputeAlpha(dt, dCutoff);
-            float smoothedDx = dxPrev + (alphaD * (rawDx - dxPrev));
-
-            float adaptiveCutoff = minCutoff + (beta * Mathf.Abs(smoothedDx));
-            float alphaX = ComputeAlpha(dt, adaptiveCutoff);
-            float filtered = xPrev + (alphaX * (value - xPrev));
-
-            xPrev = filtered;
-            dxPrev = smoothedDx;
-            return filtered;
-        }
-
-        private static float ComputeAlpha(float dt, float cutoffHz)
-        {
-            float omegaDt = TwoPi * cutoffHz * dt;
-            return omegaDt / (1f + omegaDt);
-        }
-    }
-
-    private struct OneEuroLandmarkFilter
-    {
-        public OneEuroScalarFilter x;
-        public OneEuroScalarFilter y;
-        public OneEuroScalarFilter z;
-
-        public void Reset()
-        {
-            x.Reset();
-            y.Reset();
-            z.Reset();
-        }
-    }
-
     private struct ElasticScalePop
     {
         private const float DecayRate = 9.0f;
@@ -391,6 +337,8 @@ public class AirWeavingController : MonoBehaviour
         public bool isCoasting;
         public Vector2 currentInertiaTiltDeg;
         public Vector2 velocityTiltDeg;
+        public Vector2 smoothedDragTargetXZ;
+        public float smoothedDragTargetY;
         public ElasticScalePop scalePop;
 
         public void ResetSpringState()
@@ -403,6 +351,8 @@ public class AirWeavingController : MonoBehaviour
             isCoasting = false;
             currentInertiaTiltDeg = Vector2.zero;
             velocityTiltDeg = Vector2.zero;
+            smoothedDragTargetXZ = currentLocalXY;
+            smoothedDragTargetY = currentLocalZ;
             scalePop.Reset();
         }
     }
@@ -468,10 +418,8 @@ public class AirWeavingController : MonoBehaviour
         Right = 2
     }
 
-    private readonly Vector3[] smoothedLandmarksWorld = new Vector3[LandmarkCount];
-    private readonly Vector3[] secondarySmoothedLandmarksWorld = new Vector3[LandmarkCount];
-    private readonly OneEuroLandmarkFilter[] landmarkOneEuroFilters = new OneEuroLandmarkFilter[LandmarkCount];
-    private readonly OneEuroLandmarkFilter[] secondaryLandmarkOneEuroFilters = new OneEuroLandmarkFilter[LandmarkCount];
+    private readonly Vector3[] rawLandmarksWorld = new Vector3[LandmarkCount];
+    private readonly Vector3[] secondaryRawLandmarksWorld = new Vector3[LandmarkCount];
     private readonly int[] validHandSourceIndices = new int[2];
     private long lastPrimaryFilterTimestampMs = 0;
     private long lastSecondaryFilterTimestampMs = 0;
@@ -488,14 +436,17 @@ public class AirWeavingController : MonoBehaviour
     private readonly Vector3[] pinchRingPoints = new Vector3[PinchRingSegments];
     private readonly Vector3[] hoverRingPoints = new Vector3[HoverRingSegments];
 
-    // State Exclusive Gesture Arbiter (Ambidextrous: activeInteractionHandSlot 0=primer, 1=sekunder, -1=bebas) + Kontrol 2 Tangan 6-DoF
+    // State Exclusive Gesture Arbiter (Ambidextrous: activeInteractionHandSlot 0=primer, 1=sekunder, -1=bebas) + Kontrol 2 Tangan Global 6-DoF
     private ActiveInteractionMode activeInteractionMode = ActiveInteractionMode.Idle;
     private int activeInteractionHandSlot = -1;
     private int activeCableHoverHandSlot = -1;
     private float neutralCooldownTimer = 0f;
+    private float singleHandModeEnteredTime = -10f;
     private float twoHandOrbitConfirmTimer = 0f;
     private float twoHandFreePanConfirmTimer = 0f;
+    private float twoHandIntentPendingTimer = 0f;
     private bool isTwoHandConfirming = false;
+    private bool twoHandFreePanPrimaryIsPinch = true;
     private bool twoHandFistResetLatched = false;
     private float twoHandFistResetTimer = 0f;
     private float twoHandPinchInitialDist = 0.25f;
@@ -510,6 +461,11 @@ public class AirWeavingController : MonoBehaviour
     private bool wasTwoHandPanReleaseFrozen = false;
     private float grabStartPalmSpan = AirWeavingHandGestureDetector.DefaultComfortPalmSpan;
     private float grabStartCameraDepth = WorkbenchDepth;
+    private bool preGrabWasPlaced = false;
+    private Vector2 preGrabPlacedLocalXY = Vector2.zero;
+    private Vector2 preGrabCurrentLocalXY = Vector2.zero;
+    private float preGrabLocalZ = BaseHoverHeight;
+    private float preGrabScale = ActiveGateScale;
 
     private bool IsTwoHandOrbitZoomActive => activeInteractionMode == ActiveInteractionMode.TwoHandOrbitZoom;
     private bool IsTwoHandFreePanActive => activeInteractionMode == ActiveInteractionMode.TwoHandFreePan;
@@ -577,10 +533,13 @@ public class AirWeavingController : MonoBehaviour
     private LineRenderer hoverHighlightRingRenderer;
     private LineRenderer airDrawStrokeRenderer;
 
-    private readonly List<Material> ownedMaterials = new List<Material>(16);
+    private readonly List<Material> ownedMaterials = new List<Material>(20);
     private Material jointBaseMat;
     private Material jointTipMat;
     private Material boneMat;
+    private Material secondaryJointBaseMat;
+    private Material secondaryJointTipMat;
+    private Material secondaryBoneMat;
     private Material trailMat;
     private Material pinchRingMat;
     private Material hoverRingMat;
@@ -692,7 +651,7 @@ public class AirWeavingController : MonoBehaviour
 
     private Vector3 GetHandIndexTipWorldPosition(int handSlot)
     {
-        return handSlot == 1 ? secondarySmoothedLandmarksWorld[8] : smoothedLandmarksWorld[8];
+        return GetHandDetector(handSlot).IndexTipWorldPosition;
     }
 
     private void ResetAllCircleSummoners()
@@ -931,8 +890,9 @@ public class AirWeavingController : MonoBehaviour
         bool isPinchStickyDrag = isTwoHandPinchSticky || (isSingleHandPinchSticky && activeInteractionHandSlot == 0);
         bool isSecFistStickyDrag = isTwoHandFistSticky || (isSingleHandFistSticky && activeInteractionHandSlot == 1);
         bool isSecPinchStickyDrag = isTwoHandPinchSticky || (isSingleHandPinchSticky && activeInteractionHandSlot == 1);
-        handGestureDetector.TickTemporalState(dt, isHandDetected, isFistStickyDrag, isPinchStickyDrag);
-        secondaryHandGestureDetector.TickTemporalState(dt, isSecondaryHandDetected, isSecFistStickyDrag, isSecPinchStickyDrag);
+        bool twoHandsVisibleForEdgeRelax = isHandDetected && isSecondaryHandDetected;
+        handGestureDetector.TickTemporalState(dt, isHandDetected, isFistStickyDrag, isPinchStickyDrag, twoHandsVisibleForEdgeRelax);
+        secondaryHandGestureDetector.TickTemporalState(dt, isSecondaryHandDetected, isSecFistStickyDrag, isSecPinchStickyDrag, twoHandsVisibleForEdgeRelax);
         UpdateTwoHandStageManipulation(mainCam, dt);
         if (stageController != null)
         {
@@ -977,7 +937,7 @@ public class AirWeavingController : MonoBehaviour
         UpdateHoverSfxFeedback(dt);
         UpdateContinuousHumFeedback(mainCam, dt);
         UpdateWorkbenchGuideVisuals(mainCam);
-        UpdateHologramVisuals(mainCam);
+        UpdateHologramVisuals(mainCam, dt);
         UpdateCircleSummonVisuals(mainCam, dt);
         UpdateOutputSpatialTrigger(mainCam, dt);
         UpdateAirWeavingStatusFeedback();
@@ -1490,9 +1450,9 @@ public class AirWeavingController : MonoBehaviour
                 baseOptions: baseOptions,
                 runningMode: RunningMode.VIDEO,
                 numHands: 2,
-                minHandDetectionConfidence: MediaPipeMinHandConfidence,
-                minHandPresenceConfidence: MediaPipeMinHandConfidence,
-                minTrackingConfidence: MediaPipeMinHandConfidence);
+                minHandDetectionConfidence: MediaPipeMinHandDetectionConfidence,
+                minHandPresenceConfidence: MediaPipeMinHandPresenceConfidence,
+                minTrackingConfidence: MediaPipeMinTrackingConfidence);
 
             handLandmarker = HandLandmarker.CreateFromOptions(options);
             cachedResult = HandLandmarkerResult.Alloc(2);
@@ -1561,9 +1521,12 @@ public class AirWeavingController : MonoBehaviour
         activeInteractionMode = ActiveInteractionMode.Idle;
         activeInteractionHandSlot = -1;
         neutralCooldownTimer = 0f;
+        singleHandModeEnteredTime = -10f;
         twoHandOrbitConfirmTimer = 0f;
         twoHandFreePanConfirmTimer = 0f;
+        twoHandIntentPendingTimer = 0f;
         isTwoHandConfirming = false;
+        twoHandFreePanPrimaryIsPinch = true;
         twoHandFistResetLatched = false;
         twoHandFistResetTimer = 0f;
         wasTwoHandOrbitReleaseFrozen = false;
@@ -1580,6 +1543,7 @@ public class AirWeavingController : MonoBehaviour
         }
         twoHandOrbitConfirmTimer = 0f;
         twoHandFreePanConfirmTimer = 0f;
+        twoHandIntentPendingTimer = 0f;
         isTwoHandConfirming = false;
         twoHandFistResetLatched = false;
         twoHandFistResetTimer = 0f;
@@ -1594,6 +1558,7 @@ public class AirWeavingController : MonoBehaviour
         {
             activeInteractionMode = ActiveInteractionMode.Idle;
             activeInteractionHandSlot = -1;
+            singleHandModeEnteredTime = -10f;
         }
         if (triggerNeutralCooldown)
         {
@@ -1602,12 +1567,67 @@ public class AirWeavingController : MonoBehaviour
     }
 
     /// <summary>
-    /// Kontrol 2 Tangan Full Free-View 6-DoF dengan Exclusive Gesture Arbiter (Tahap 5.5 v8.0, Zero-GC):
-    /// - Dilarang membajak mode aktif 1-tangan (GateGrab / CableDrag / InputSwitch / CircleSummon / OutputHold).
-    /// - Both Hands Pinch: wajib kedua tangan <c>IsPinchActive &amp;&amp; !IsFistActive</c> stabil &gt;= 40 ms (tanpa bypass PinchRatio mentah).
-    /// - Free Air-Pan 3D: 1 Pinch murni + 1 Fist murni stabil &gt;= 110 ms.
-    /// - Both Hands Fist: 2 Fist murni tahan 550 ms untuk reset panggung.
-    /// - Release-Intent Freeze Gate (&gt;0.50f / IsPinchReleaseIntent) membekukan injeksi delta &amp; coasting anti-kick sebelum keluar.
+    /// Membatalkan aksi 1-tangan yang baru saja mulai dalam jendela grace singkat (&lt;= 190 ms) tanpa efek samping
+    /// (mengembalikan gerbang/kabel yang baru disentuh) agar mode 2 tangan global mengambil alih secara mulus. Zero-GC.
+    /// </summary>
+    private void RevertSingleHandForTwoHandUpgrade(Camera mainCam)
+    {
+        if (activeInteractionMode == ActiveInteractionMode.CableDrag)
+        {
+            cableRouter?.RevertActiveDragForTwoHandUpgrade(circuitManager);
+        }
+        else if (activeInteractionMode == ActiveInteractionMode.GateGrab
+                 && grabbedGateSlotIndex >= 0
+                 && grabbedGateSlotIndex < gateSlots.Count)
+        {
+            WorkbenchGateSlot slot = gateSlots[grabbedGateSlotIndex];
+            if (slot != null)
+            {
+                slot.isPlacedOnWorkbench = preGrabWasPlaced;
+                slot.placedLocalXY = preGrabPlacedLocalXY;
+                slot.currentLocalXY = preGrabCurrentLocalXY;
+                slot.currentLocalZ = preGrabLocalZ;
+                slot.currentScale = preGrabScale;
+                slot.ResetSpringState();
+            }
+            grabbedGateSlotIndex = -1;
+            wasGrabbedGateInDeleteZone = false;
+        }
+        else if (activeInteractionMode == ActiveInteractionMode.CircleSummon)
+        {
+            ResetAllCircleSummoners();
+        }
+        else if (activeInteractionMode == ActiveInteractionMode.InputSwitch)
+        {
+            inputADwellTimers[0] = 0f;
+            inputADwellTimers[1] = 0f;
+            inputBDwellTimers[0] = 0f;
+            inputBDwellTimers[1] = 0f;
+        }
+
+        if (isRecordingAirDraw)
+        {
+            CancelAirDrawStrokeImmediate();
+        }
+        activeInteractionMode = ActiveInteractionMode.Idle;
+        activeInteractionHandSlot = -1;
+        singleHandModeEnteredTime = -10f;
+        neutralCooldownTimer = 0f;
+        if (mainCam != null)
+        {
+            SetHoverRingVisible(false);
+        }
+    }
+
+    /// <summary>
+    /// Kontrol 2 Tangan Full Free-View 6-DoF Global di Seluruh Layar Kamera (Tahap 5.5+ Zero-GC):
+    /// - 100% bebas lokasi: bekerja di ruang kosong mana pun, pinggir layar, maupun di atas hologram/objek.
+    /// - Prioritas 2-tangan anti-bajak: jeda pra-niat saat kedua tangan mulai membentuk gestur 2 tangan + upgrade mulus
+    ///   dari aksi 1-tangan yang baru mulai &lt;= 190 ms; setelah &gt; 190 ms aksi 1-tangan tetap terkunci aman oleh Arbiter.
+    /// - Tidak pernah membatalkan mode 2 tangan yang sudah aktif hanya karena salah satu tangan mendekati tepi layar.
+    /// - Both Hands Pinch: Orbit 360° Quaternion Arcball + Roll + Zoom.
+    /// - Free Air-Pan 3D: 1 Pinch + 1 Fist (dengan hold hysteresis &amp; Anti-Kick Release Gate).
+    /// - Both Hands Fist: tahan 550 ms untuk reset panggung.
     /// </summary>
     private void UpdateTwoHandStageManipulation(Camera mainCam, float dt)
     {
@@ -1622,21 +1642,7 @@ public class AirWeavingController : MonoBehaviour
             }
             twoHandOrbitConfirmTimer = 0f;
             twoHandFreePanConfirmTimer = 0f;
-            twoHandFistResetTimer = 0f;
-            twoHandFistResetLatched = false;
-            wasTwoHandOrbitReleaseFrozen = false;
-            wasTwoHandPanReleaseFrozen = false;
-            stageController?.SetTwoHandManipulationState(false);
-            return;
-        }
-
-        // Kunci Eksklusif Arbiter: bila 1 tangan sedang memegang gerbang, menyeret kabel, menyentuh sakelar,
-        // menggambar Circle Summon, atau menahan Output -> tangan kedua DILARANG membajak atau membatalkannya!
-        bool lockedBySingleHandMode = activeInteractionMode != ActiveInteractionMode.Idle && !IsAnyTwoHandModeActive;
-        if (lockedBySingleHandMode)
-        {
-            twoHandOrbitConfirmTimer = 0f;
-            twoHandFreePanConfirmTimer = 0f;
+            twoHandIntentPendingTimer = 0f;
             twoHandFistResetTimer = 0f;
             twoHandFistResetLatched = false;
             wasTwoHandOrbitReleaseFrozen = false;
@@ -1654,6 +1660,7 @@ public class AirWeavingController : MonoBehaviour
             }
             twoHandOrbitConfirmTimer = 0f;
             twoHandFreePanConfirmTimer = 0f;
+            twoHandIntentPendingTimer = 0f;
             twoHandFistResetTimer = 0f;
             twoHandFistResetLatched = false;
             wasTwoHandOrbitReleaseFrozen = false;
@@ -1662,7 +1669,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // Predikat anatomi murni (nol bypass PinchRatio < 0.48f)
+        // Predikat anatomi murni (nol lokasi pembatas — berlaku global di seluruh layar kamera)
         bool primaryPurePinch = handGestureDetector.IsPinchActive && !handGestureDetector.IsFistActive;
         bool secondaryPurePinch = secondaryHandGestureDetector.IsPinchActive && !secondaryHandGestureDetector.IsFistActive;
         bool primaryPureFist = handGestureDetector.IsFistActive && !handGestureDetector.IsPinchActive;
@@ -1674,9 +1681,41 @@ public class AirWeavingController : MonoBehaviour
         bool validFreePanPose = primaryPinchSecondaryFist || primaryFistSecondaryPinch;
         bool bothPureFists = primaryPureFist && secondaryPureFist;
 
-        // 1. Kelanjutan mode 2-tangan yang SUDAH terkunci (dilarang loncat paksa antar-mode 2-tangan)
+        // Kunci Eksklusif Arbiter: lindungi aksi 1-tangan yang sedang berlangsung;
+        // namun jika aksi 1-tangan BARU saja mulai (<= 190 ms) & kedua tangan jelas sudah membentuk pose 2 tangan penuh,
+        // upgrade mulus ke mode 2 tangan agar tidak kalah cepat saat pengguna mencubit/mengepal dekat objek.
+        bool lockedBySingleHandMode = activeInteractionMode != ActiveInteractionMode.Idle && !IsAnyTwoHandModeActive;
+        if (lockedBySingleHandMode)
+        {
+            float singleHandElapsed = Time.unscaledTime - singleHandModeEnteredTime;
+            bool canUpgradeSingleHand = singleHandElapsed >= 0f
+                                        && singleHandElapsed <= TwoHandSingleHandUpgradeWindowSeconds
+                                        && activeInteractionMode != ActiveInteractionMode.OutputHold
+                                        && (bothPurePinch || validFreePanPose)
+                                        && handGestureDetector.IsTwoHandQualityGatePassing
+                                        && secondaryHandGestureDetector.IsTwoHandQualityGatePassing;
+            if (canUpgradeSingleHand)
+            {
+                RevertSingleHandForTwoHandUpgrade(mainCam);
+            }
+            else
+            {
+                twoHandOrbitConfirmTimer = 0f;
+                twoHandFreePanConfirmTimer = 0f;
+                twoHandIntentPendingTimer = 0f;
+                twoHandFistResetTimer = 0f;
+                twoHandFistResetLatched = false;
+                wasTwoHandOrbitReleaseFrozen = false;
+                wasTwoHandPanReleaseFrozen = false;
+                stageController?.SetTwoHandManipulationState(false);
+                return;
+            }
+        }
+
+        // 1. Kelanjutan mode 2-tangan yang SUDAH terkunci (kebal tepi layar & dilarang loncat paksa antar-mode 2-tangan)
         if (activeInteractionMode == ActiveInteractionMode.TwoHandOrbitZoom)
         {
+            twoHandIntentPendingTimer = 0f;
             bool primaryHoldPinch = primaryPurePinch || (!handGestureDetector.IsFistActive && handGestureDetector.PinchRatio < TwoHandOrbitHoldMaxPinchRatio);
             bool secondaryHoldPinch = secondaryPurePinch || (!secondaryHandGestureDetector.IsFistActive && secondaryHandGestureDetector.PinchRatio < TwoHandOrbitHoldMaxPinchRatio);
             if (primaryHoldPinch && secondaryHoldPinch)
@@ -1694,9 +1733,15 @@ public class AirWeavingController : MonoBehaviour
 
         if (activeInteractionMode == ActiveInteractionMode.TwoHandFreePan)
         {
-            if (validFreePanPose)
+            twoHandIntentPendingTimer = 0f;
+            AirWeavingHandGestureDetector pinchDet = twoHandFreePanPrimaryIsPinch ? handGestureDetector : secondaryHandGestureDetector;
+            AirWeavingHandGestureDetector fistDet = twoHandFreePanPrimaryIsPinch ? secondaryHandGestureDetector : handGestureDetector;
+            bool holdPinchOk = !pinchDet.IsFistActive && (pinchDet.IsPinchActive || pinchDet.PinchRatio < TwoHandOrbitHoldMaxPinchRatio);
+            bool holdFistOk = !fistDet.IsPinchActive
+                              && (fistDet.IsFistActive || (fistDet.MeanWeightedBendDeg >= TwoHandFreePanHoldMinFistBendDeg && fistDet.FoldedFingerCount >= 2));
+            if (holdPinchOk && holdFistOk)
             {
-                StepTwoHandFreePan(primaryPinchSecondaryFist, isStarting: false);
+                StepTwoHandFreePan(twoHandFreePanPrimaryIsPinch, isStarting: false);
                 return;
             }
 
@@ -1709,6 +1754,7 @@ public class AirWeavingController : MonoBehaviour
 
         if (activeInteractionMode == ActiveInteractionMode.TwoHandReset)
         {
+            twoHandIntentPendingTimer = 0f;
             if (bothPureFists)
             {
                 if (!twoHandFistResetLatched)
@@ -1742,13 +1788,14 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // 2. Transisi masuk dari Idle: wajib lolos Neutral Cooldown & Quality Gate pada kedua tangan
+        // 2. Transisi masuk dari Idle: gunakan IsTwoHandQualityGatePassing (longgar tepi layar [0.015, 0.985] tanpa syarat di atas hologram)
         if (neutralCooldownTimer > 0f
-            || !handGestureDetector.IsQualityGatePassing
-            || !secondaryHandGestureDetector.IsQualityGatePassing)
+            || !handGestureDetector.IsTwoHandQualityGatePassing
+            || !secondaryHandGestureDetector.IsTwoHandQualityGatePassing)
         {
             twoHandOrbitConfirmTimer = 0f;
             twoHandFreePanConfirmTimer = 0f;
+            twoHandIntentPendingTimer = 0f;
             twoHandFistResetTimer = 0f;
             if (!bothPureFists)
             {
@@ -1758,11 +1805,12 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // 2A. Masuk Both Pinch (Orbit 360° Diagonal Bebas & Focal-Zoom): stabil >= 40 ms
+        // 2A. Masuk Both Pinch (Orbit 360° Diagonal Bebas & Focal-Zoom global): stabil >= 40 ms
         if (bothPurePinch)
         {
             twoHandFreePanConfirmTimer = 0f;
             twoHandFistResetTimer = 0f;
+            twoHandIntentPendingTimer = 0f;
             twoHandOrbitConfirmTimer += dt;
             isTwoHandConfirming = true;
             if (twoHandOrbitConfirmTimer >= TwoHandOrbitConfirmHoldSeconds)
@@ -1782,20 +1830,22 @@ public class AirWeavingController : MonoBehaviour
         }
         twoHandOrbitConfirmTimer = 0f;
 
-        // 2B. Masuk Free Air-Pan 3D (1 Pinch + 1 Fist murni): stabil >= 110 ms
+        // 2B. Masuk Free Air-Pan 3D global (1 Pinch + 1 Fist murni): stabil >= 55 ms
         if (validFreePanPose)
         {
             twoHandFistResetTimer = 0f;
+            twoHandIntentPendingTimer = 0f;
             twoHandFreePanConfirmTimer += dt;
             isTwoHandConfirming = true;
             if (twoHandFreePanConfirmTimer >= TwoHandFreePanConfirmHoldSeconds)
             {
                 twoHandFreePanConfirmTimer = 0f;
+                twoHandFreePanPrimaryIsPinch = primaryPinchSecondaryFist;
                 activeInteractionMode = ActiveInteractionMode.TwoHandFreePan;
                 activeInteractionHandSlot = -1;
                 if (isRecordingAirDraw) CancelAirDrawStrokeImmediate();
                 if (IsAnyCircleSummonActive) ResetAllCircleSummoners();
-                StepTwoHandFreePan(primaryPinchSecondaryFist, isStarting: true);
+                StepTwoHandFreePan(twoHandFreePanPrimaryIsPinch, isStarting: true);
             }
             else
             {
@@ -1808,6 +1858,7 @@ public class AirWeavingController : MonoBehaviour
         // 2C. Masuk Both Fist (Reset Panggung 550 ms)
         if (bothPureFists && !twoHandFistResetLatched)
         {
+            twoHandIntentPendingTimer = 0f;
             activeInteractionMode = ActiveInteractionMode.TwoHandReset;
             activeInteractionHandSlot = -1;
             twoHandFistResetTimer = 0f;
@@ -1815,6 +1866,29 @@ public class AirWeavingController : MonoBehaviour
             if (IsAnyCircleSummonActive) ResetAllCircleSummoners();
             stageController?.SetTwoHandManipulationState(true);
             return;
+        }
+
+        // 2D. Pra-Niat Anti-Bajak: jika KEDUA tangan sedang sama-sama mulai menutup Pinch/Fist (asinkron ringan),
+        //     tahan sementara (maks 220 ms) agar CableDrag/GateGrab 1 tangan tidak membajak niat 2 tangan.
+        bool h0FormPinch = handGestureDetector.IsFormingPinchIntent;
+        bool h1FormPinch = secondaryHandGestureDetector.IsFormingPinchIntent;
+        bool h0FormFist = handGestureDetector.IsFormingFistIntent;
+        bool h1FormFist = secondaryHandGestureDetector.IsFormingFistIntent;
+        bool formingTwoHandCombo = (h0FormPinch && h1FormPinch)
+                                   || (h0FormPinch && h1FormFist)
+                                   || (h0FormFist && h1FormPinch)
+                                   || (h0FormFist && h1FormFist);
+        if (formingTwoHandCombo)
+        {
+            twoHandIntentPendingTimer += dt;
+            if (twoHandIntentPendingTimer <= TwoHandIntentGraceMaxSeconds)
+            {
+                isTwoHandConfirming = true;
+            }
+        }
+        else
+        {
+            twoHandIntentPendingTimer = 0f;
         }
 
         if (!bothPureFists)
@@ -1895,25 +1969,32 @@ public class AirWeavingController : MonoBehaviour
                 -TwoHandOrbitMaxAxisDeltaPerFrameDeg,
                 TwoHandOrbitMaxAxisDeltaPerFrameDeg);
 
-            // Kemiringan sudut garis antar kedua tangan (roll camT.forward): redaman 0.65x + EMA ringan + clamp ketat <= 10°/frame
+            // Kemiringan sudut garis antar kedua tangan (roll camT.forward): redaman halus berdasarkan jarak pisah tangan
+            // agar tetap stabil saat kedua tangan rapat di satu sisi layar maupun lebar di tepi kiri-kanan.
             float safeDt = Mathf.Clamp(dt, 0.001f, 0.05f);
             float rollDelta = 0f;
-            if (handVec.sqrMagnitude >= 0.0064f)
+            float rollSepWeight = Mathf.Clamp01((curDist - TwoHandRollMinSepDist) / (TwoHandRollFullSepDist - TwoHandRollMinSepDist));
+            if (rollSepWeight > 0.001f)
             {
                 float rollAlpha = 1f - Mathf.Exp(-TwoHandOrbitRollEmaRate * safeDt);
                 float angleErr = Mathf.DeltaAngle(twoHandPinchSmoothedLineAngleDeg, curLineAngleDeg);
                 float smoothedStepDeg = angleErr * rollAlpha;
                 twoHandPinchSmoothedLineAngleDeg += smoothedStepDeg;
                 rollDelta = Mathf.Clamp(
-                    smoothedStepDeg * TwoHandOrbitRollGain,
+                    smoothedStepDeg * TwoHandOrbitRollGain * rollSepWeight,
                     -TwoHandOrbitRollMaxDeltaPerFrameDeg,
                     TwoHandOrbitRollMaxDeltaPerFrameDeg);
             }
+            else
+            {
+                twoHandPinchSmoothedLineAngleDeg = curLineAngleDeg;
+            }
 
-            // Zoom kalem & proporsional: EMA ringan pada jarak kedua tangan + clamp langkah maksimum per frame
+            // Zoom kalem & proporsional dengan soft-floor jarak agar mulus baik saat tangan rapat di satu sisi maupun lebar di tepi
             float zoomAlpha = 1f - Mathf.Exp(-TwoHandZoomDistEmaRate * safeDt);
             twoHandPinchSmoothedDist = Mathf.Lerp(twoHandPinchSmoothedDist, curDist, zoomAlpha);
-            float rawZoomRatio = Mathf.Max(0.10f, twoHandPinchSmoothedDist) / Mathf.Max(0.14f, twoHandPinchInitialDist);
+            float rawZoomRatio = (Mathf.Max(0.08f, twoHandPinchSmoothedDist) + TwoHandZoomDistSoftFloor)
+                                 / (Mathf.Max(0.14f, twoHandPinchInitialDist) + TwoHandZoomDistSoftFloor);
             float uncappedZoom = twoHandPinchInitialZoom * Mathf.Pow(rawZoomRatio, TwoHandZoomSensitivity);
             float prevTargetZoom = stageController != null ? Mathf.Max(0.10f, stageController.TargetZoomScale) : twoHandPinchInitialZoom;
             float desiredZoom = Mathf.Clamp(
@@ -2049,10 +2130,11 @@ public class AirWeavingController : MonoBehaviour
             Vector3 grabPalmWorldPos = grabDetector.PalmCursorWorldPosition;
 
             WorkbenchGateSlot grabbed = gateSlots[grabbedGateSlotIndex];
+            float safeGrabDt = Mathf.Clamp(dt, 0.0001f, 0.050f);
             if (grabFistActive)
             {
                 isPinching = true;
-                float liftedTargetHeightY = grabbed.currentLocalZ;
+                float liftedTargetHeightY = grabbed.smoothedDragTargetY;
 
                 if (grabHandDetected && mainCam != null)
                 {
@@ -2092,25 +2174,29 @@ public class AirWeavingController : MonoBehaviour
                     }
 
                     Vector2 clampedTarget = ClampDraggedGateLocalXY(targetStageXZ, aspectScale);
+                    float targetDampAlpha = 1f - Mathf.Exp(-GateDragTargetDampRate * safeGrabDt);
+                    grabbed.smoothedDragTargetXZ = Vector2.Lerp(grabbed.smoothedDragTargetXZ, clampedTarget, targetDampAlpha);
+                    grabbed.smoothedDragTargetY = Mathf.Lerp(grabbed.smoothedDragTargetY, liftedTargetHeightY, targetDampAlpha);
+
                     grabbed.currentLocalXY = StepCriticallyDampedSpring2D(
                         grabbed.currentLocalXY,
-                        clampedTarget,
+                        grabbed.smoothedDragTargetXZ,
                         ref grabbed.velocityXY,
                         GateDragSpringOmega,
-                        dt);
+                        safeGrabDt);
                 }
                 else
                 {
                     grabbed.currentLocalXY = StepCriticallyDampedSpring2D(
                         grabbed.currentLocalXY,
-                        grabbed.currentLocalXY,
+                        grabbed.smoothedDragTargetXZ,
                         ref grabbed.velocityXY,
                         GateDragSpringOmega,
-                        dt);
+                        safeGrabDt);
                 }
 
                 // Velocity banking tilt 2-sumbu (maju-mundur & kiri-kanan mengikuti kecepatan di atas meja, maks ±24°)
-                float velSmoothAlpha = 1f - Mathf.Exp(-GateDragVelocitySmoothRate * Mathf.Max(0.0001f, dt));
+                float velSmoothAlpha = 1f - Mathf.Exp(-GateDragVelocitySmoothRate * safeGrabDt);
                 grabbed.smoothedVelocityXY = Vector2.Lerp(grabbed.smoothedVelocityXY, grabbed.velocityXY, velSmoothAlpha);
                 Vector2 targetTilt = new Vector2(
                     Mathf.Clamp(grabbed.velocityXY.y * DragVelocityTiltDegPerUnitSec, -MaxDragInertiaTiltDeg, MaxDragInertiaTiltDeg),
@@ -2120,20 +2206,20 @@ public class AirWeavingController : MonoBehaviour
                     targetTilt,
                     ref grabbed.velocityTiltDeg,
                     GateSettleSpringOmega,
-                    dt);
+                    safeGrabDt);
 
                 grabbed.currentLocalZ = StepCriticallyDampedSpring(
                     grabbed.currentLocalZ,
-                    liftedTargetHeightY,
+                    grabbed.smoothedDragTargetY,
                     ref grabbed.velocityZ,
                     GateLiftZSpringOmega,
-                    dt);
+                    safeGrabDt);
                 grabbed.currentScale = StepCriticallyDampedSpring(
                     grabbed.currentScale,
                     GrabbedGateScale,
                     ref grabbed.velocityScale,
                     GateScaleSpringOmega,
-                    dt);
+                    safeGrabDt);
                 grabbed.isPlacedOnWorkbench = true;
 
                 bool curOutsideBox = IsOutsideAssemblyZone(grabbed.currentLocalXY, aspectScale);
@@ -2343,6 +2429,7 @@ public class AirWeavingController : MonoBehaviour
         grabbedGateSlotIndex = targetGateSlotIndex;
         activeInteractionMode = ActiveInteractionMode.GateGrab;
         activeInteractionHandSlot = handSlot;
+        singleHandModeEnteredTime = Time.unscaledTime;
 
         hoveredGateSlotIndex = handSlot == 0 ? targetGateSlotIndex : -1;
         secondaryHoveredGateSlotIndex = handSlot == 1 ? targetGateSlotIndex : -1;
@@ -2350,6 +2437,14 @@ public class AirWeavingController : MonoBehaviour
         secondaryHoveredInputNode = null;
 
         WorkbenchGateSlot grabbed = gateSlots[grabbedGateSlotIndex];
+        preGrabWasPlaced = grabbed.isPlacedOnWorkbench;
+        preGrabPlacedLocalXY = grabbed.placedLocalXY;
+        preGrabCurrentLocalXY = grabbed.currentLocalXY;
+        preGrabLocalZ = grabbed.currentLocalZ;
+        preGrabScale = grabbed.currentScale;
+        grabbed.smoothedDragTargetXZ = grabbed.currentLocalXY;
+        grabbed.smoothedDragTargetY = grabbed.currentLocalZ;
+
         grabStartPalmSpan = Mathf.Max(0.055f, grabDetector.FilteredPalmSpan);
         if (grabbed.node != null && mainCam != null)
         {
@@ -2931,6 +3026,7 @@ public class AirWeavingController : MonoBehaviour
                 {
                     activeInteractionMode = ActiveInteractionMode.InputSwitch;
                     activeInteractionHandSlot = handSlot;
+                    singleHandModeEnteredTime = Time.unscaledTime;
                     isOwner = true;
                 }
                 if (isOwner)
@@ -2966,6 +3062,7 @@ public class AirWeavingController : MonoBehaviour
                 {
                     activeInteractionMode = ActiveInteractionMode.InputSwitch;
                     activeInteractionHandSlot = handSlot;
+                    singleHandModeEnteredTime = Time.unscaledTime;
                     isOwner = true;
                 }
                 if (isOwner)
@@ -3882,7 +3979,6 @@ public class AirWeavingController : MonoBehaviour
         inputSwitchMagnetOffsetBySlot[0] = Vector2.zero;
         circleSummoners[0].ClearPoseVoteBuffer();
         ResetLandmarkOneEuroFilters();
-        SetHandRigVisible(false);
         SetHoverRingVisible(false);
     }
 
@@ -3907,7 +4003,6 @@ public class AirWeavingController : MonoBehaviour
             secondaryHandGestureDetector.Reset();
         }
         ResetSecondaryLandmarkOneEuroFilters();
-        SetSecondaryHandRigVisible(false);
     }
 
     private static bool IsValidHandLandmarkCandidate(List<NormalizedLandmark> landmarks)
@@ -4038,7 +4133,7 @@ public class AirWeavingController : MonoBehaviour
 
     /// <summary>
     /// Downscale 2x2 box-filter Zero-GC (menggantikan nearest-neighbor) sambil menegakkan rotasi &amp; cermin kamera
-    /// sehingga tepi jari lebih halus &amp; minim jitter pada resolusi inferensi 256px CPU Android.
+    /// sehingga tepi jari lebih halus &amp; minim jitter pada resolusi inferensi 384px CPU Android.
     /// </summary>
     private void FillUprightMirroredRgbaBuffer(
         int srcW,
@@ -4137,19 +4232,15 @@ public class AirWeavingController : MonoBehaviour
 
     private void ResetLandmarkOneEuroFilters()
     {
-        for (int i = 0; i < LandmarkCount; i++)
-        {
-            landmarkOneEuroFilters[i].Reset();
-        }
+        hologramVisual?.ResetHandSkeletonFilters(0, clearAlphaImmediate: false);
+        handGestureDetector.ResetCursorFilters();
         lastPrimaryFilterTimestampMs = 0;
     }
 
     private void ResetSecondaryLandmarkOneEuroFilters()
     {
-        for (int i = 0; i < LandmarkCount; i++)
-        {
-            secondaryLandmarkOneEuroFilters[i].Reset();
-        }
+        hologramVisual?.ResetHandSkeletonFilters(1, clearAlphaImmediate: false);
+        secondaryHandGestureDetector.ResetCursorFilters();
         lastSecondaryFilterTimestampMs = 0;
     }
 
@@ -4165,10 +4256,6 @@ public class AirWeavingController : MonoBehaviour
         bool justAppeared = !wasHandDetected;
         if (justAppeared)
         {
-            for (int i = 0; i < LandmarkCount; i++)
-            {
-                landmarkOneEuroFilters[i].Reset();
-            }
             handGestureDetector.RestartEntryWarmup();
         }
 
@@ -4179,41 +4266,27 @@ public class AirWeavingController : MonoBehaviour
             HandCursorDepthTrackGain);
         float baseHandCamDepth = Mathf.Clamp((WorkbenchDepth - 0.14f) * handDepthScale, MinHandRigCameraDepth, MaxHandRigCameraDepth);
 
+        // Proyeksikan 21 titik mentah dunia tanpa tumpukan filter ganda; One-Euro 3D tunggal dijalankan di
+        // AirWeavingHologramVisual (21 titik visual skeleton) & AirWeavingHandGestureDetector (telapak, Pinch #4-#8, telunjuk #8).
         for (int i = 0; i < LandmarkCount; i++)
         {
             NormalizedLandmark lm = landmarks[i];
-            float filteredXNorm = landmarkOneEuroFilters[i].x.Filter(
-                lm.x * OneEuroCoordScale,
-                sampleDt,
-                OneEuroMinCutoff,
-                OneEuroBeta,
-                OneEuroDCutoff) / OneEuroCoordScale;
-            float filteredYNorm = landmarkOneEuroFilters[i].y.Filter(
-                lm.y * OneEuroCoordScale,
-                sampleDt,
-                OneEuroMinCutoff,
-                OneEuroBeta,
-                OneEuroDCutoff) / OneEuroCoordScale;
-            float filteredZ = landmarkOneEuroFilters[i].z.Filter(
-                Mathf.Clamp(lm.z, -0.25f, 0.25f) * OneEuroCoordScale,
-                sampleDt,
-                OneEuroZMinCutoff,
-                OneEuroZBeta,
-                OneEuroDCutoff) / OneEuroCoordScale;
-
-            float localZ = Mathf.Clamp(baseHandCamDepth + (filteredZ * DepthParallaxScale), 0.75f, 6.20f);
+            float clampedZ = Mathf.Clamp(lm.z, -0.25f, 0.25f);
+            float localZ = Mathf.Clamp(baseHandCamDepth + (clampedZ * DepthParallaxScale), 0.75f, 6.20f);
             float rayDepthRatio = localZ / VideoQuadDepth;
-            float localX = (filteredXNorm - 0.5f) * currentVideoDisplayWidth * rayDepthRatio;
-            float localY = (0.5f - filteredYNorm) * currentVideoDisplayHeight * rayDepthRatio;
-            smoothedLandmarksWorld[i] = camTransform.TransformPoint(new Vector3(localX, localY, localZ));
+            float localX = (lm.x - 0.5f) * currentVideoDisplayWidth * rayDepthRatio;
+            float localY = (0.5f - lm.y) * currentVideoDisplayHeight * rayDepthRatio;
+            rawLandmarksWorld[i] = camTransform.TransformPoint(new Vector3(localX, localY, localZ));
         }
+
+        hologramVisual?.PushHandSkeletonSample(0, rawLandmarksWorld, sampleDt, freshEntry: justAppeared);
 
         isHandDetected = true;
         wasHandDetected = true;
         timeSinceLastValidHand = 0f;
 
-        // Perbarui detektor 3D Metrik (handWorldLandmarks + proyeksi sinar WorkbenchDepth konsisten)
-        handGestureDetector.UpdateFromLandmarks(landmarks, worldLandmarks, smoothedLandmarksWorld, camTransform, WorkbenchDepth, camAspect);
+        // Perbarui detektor 3D Metrik (handWorldLandmarks + One-Euro 3D kursor interaksi Zero-GC)
+        handGestureDetector.UpdateFromLandmarks(landmarks, worldLandmarks, rawLandmarksWorld, camTransform, WorkbenchDepth, camAspect);
         circleSummoners[0].RecordPoseSample(handGestureDetector.CurrentSummonPose);
 
         // Sinkronkan status kompatibilitas Pinch legacy dengan rasio 3D metrik terbaru
@@ -4230,14 +4303,13 @@ public class AirWeavingController : MonoBehaviour
         // Deteksi pose "Tongkat Telunjuk" (Index-Only Wand) untuk kompatibilitas Air-Draw legacy
         isIndexOnlyWandPose = EvaluateIndexOnlyWandPose(landmarks);
 
-        indexTipWorldPosition = smoothedLandmarksWorld[8];
+        indexTipWorldPosition = handGestureDetector.IndexTipWorldPosition;
         pinchWorldPosition = handGestureDetector.PalmCursorWorldPosition;
 
         // Simpan koordinat XY lokal yang sudah disatukan pada bidang sinar referensi (WorkbenchDepth)
         indexWorkbenchLocalXY = handGestureDetector.IndexTipLocalXY;
         pinchWorkbenchLocalXY = handGestureDetector.PalmCursorLocalXY;
 
-        SetHandRigVisible(true);
         if (pinchCursorRingRenderer != null && pinchCursorRingRenderer.enabled)
         {
             pinchCursorRingRenderer.enabled = false;
@@ -4246,31 +4318,6 @@ public class AirWeavingController : MonoBehaviour
         {
             indexTrailRenderer.emitting = false;
             indexTrailRenderer.Clear();
-        }
-
-        if (jointSphereObjs != null)
-        {
-            for (int i = 0; i < LandmarkCount; i++)
-            {
-                if (jointSphereObjs[i] != null)
-                {
-                    jointSphereObjs[i].transform.position = smoothedLandmarksWorld[i];
-                }
-            }
-        }
-
-        if (boneLineRenderers != null)
-        {
-            int boneCount = HandBoneConnections.GetLength(0);
-            for (int b = 0; b < boneCount; b++)
-            {
-                LineRenderer lr = boneLineRenderers[b];
-                if (lr != null)
-                {
-                    lr.SetPosition(0, smoothedLandmarksWorld[HandBoneConnections[b, 0]]);
-                    lr.SetPosition(1, smoothedLandmarksWorld[HandBoneConnections[b, 1]]);
-                }
-            }
         }
 
         if (indexTrailObj != null)
@@ -4294,9 +4341,9 @@ public class AirWeavingController : MonoBehaviour
         Transform camTransform = mainCam.transform;
         float camAspect = (mainCam != null && mainCam.aspect > 0.1f) ? mainCam.aspect : (16f / 9f);
 
-        if (!wasSecondaryHandDetected)
+        bool justAppeared = !wasSecondaryHandDetected;
+        if (justAppeared)
         {
-            ResetSecondaryLandmarkOneEuroFilters();
             secondaryHandGestureDetector.RestartEntryWarmup();
         }
 
@@ -4310,64 +4357,22 @@ public class AirWeavingController : MonoBehaviour
         for (int i = 0; i < LandmarkCount; i++)
         {
             NormalizedLandmark lm = landmarks[i];
-            float filteredXNorm = secondaryLandmarkOneEuroFilters[i].x.Filter(
-                lm.x * OneEuroCoordScale,
-                sampleDt,
-                OneEuroMinCutoff,
-                OneEuroBeta,
-                OneEuroDCutoff) / OneEuroCoordScale;
-            float filteredYNorm = secondaryLandmarkOneEuroFilters[i].y.Filter(
-                lm.y * OneEuroCoordScale,
-                sampleDt,
-                OneEuroMinCutoff,
-                OneEuroBeta,
-                OneEuroDCutoff) / OneEuroCoordScale;
-            float filteredZ = secondaryLandmarkOneEuroFilters[i].z.Filter(
-                Mathf.Clamp(lm.z, -0.25f, 0.25f) * OneEuroCoordScale,
-                sampleDt,
-                OneEuroZMinCutoff,
-                OneEuroZBeta,
-                OneEuroDCutoff) / OneEuroCoordScale;
-
-            float localZ = Mathf.Clamp(baseSecCamDepth + (filteredZ * DepthParallaxScale), 0.75f, 6.20f);
+            float clampedZ = Mathf.Clamp(lm.z, -0.25f, 0.25f);
+            float localZ = Mathf.Clamp(baseSecCamDepth + (clampedZ * DepthParallaxScale), 0.75f, 6.20f);
             float rayDepthRatio = localZ / VideoQuadDepth;
-            float localX = (filteredXNorm - 0.5f) * currentVideoDisplayWidth * rayDepthRatio;
-            float localY = (0.5f - filteredYNorm) * currentVideoDisplayHeight * rayDepthRatio;
-            secondarySmoothedLandmarksWorld[i] = camTransform.TransformPoint(new Vector3(localX, localY, localZ));
+            float localX = (lm.x - 0.5f) * currentVideoDisplayWidth * rayDepthRatio;
+            float localY = (0.5f - lm.y) * currentVideoDisplayHeight * rayDepthRatio;
+            secondaryRawLandmarksWorld[i] = camTransform.TransformPoint(new Vector3(localX, localY, localZ));
         }
+
+        hologramVisual?.PushHandSkeletonSample(1, secondaryRawLandmarksWorld, sampleDt, freshEntry: justAppeared);
 
         isSecondaryHandDetected = true;
         wasSecondaryHandDetected = true;
         timeSinceLastValidHand = 0f;
 
-        secondaryHandGestureDetector.UpdateFromLandmarks(landmarks, worldLandmarks, secondarySmoothedLandmarksWorld, camTransform, WorkbenchDepth, camAspect);
+        secondaryHandGestureDetector.UpdateFromLandmarks(landmarks, worldLandmarks, secondaryRawLandmarksWorld, camTransform, WorkbenchDepth, camAspect);
         circleSummoners[1].RecordPoseSample(secondaryHandGestureDetector.CurrentSummonPose);
-        SetSecondaryHandRigVisible(true);
-
-        if (secondaryJointSphereObjs != null)
-        {
-            for (int i = 0; i < LandmarkCount; i++)
-            {
-                if (secondaryJointSphereObjs[i] != null)
-                {
-                    secondaryJointSphereObjs[i].transform.position = secondarySmoothedLandmarksWorld[i];
-                }
-            }
-        }
-
-        if (secondaryBoneLineRenderers != null)
-        {
-            int boneCount = HandBoneConnections.GetLength(0);
-            for (int b = 0; b < boneCount; b++)
-            {
-                LineRenderer lr = secondaryBoneLineRenderers[b];
-                if (lr != null)
-                {
-                    lr.SetPosition(0, secondarySmoothedLandmarksWorld[HandBoneConnections[b, 0]]);
-                    lr.SetPosition(1, secondarySmoothedLandmarksWorld[HandBoneConnections[b, 1]]);
-                }
-            }
-        }
     }
 
     private static bool EvaluateIndexOnlyWandPose(List<NormalizedLandmark> landmarks)
@@ -4895,6 +4900,7 @@ public class AirWeavingController : MonoBehaviour
             activeInteractionMode = ActiveInteractionMode.CableDrag;
             activeInteractionHandSlot = chosenSlot >= 0 ? chosenSlot : 0;
             activeCableHoverHandSlot = activeInteractionHandSlot;
+            singleHandModeEnteredTime = Time.unscaledTime;
         }
         else if (activeInteractionMode == ActiveInteractionMode.CableDrag && !cableRouter.IsDraggingCable)
         {
@@ -4935,7 +4941,7 @@ public class AirWeavingController : MonoBehaviour
             stageZoom);
     }
 
-    private void UpdateHologramVisuals(Camera mainCam)
+    private void UpdateHologramVisuals(Camera mainCam, float dt)
     {
         if (hologramVisual == null || mainCam == null) return;
         Transform camT = mainCam.transform;
@@ -4943,6 +4949,49 @@ public class AirWeavingController : MonoBehaviour
         bool isVerifying = levelManager != null && levelManager.IsVerifying;
         bool canShowHover = IsAnyHandDetected && !overlayOpen && !isVerifying && !IsAnyTwoHandModeActive;
         hologramVisual.SetRootVisible(isAirWeavingActive);
+
+        // Perbarui visual skeleton 21 titik (One-Euro 3D pada laju render dt + fade alpha halus saat occlusion grace)
+        float primaryGraceNorm = primaryMissedLastInference
+            ? Mathf.Clamp01(primaryMissingTimer / HandFrameDropGraceSeconds)
+            : 0f;
+        float secondaryGraceNorm = secondaryMissedLastInference
+            ? Mathf.Clamp01(secondaryMissingTimer / HandFrameDropGraceSeconds)
+            : 0f;
+        bool hideSkeletonsForUi = overlayOpen || isVerifying;
+        hologramVisual.UpdateHandSkeletonVisual(
+            0,
+            isHandDetected,
+            primaryMissedLastInference,
+            primaryGraceNorm,
+            hideSkeletonsForUi,
+            dt,
+            handRigRootObj,
+            jointSphereObjs,
+            boneLineRenderers,
+            HandBoneConnections,
+            boneMat,
+            jointBaseMat,
+            jointTipMat,
+            NeonCyanBoneColor,
+            NeonJointBaseColor,
+            NeonJointTipColor);
+        hologramVisual.UpdateHandSkeletonVisual(
+            1,
+            isSecondaryHandDetected,
+            secondaryMissedLastInference,
+            secondaryGraceNorm,
+            hideSkeletonsForUi,
+            dt,
+            secondaryHandRigRootObj,
+            secondaryJointSphereObjs,
+            secondaryBoneLineRenderers,
+            HandBoneConnections,
+            secondaryBoneMat,
+            secondaryJointBaseMat,
+            secondaryJointTipMat,
+            NeonCyanBoneColor,
+            NeonJointBaseColor,
+            NeonJointTipColor);
 
         Transform stageRoot = stageController != null ? stageController.StageRoot : null;
         GateNode portFocusedNode = (canShowHover && cableRouter != null) ? cableRouter.HoveredPortNode : null;
@@ -5042,7 +5091,10 @@ public class AirWeavingController : MonoBehaviour
             handGestureDetector.PalmCursorWorldPosition,
             handGestureDetector.IsFistActive,
             slot0PortHovering,
-            handGestureDetector.MeanCurlRatio);
+            handGestureDetector.MeanCurlRatio,
+            primaryMissedLastInference,
+            primaryGraceNorm,
+            dt);
 
         hologramVisual.UpdateSecondaryPalmReticle(
             camT,
@@ -5051,11 +5103,16 @@ public class AirWeavingController : MonoBehaviour
             secondaryHandGestureDetector.PalmCursorWorldPosition,
             secondaryHandGestureDetector.IsFistActive,
             slot1PortHovering,
-            secondaryHandGestureDetector.MeanCurlRatio);
+            secondaryHandGestureDetector.MeanCurlRatio,
+            secondaryMissedLastInference,
+            secondaryGraceNorm,
+            dt);
 
         // Indikator cincin cubit presisi untuk tangan kabel aktif (baik slot 0 maupun slot 1) & tangan kedua bila ikut hover port saat Idle
         bool hasPrimaryCableHand = primaryCableSlot >= 0 && IsHandSlotDetected(primaryCableSlot);
         AirWeavingHandGestureDetector primaryCableDet = primaryCableSlot >= 0 ? GetHandDetector(primaryCableSlot) : handGestureDetector;
+        bool primaryCableInGrace = primaryCableSlot == 1 ? secondaryMissedLastInference : primaryMissedLastInference;
+        float primaryCableGraceNorm = primaryCableSlot == 1 ? secondaryGraceNorm : primaryGraceNorm;
         bool showPrimaryPinchRing = !overlayOpen
                                     && !isVerifying
                                     && !twoHandVisualActive
@@ -5073,10 +5130,15 @@ public class AirWeavingController : MonoBehaviour
             showPrimaryPinchRing,
             primaryPinchVisualWorldPos,
             hasPrimaryCableHand && primaryCableDet.IsPinchActive,
-            cableRouter != null && cableRouter.IsSnappedTargetPort);
+            cableRouter != null && cableRouter.IsSnappedTargetPort,
+            primaryCableInGrace,
+            primaryCableGraceNorm,
+            dt);
 
         bool hasOtherCableHand = otherCableSlot >= 0 && IsHandSlotDetected(otherCableSlot);
         AirWeavingHandGestureDetector otherCableDet = otherCableSlot >= 0 ? GetHandDetector(otherCableSlot) : secondaryHandGestureDetector;
+        bool otherCableInGrace = otherCableSlot == 0 ? primaryMissedLastInference : secondaryMissedLastInference;
+        float otherCableGraceNorm = otherCableSlot == 0 ? primaryGraceNorm : secondaryGraceNorm;
         bool showSecondaryPinchRing = !overlayOpen
                                       && !isVerifying
                                       && !twoHandVisualActive
@@ -5092,35 +5154,19 @@ public class AirWeavingController : MonoBehaviour
             showSecondaryPinchRing,
             hasOtherCableHand ? otherCableDet.PinchPointWorldPosition : Vector3.zero,
             hasOtherCableHand && otherCableDet.IsPinchActive,
-            isSnappedToPort: false);
+            isSnappedToPort: false,
+            otherCableInGrace,
+            otherCableGraceNorm,
+            dt);
 
-        Vector3 handAWorld = (IsTwoHandFistResetCharging || (IsTwoHandFreePanActive && handGestureDetector.IsFistActive))
+        // Jangkar visual link 2 tangan selalu terkunci langsung pada posisi 3D tangan pengguna di seluruh bidang layar (global)
+        Vector3 handAWorld = (IsTwoHandFistResetCharging || (IsTwoHandFreePanActive && !twoHandFreePanPrimaryIsPinch))
             ? handGestureDetector.PalmCursorWorldPosition
             : handGestureDetector.PinchPointWorldPosition;
-        Vector3 handBWorld = (IsTwoHandFistResetCharging || (IsTwoHandFreePanActive && secondaryHandGestureDetector.IsFistActive))
+        Vector3 handBWorld = (IsTwoHandFistResetCharging || (IsTwoHandFreePanActive && twoHandFreePanPrimaryIsPinch))
             ? secondaryHandGestureDetector.PalmCursorWorldPosition
             : secondaryHandGestureDetector.PinchPointWorldPosition;
 
-        // Kunci titik jangkar visual cincin 2 tangan tepat pada bidang meja sejajar titik cubitan selama Both Pinch
-        if (IsTwoHandOrbitZoomActive && stageController != null && mainCam != null)
-        {
-            if (stageController.TryIntersectHandWithHoverPlane(mainCam, handAWorld, BaseHoverHeight, out _, out Vector3 anchorHitA))
-            {
-                float distA = Vector3.Distance(camT.position, anchorHitA);
-                if (distA >= 1.0f && distA <= 6.4f)
-                {
-                    handAWorld = anchorHitA;
-                }
-            }
-            if (stageController.TryIntersectHandWithHoverPlane(mainCam, handBWorld, BaseHoverHeight, out _, out Vector3 anchorHitB))
-            {
-                float distB = Vector3.Distance(camT.position, anchorHitB);
-                if (distB >= 1.0f && distB <= 6.4f)
-                {
-                    handBWorld = anchorHitB;
-                }
-            }
-        }
         float resetProgress = IsTwoHandFistResetCharging
             ? Mathf.Clamp01(twoHandFistResetTimer / TwoHandFistResetHoldSeconds)
             : 0f;
@@ -5208,6 +5254,7 @@ public class AirWeavingController : MonoBehaviour
             {
                 activeInteractionMode = ActiveInteractionMode.CircleSummon;
                 activeInteractionHandSlot = handSlot;
+                singleHandModeEnteredTime = Time.unscaledTime;
                 lockedSlot = handSlot;
                 circleSummoners[1 - handSlot].Reset();
             }
@@ -6203,7 +6250,11 @@ public class AirWeavingController : MonoBehaviour
 
         handRigRootObj.SetActive(false);
 
-        // Rig 3D neon tangan ke-2 (slot sekunder) berbagi material yang sama (Zero-GC)
+        // Rig 3D neon tangan ke-2 (slot sekunder) memakai material terpisah agar transisi fade alpha independen per slot (Zero-GC)
+        secondaryBoneMat = CreateSafeSpritesMaterial(NeonCyanBoneColor, 2994);
+        secondaryJointBaseMat = CreateSafeSpritesMaterial(NeonJointBaseColor, 2995);
+        secondaryJointTipMat = CreateSafeSpritesMaterial(NeonJointTipColor, 2996);
+
         secondaryHandRigRootObj = new GameObject("AR_AirWeavingSecondaryHandRig");
         secondaryHandRigRootObj.transform.SetParent(transform, false);
         secondaryJointSphereObjs = new GameObject[LandmarkCount];
@@ -6229,7 +6280,7 @@ public class AirWeavingController : MonoBehaviour
             {
                 rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 rend.receiveShadows = false;
-                rend.sharedMaterial = isTip ? jointTipMat : jointBaseMat;
+                rend.sharedMaterial = isTip ? secondaryJointTipMat : secondaryJointBaseMat;
             }
 
             secondaryJointSphereObjs[i] = jointObj;
@@ -6250,9 +6301,9 @@ public class AirWeavingController : MonoBehaviour
             lr.receiveShadows = false;
             lr.startColor = NeonCyanBoneColor;
             lr.endColor = NeonCyanBoneColor;
-            if (boneMat != null)
+            if (secondaryBoneMat != null)
             {
-                lr.sharedMaterial = boneMat;
+                lr.sharedMaterial = secondaryBoneMat;
             }
 
             secondaryBoneLineRenderers[b] = lr;
@@ -6499,6 +6550,9 @@ public class AirWeavingController : MonoBehaviour
         jointBaseMat = null;
         jointTipMat = null;
         boneMat = null;
+        secondaryJointBaseMat = null;
+        secondaryJointTipMat = null;
+        secondaryBoneMat = null;
         trailMat = null;
         pinchRingMat = null;
         hoverRingMat = null;

@@ -25,6 +25,18 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private const int ReticleSegments = 20;
     private const int PinchRingSegments = 16;
     private const int MaxNodeSlots = 8; // InputA, InputB, Output, + 5 Gerbang Logika
+    private const int SkeletonJointCount = 21;
+
+    // One-Euro Filter 3D Zero-GC untuk 21 titik visual skeleton tangan (minCutoff 1.35 Hz bunuh jitter, beta 0.06 nol-lag, dCutoff = 1.0 Hz)
+    private const float SkeletonOneEuroMinCutoff = 1.35f;
+    private const float SkeletonOneEuroBeta = 0.060f;
+    private const float SkeletonOneEuroDCutoff = 1.00f;
+    private const float SkeletonOneEuroWorldSpeedScale = 22.0f;
+    private const float SkeletonFadeInRate = 15.0f;
+    private const float SkeletonFadeOutRate = 10.0f;
+    private const float ReticleFadeInRate = 18.0f;
+    private const float ReticleFadeOutRate = 11.0f;
+    private const float FadeDisableEpsilon = 0.015f;
 
     private static readonly Color InputACyanHoverColor = new Color(0.38f, 0.96f, 1.00f, 0.96f);
     private static readonly Color InputBGoldHoverColor = new Color(1.00f, 0.88f, 0.30f, 0.96f);
@@ -54,6 +66,44 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private LineRenderer[] inputRippleRenderers;
     private Material[] inputRippleMats;
 
+    private struct ReticleFadeState
+    {
+        public float alpha;
+        public bool hasPose;
+        public Vector3 lastPos;
+        public bool lastIsFist;
+        public bool lastIsTargetingPort;
+        public float lastMeanCurlRatio;
+
+        public void ResetImmediate()
+        {
+            alpha = 0f;
+            hasPose = false;
+            lastPos = Vector3.zero;
+            lastIsFist = false;
+            lastIsTargetingPort = false;
+            lastMeanCurlRatio = 1.4f;
+        }
+    }
+
+    private struct PinchFadeState
+    {
+        public float alpha;
+        public bool hasPose;
+        public Vector3 lastPos;
+        public bool lastIsPinchActive;
+        public bool lastIsSnapped;
+
+        public void ResetImmediate()
+        {
+            alpha = 0f;
+            hasPose = false;
+            lastPos = Vector3.zero;
+            lastIsPinchActive = false;
+            lastIsSnapped = false;
+        }
+    }
+
     private LineRenderer reticleOuterRenderer;
     private LineRenderer reticleInnerRenderer;
     private LineRenderer reticleCrossHRenderer;
@@ -66,6 +116,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private LineRenderer secondaryReticleCrossHRenderer;
     private LineRenderer secondaryReticleCrossVRenderer;
     private Material secondaryReticleOuterMat;
+    private Material secondaryReticleInnerMat;
+    private Material secondaryReticleCrossMat;
     private readonly Vector3[] reticleBuffer = new Vector3[ReticleSegments];
 
     private LineRenderer pinchRingRenderer;
@@ -75,7 +127,22 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private LineRenderer secondaryPinchRingRenderer;
     private LineRenderer secondaryPinchCoreRenderer;
     private Material secondaryPinchRingMat;
+    private Material secondaryPinchCoreMat;
     private readonly Vector3[] pinchRingBuffer = new Vector3[PinchRingSegments];
+
+    // One-Euro Filter 3D Zero-GC untuk 21 titik visual skeleton slot 0 & slot 1 + smooth fade alpha occlusion grace
+    private readonly OneEuroFilter3D[] primarySkeletonFilters = new OneEuroFilter3D[SkeletonJointCount];
+    private readonly OneEuroFilter3D[] secondarySkeletonFilters = new OneEuroFilter3D[SkeletonJointCount];
+    private readonly Vector3[] primarySmoothedJoints = new Vector3[SkeletonJointCount];
+    private readonly Vector3[] secondarySmoothedJoints = new Vector3[SkeletonJointCount];
+    private float primarySkeletonAlpha = 0f;
+    private float secondarySkeletonAlpha = 0f;
+    private bool hasPrimarySkeletonPose = false;
+    private bool hasSecondarySkeletonPose = false;
+    private ReticleFadeState primaryReticleFade;
+    private ReticleFadeState secondaryReticleFade;
+    private PinchFadeState primaryPinchFade;
+    private PinchFadeState secondaryPinchFade;
 
     // Visual Lock 2 Tangan (Air-Orbit 360°, Air-Zoom, & Dual-Fist Reset)
     private LineRenderer twoHandBeamRenderer;
@@ -86,7 +153,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private Material twoHandAnchorMat;
     private Material twoHandCenterMat;
 
-    private readonly List<Material> ownedMaterials = new List<Material>(30);
+    private readonly List<Material> ownedMaterials = new List<Material>(36);
     private bool isInitialized = false;
 
     public void EnsureVisualsCreated()
@@ -128,10 +195,12 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         reticleCrossVRenderer = CreateSegmentLine("Holo_PalmReticleCrossV", 0.006f, reticleCrossMat);
 
         secondaryReticleOuterMat = CreateSafeSpritesMat(ReticleOpenColor, 3040);
+        secondaryReticleInnerMat = CreateSafeSpritesMat(ReticleCoreWhiteColor, 3041);
+        secondaryReticleCrossMat = CreateSafeSpritesMat(ReticleCoreWhiteColor, 3042);
         secondaryReticleOuterRenderer = CreateLoopLine("Holo_SecPalmReticleOuter", ReticleSegments, 0.009f, secondaryReticleOuterMat);
-        secondaryReticleInnerRenderer = CreateLoopLine("Holo_SecPalmReticleInner", ReticleSegments, 0.0065f, reticleInnerMat);
-        secondaryReticleCrossHRenderer = CreateSegmentLine("Holo_SecPalmReticleCrossH", 0.006f, reticleCrossMat);
-        secondaryReticleCrossVRenderer = CreateSegmentLine("Holo_SecPalmReticleCrossV", 0.006f, reticleCrossMat);
+        secondaryReticleInnerRenderer = CreateLoopLine("Holo_SecPalmReticleInner", ReticleSegments, 0.0065f, secondaryReticleInnerMat);
+        secondaryReticleCrossHRenderer = CreateSegmentLine("Holo_SecPalmReticleCrossH", 0.006f, secondaryReticleCrossMat);
+        secondaryReticleCrossVRenderer = CreateSegmentLine("Holo_SecPalmReticleCrossV", 0.006f, secondaryReticleCrossMat);
 
         pinchRingMat = CreateSafeSpritesMat(PinchHoverColor, 3043);
         pinchCoreMat = CreateSafeSpritesMat(ReticleCoreWhiteColor, 3044);
@@ -139,8 +208,9 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         pinchCoreRenderer = CreateLoopLine("Holo_PinchCursorCore", PinchRingSegments, 0.0065f, pinchCoreMat);
 
         secondaryPinchRingMat = CreateSafeSpritesMat(PinchHoverColor, 3043);
+        secondaryPinchCoreMat = CreateSafeSpritesMat(ReticleCoreWhiteColor, 3044);
         secondaryPinchRingRenderer = CreateLoopLine("Holo_SecPinchCursorRing", PinchRingSegments, 0.0085f, secondaryPinchRingMat);
-        secondaryPinchCoreRenderer = CreateLoopLine("Holo_SecPinchCursorCore", PinchRingSegments, 0.0065f, pinchCoreMat);
+        secondaryPinchCoreRenderer = CreateLoopLine("Holo_SecPinchCursorCore", PinchRingSegments, 0.0065f, secondaryPinchCoreMat);
 
         twoHandBeamMat = CreateSafeSpritesMat(TwoHandOrbitCyanColor, 3045);
         twoHandAnchorMat = CreateSafeSpritesMat(TwoHandOrbitCyanColor, 3046);
@@ -156,6 +226,13 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
     public void HideImmediate()
     {
+        ResetHandSkeletonFilters(0, clearAlphaImmediate: true);
+        ResetHandSkeletonFilters(1, clearAlphaImmediate: true);
+        primaryReticleFade.ResetImmediate();
+        secondaryReticleFade.ResetImmediate();
+        primaryPinchFade.ResetImmediate();
+        secondaryPinchFade.ResetImmediate();
+
         if (!isInitialized)
         {
             return;
@@ -178,6 +255,11 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
     public void HideCursors()
     {
+        primaryReticleFade.ResetImmediate();
+        secondaryReticleFade.ResetImmediate();
+        primaryPinchFade.ResetImmediate();
+        secondaryPinchFade.ResetImmediate();
+
         if (!isInitialized)
         {
             return;
@@ -188,6 +270,206 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         SetPinchIndicatorVisible(false);
         SetSecondaryPinchIndicatorVisible(false);
         SetTwoHandLinkVisible(false);
+    }
+
+    /// <summary>
+    /// Mereset seluruh 21 filter One-Euro 3D skeleton tangan untuk slot 0 atau slot 1 saat fresh entry / reset. Zero-GC.
+    /// </summary>
+    public void ResetHandSkeletonFilters(int handSlot, bool clearAlphaImmediate = false)
+    {
+        OneEuroFilter3D[] filters = handSlot == 1 ? secondarySkeletonFilters : primarySkeletonFilters;
+        for (int i = 0; i < SkeletonJointCount; i++)
+        {
+            filters[i].Reset();
+        }
+
+        if (handSlot == 1)
+        {
+            if (clearAlphaImmediate)
+            {
+                secondarySkeletonAlpha = 0f;
+                hasSecondarySkeletonPose = false;
+            }
+        }
+        else
+        {
+            if (clearAlphaImmediate)
+            {
+                primarySkeletonAlpha = 0f;
+                hasPrimarySkeletonPose = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Menerima 21 titik mentah dunia tangan pada laju inferensi kamera dan memasukkannya ke <c>OneEuroFilter3D</c>
+    /// Zero-GC per-sendi. Pada <c>freshEntry</c>, state filter direset bersih agar nol tarikan dari posisi lama. Zero-GC.
+    /// </summary>
+    public void PushHandSkeletonSample(int handSlot, Vector3[] rawJointsWorld, float sampleDt, bool freshEntry)
+    {
+        if (rawJointsWorld == null || rawJointsWorld.Length < SkeletonJointCount)
+        {
+            return;
+        }
+
+        OneEuroFilter3D[] filters = handSlot == 1 ? secondarySkeletonFilters : primarySkeletonFilters;
+        Vector3[] smoothed = handSlot == 1 ? secondarySmoothedJoints : primarySmoothedJoints;
+
+        if (freshEntry)
+        {
+            for (int i = 0; i < SkeletonJointCount; i++)
+            {
+                filters[i].Reset();
+            }
+        }
+
+        for (int i = 0; i < SkeletonJointCount; i++)
+        {
+            Vector3 filtered = filters[i].PushSample(
+                rawJointsWorld[i],
+                sampleDt,
+                SkeletonOneEuroMinCutoff,
+                SkeletonOneEuroBeta,
+                SkeletonOneEuroDCutoff,
+                SkeletonOneEuroWorldSpeedScale);
+            if (freshEntry)
+            {
+                smoothed[i] = filtered;
+            }
+        }
+
+        if (handSlot == 1)
+        {
+            hasSecondarySkeletonPose = true;
+        }
+        else
+        {
+            hasPrimarySkeletonPose = true;
+        }
+    }
+
+    /// <summary>
+    /// Memajukan One-Euro 3D untuk seluruh 21 sendi skeleton pada laju render <c>dt</c> serta menerapkan transisi fade alpha
+    /// halus selama occlusion grace / kemunculan / menghilang agar visual tangan tidak pernah berkedip tiba-tiba. Zero-GC.
+    /// </summary>
+    public void UpdateHandSkeletonVisual(
+        int handSlot,
+        bool isHandDetected,
+        bool isInOcclusionGrace,
+        float graceNormalized,
+        bool forceHide,
+        float dt,
+        GameObject rigRootObj,
+        GameObject[] jointSpheres,
+        LineRenderer[] boneLines,
+        int[,] boneConnections,
+        Material boneMat,
+        Material jointBaseMat,
+        Material jointTipMat,
+        Color baseBoneColor,
+        Color baseJointColor,
+        Color baseTipColor)
+    {
+        if (rigRootObj == null)
+        {
+            return;
+        }
+
+        bool isSecondary = handSlot == 1;
+        OneEuroFilter3D[] filters = isSecondary ? secondarySkeletonFilters : primarySkeletonFilters;
+        Vector3[] smoothed = isSecondary ? secondarySmoothedJoints : primarySmoothedJoints;
+        bool hasPose = isSecondary ? hasSecondarySkeletonPose : hasPrimarySkeletonPose;
+        float curAlpha = isSecondary ? secondarySkeletonAlpha : primarySkeletonAlpha;
+
+        float safeDt = Mathf.Clamp(dt, 0.0005f, 0.050f);
+        if (hasPose)
+        {
+            for (int i = 0; i < SkeletonJointCount; i++)
+            {
+                smoothed[i] = filters[i].Tick(safeDt);
+            }
+        }
+
+        float targetAlpha;
+        if (forceHide || !hasPose || !isHandDetected)
+        {
+            targetAlpha = 0f;
+        }
+        else if (isInOcclusionGrace)
+        {
+            targetAlpha = Mathf.Lerp(0.88f, 0.32f, Mathf.Clamp01(graceNormalized));
+        }
+        else
+        {
+            targetAlpha = 1f;
+        }
+
+        float fadeRate = targetAlpha >= curAlpha ? SkeletonFadeInRate : SkeletonFadeOutRate;
+        float fadeStep = 1f - Mathf.Exp(-fadeRate * safeDt);
+        curAlpha = Mathf.Lerp(curAlpha, targetAlpha, fadeStep);
+        if (curAlpha <= FadeDisableEpsilon && targetAlpha <= 0.001f)
+        {
+            curAlpha = 0f;
+        }
+
+        if (isSecondary)
+        {
+            secondarySkeletonAlpha = curAlpha;
+        }
+        else
+        {
+            primarySkeletonAlpha = curAlpha;
+        }
+
+        if (curAlpha <= FadeDisableEpsilon)
+        {
+            if (rigRootObj.activeSelf)
+            {
+                rigRootObj.SetActive(false);
+            }
+            return;
+        }
+
+        if (!rigRootObj.activeSelf)
+        {
+            rigRootObj.SetActive(true);
+        }
+
+        Color boneCol = new Color(baseBoneColor.r, baseBoneColor.g, baseBoneColor.b, baseBoneColor.a * curAlpha);
+        Color jointCol = new Color(baseJointColor.r, baseJointColor.g, baseJointColor.b, baseJointColor.a * curAlpha);
+        Color tipCol = new Color(baseTipColor.r, baseTipColor.g, baseTipColor.b, baseTipColor.a * curAlpha);
+
+        if (boneMat != null) boneMat.color = boneCol;
+        if (jointBaseMat != null) jointBaseMat.color = jointCol;
+        if (jointTipMat != null) jointTipMat.color = tipCol;
+
+        if (jointSpheres != null)
+        {
+            int sphereCount = Mathf.Min(jointSpheres.Length, SkeletonJointCount);
+            for (int i = 0; i < sphereCount; i++)
+            {
+                if (jointSpheres[i] != null)
+                {
+                    jointSpheres[i].transform.position = smoothed[i];
+                }
+            }
+        }
+
+        if (boneLines != null && boneConnections != null)
+        {
+            int boneCount = Mathf.Min(boneLines.Length, boneConnections.GetLength(0));
+            for (int b = 0; b < boneCount; b++)
+            {
+                LineRenderer lr = boneLines[b];
+                if (lr != null)
+                {
+                    lr.startColor = boneCol;
+                    lr.endColor = boneCol;
+                    lr.SetPosition(0, smoothed[boneConnections[b, 0]]);
+                    lr.SetPosition(1, smoothed[boneConnections[b, 1]]);
+                }
+            }
+        }
     }
 
     public void SetRootVisible(bool visible)
@@ -348,7 +630,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     }
 
     /// <summary>
-    /// Memperbarui reticle kursor telapak tangan primer (tersembunyi otomatis saat tangan hilang / overlay / drag kabel). Zero-GC.
+    /// Memperbarui reticle kursor telapak tangan primer dengan transisi fade alpha halus saat occlusion grace / hilang. Zero-GC.
     /// </summary>
     public void UpdatePalmReticle(
         Transform camT,
@@ -357,7 +639,10 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         Vector3 palmWorldPos,
         bool isFistActive,
         bool isTargetingPort,
-        float meanCurlRatio)
+        float meanCurlRatio,
+        bool isInOcclusionGrace = false,
+        float graceNormalized = 0f,
+        float dt = 0.016f)
     {
         RenderPalmReticle(
             camT,
@@ -367,16 +652,22 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             isFistActive,
             isTargetingPort,
             meanCurlRatio,
+            isInOcclusionGrace,
+            graceNormalized,
+            dt,
+            ref primaryReticleFade,
             reticleOuterRenderer,
             reticleOuterMat,
             reticleInnerRenderer,
+            reticleInnerMat,
             reticleCrossHRenderer,
             reticleCrossVRenderer,
+            reticleCrossMat,
             isSecondary: false);
     }
 
     /// <summary>
-    /// Memperbarui reticle kursor telapak tangan sekunder agar kedua tangan sama-sama tampak siap pakai saat Idle. Zero-GC.
+    /// Memperbarui reticle kursor telapak tangan sekunder dengan transisi fade alpha halus saat occlusion grace / hilang. Zero-GC.
     /// </summary>
     public void UpdateSecondaryPalmReticle(
         Transform camT,
@@ -385,7 +676,10 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         Vector3 palmWorldPos,
         bool isFistActive,
         bool isTargetingPort,
-        float meanCurlRatio)
+        float meanCurlRatio,
+        bool isInOcclusionGrace = false,
+        float graceNormalized = 0f,
+        float dt = 0.016f)
     {
         RenderPalmReticle(
             camT,
@@ -395,11 +689,17 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             isFistActive,
             isTargetingPort,
             meanCurlRatio,
+            isInOcclusionGrace,
+            graceNormalized,
+            dt,
+            ref secondaryReticleFade,
             secondaryReticleOuterRenderer,
             secondaryReticleOuterMat,
             secondaryReticleInnerRenderer,
+            secondaryReticleInnerMat,
             secondaryReticleCrossHRenderer,
             secondaryReticleCrossVRenderer,
+            secondaryReticleCrossMat,
             isSecondary: true);
     }
 
@@ -411,11 +711,17 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         bool isFistActive,
         bool isTargetingPort,
         float meanCurlRatio,
+        bool isInOcclusionGrace,
+        float graceNormalized,
+        float dt,
+        ref ReticleFadeState fadeState,
         LineRenderer outerLr,
         Material outerMat,
         LineRenderer innerLr,
+        Material innerMat,
         LineRenderer crossHLr,
         LineRenderer crossVLr,
+        Material crossMat,
         bool isSecondary)
     {
         if (!isInitialized)
@@ -424,7 +730,38 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         }
 
         bool show = isHandDetected && !hideReticle && camT != null;
-        if (!show)
+        if (show)
+        {
+            fadeState.hasPose = true;
+            fadeState.lastPos = palmWorldPos;
+            fadeState.lastIsFist = isFistActive;
+            fadeState.lastIsTargetingPort = isTargetingPort;
+            fadeState.lastMeanCurlRatio = meanCurlRatio;
+        }
+
+        float safeDt = Mathf.Clamp(dt, 0.0005f, 0.050f);
+        float targetAlpha;
+        if (!show || !fadeState.hasPose)
+        {
+            targetAlpha = 0f;
+        }
+        else if (isInOcclusionGrace)
+        {
+            targetAlpha = Mathf.Lerp(0.86f, 0.34f, Mathf.Clamp01(graceNormalized));
+        }
+        else
+        {
+            targetAlpha = 1f;
+        }
+
+        float fadeRate = targetAlpha >= fadeState.alpha ? ReticleFadeInRate : ReticleFadeOutRate;
+        fadeState.alpha = Mathf.Lerp(fadeState.alpha, targetAlpha, 1f - Mathf.Exp(-fadeRate * safeDt));
+        if (fadeState.alpha <= FadeDisableEpsilon && targetAlpha <= 0.001f)
+        {
+            fadeState.alpha = 0f;
+        }
+
+        if (fadeState.alpha <= FadeDisableEpsilon || camT == null || !fadeState.hasPose)
         {
             if (isSecondary) SetSecondaryReticleVisible(false);
             else SetReticleVisible(false);
@@ -433,33 +770,40 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         Vector3 right = camT.right;
         Vector3 up = camT.up;
-        Vector3 center = palmWorldPos - (camT.forward * 0.14f);
+        Vector3 center = fadeState.lastPos - (camT.forward * 0.14f);
 
-        float openFrac = Mathf.Clamp01((meanCurlRatio - 0.78f) / 0.75f);
-        float outerRadius = isFistActive ? 0.036f : Mathf.Lerp(0.044f, 0.074f, openFrac);
-        float innerRadius = isFistActive ? 0.015f : 0.018f;
-        float crossHalf = isFistActive ? 0.022f : 0.030f;
+        float openFrac = Mathf.Clamp01((fadeState.lastMeanCurlRatio - 0.78f) / 0.75f);
+        float outerRadius = fadeState.lastIsFist ? 0.036f : Mathf.Lerp(0.044f, 0.074f, openFrac);
+        float innerRadius = fadeState.lastIsFist ? 0.015f : 0.018f;
+        float crossHalf = fadeState.lastIsFist ? 0.022f : 0.030f;
 
-        Color color = isFistActive
+        Color baseColor = fadeState.lastIsFist
             ? ReticleFistColor
-            : (isTargetingPort ? ReticlePortAimColor : ReticleOpenColor);
+            : (fadeState.lastIsTargetingPort ? ReticlePortAimColor : ReticleOpenColor);
+        Color color = new Color(baseColor.r, baseColor.g, baseColor.b, baseColor.a * fadeState.alpha);
+        Color coreCol = new Color(ReticleCoreWhiteColor.r, ReticleCoreWhiteColor.g, ReticleCoreWhiteColor.b, ReticleCoreWhiteColor.a * fadeState.alpha);
 
-        DrawReticleCircle(outerLr, outerMat, center, right, up, outerRadius, color, isFistActive ? 0.013f : 0.009f);
-        DrawReticleCircle(innerLr, reticleInnerMat, center - (camT.forward * 0.004f), right, up, innerRadius, ReticleCoreWhiteColor, isFistActive ? 0.009f : 0.006f);
+        DrawReticleCircle(outerLr, outerMat, center, right, up, outerRadius, color, fadeState.lastIsFist ? 0.013f : 0.009f);
+        DrawReticleCircle(innerLr, innerMat, center - (camT.forward * 0.004f), right, up, innerRadius, coreCol, fadeState.lastIsFist ? 0.009f : 0.006f);
         if (crossHLr != null && crossVLr != null)
         {
+            if (crossMat != null) crossMat.color = coreCol;
             Vector3 crossCenter = center - (camT.forward * 0.006f);
             crossHLr.enabled = true;
+            crossHLr.startColor = coreCol;
+            crossHLr.endColor = coreCol;
             crossHLr.SetPosition(0, crossCenter - (right * crossHalf));
             crossHLr.SetPosition(1, crossCenter + (right * crossHalf));
             crossVLr.enabled = true;
+            crossVLr.startColor = coreCol;
+            crossVLr.endColor = coreCol;
             crossVLr.SetPosition(0, crossCenter - (up * crossHalf));
             crossVLr.SetPosition(1, crossCenter + (up * crossHalf));
         }
     }
 
     /// <summary>
-    /// Menampilkan indikator cincin cubit kecil presisi di titik tengah #4-#8 saat membidik port atau menyeret kabel. Zero-GC.
+    /// Menampilkan indikator cincin cubit kecil presisi di titik tengah #4-#8 dengan fade alpha halus saat occlusion grace. Zero-GC.
     /// </summary>
     public void UpdatePinchIndicator(
         Transform camT,
@@ -467,7 +811,10 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         bool isAllowedAndRelevant,
         Vector3 pinchWorldPos,
         bool isPinchActive,
-        bool isSnappedToPort)
+        bool isSnappedToPort,
+        bool isInOcclusionGrace = false,
+        float graceNormalized = 0f,
+        float dt = 0.016f)
     {
         RenderPinchIndicator(
             camT,
@@ -476,14 +823,19 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             pinchWorldPos,
             isPinchActive,
             isSnappedToPort,
+            isInOcclusionGrace,
+            graceNormalized,
+            dt,
+            ref primaryPinchFade,
             pinchRingRenderer,
             pinchRingMat,
             pinchCoreRenderer,
+            pinchCoreMat,
             isSecondary: false);
     }
 
     /// <summary>
-    /// Menampilkan indikator cincin cubit untuk tangan kedua saat membidik port di mode Idle ambidextrous. Zero-GC.
+    /// Menampilkan indikator cincin cubit tangan kedua dengan fade alpha halus saat occlusion grace. Zero-GC.
     /// </summary>
     public void UpdateSecondaryPinchIndicator(
         Transform camT,
@@ -491,7 +843,10 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         bool isAllowedAndRelevant,
         Vector3 pinchWorldPos,
         bool isPinchActive,
-        bool isSnappedToPort)
+        bool isSnappedToPort,
+        bool isInOcclusionGrace = false,
+        float graceNormalized = 0f,
+        float dt = 0.016f)
     {
         RenderPinchIndicator(
             camT,
@@ -500,9 +855,14 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             pinchWorldPos,
             isPinchActive,
             isSnappedToPort,
+            isInOcclusionGrace,
+            graceNormalized,
+            dt,
+            ref secondaryPinchFade,
             secondaryPinchRingRenderer,
             secondaryPinchRingMat,
             secondaryPinchCoreRenderer,
+            secondaryPinchCoreMat,
             isSecondary: true);
     }
 
@@ -513,9 +873,14 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         Vector3 pinchWorldPos,
         bool isPinchActive,
         bool isSnappedToPort,
+        bool isInOcclusionGrace,
+        float graceNormalized,
+        float dt,
+        ref PinchFadeState fadeState,
         LineRenderer ringLr,
         Material ringMat,
         LineRenderer coreLr,
+        Material coreMat,
         bool isSecondary)
     {
         if (!isInitialized)
@@ -524,7 +889,37 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         }
 
         bool show = isHandDetected && isAllowedAndRelevant && camT != null;
-        if (!show)
+        if (show)
+        {
+            fadeState.hasPose = true;
+            fadeState.lastPos = pinchWorldPos;
+            fadeState.lastIsPinchActive = isPinchActive;
+            fadeState.lastIsSnapped = isSnappedToPort;
+        }
+
+        float safeDt = Mathf.Clamp(dt, 0.0005f, 0.050f);
+        float targetAlpha;
+        if (!show || !fadeState.hasPose)
+        {
+            targetAlpha = 0f;
+        }
+        else if (isInOcclusionGrace)
+        {
+            targetAlpha = Mathf.Lerp(0.86f, 0.34f, Mathf.Clamp01(graceNormalized));
+        }
+        else
+        {
+            targetAlpha = 1f;
+        }
+
+        float fadeRate = targetAlpha >= fadeState.alpha ? ReticleFadeInRate : ReticleFadeOutRate;
+        fadeState.alpha = Mathf.Lerp(fadeState.alpha, targetAlpha, 1f - Mathf.Exp(-fadeRate * safeDt));
+        if (fadeState.alpha <= FadeDisableEpsilon && targetAlpha <= 0.001f)
+        {
+            fadeState.alpha = 0f;
+        }
+
+        if (fadeState.alpha <= FadeDisableEpsilon || camT == null || !fadeState.hasPose)
         {
             if (isSecondary) SetSecondaryPinchIndicatorVisible(false);
             else SetPinchIndicatorVisible(false);
@@ -533,14 +928,18 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         Vector3 right = camT.right;
         Vector3 up = camT.up;
-        Vector3 center = pinchWorldPos - (camT.forward * 0.145f);
+        Vector3 center = fadeState.lastPos - (camT.forward * 0.145f);
         float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 8.0f));
-        float outerR = isPinchActive ? (0.020f + (0.003f * pulse)) : 0.032f;
-        float coreR = isPinchActive ? 0.0085f : 0.0065f;
-        Color ringCol = isSnappedToPort ? PinchSnappedColor : (isPinchActive ? PinchActiveDragColor : PinchHoverColor);
+        float outerR = fadeState.lastIsPinchActive ? (0.020f + (0.003f * pulse)) : 0.032f;
+        float coreR = fadeState.lastIsPinchActive ? 0.0085f : 0.0065f;
+        Color baseRingCol = fadeState.lastIsSnapped
+            ? PinchSnappedColor
+            : (fadeState.lastIsPinchActive ? PinchActiveDragColor : PinchHoverColor);
+        Color ringCol = new Color(baseRingCol.r, baseRingCol.g, baseRingCol.b, baseRingCol.a * fadeState.alpha);
+        Color coreCol = new Color(ReticleCoreWhiteColor.r, ReticleCoreWhiteColor.g, ReticleCoreWhiteColor.b, ReticleCoreWhiteColor.a * fadeState.alpha);
 
-        DrawPinchCircle(ringLr, ringMat, center, right, up, outerR, ringCol, isPinchActive ? 0.011f : 0.0085f);
-        DrawPinchCircle(coreLr, pinchCoreMat, center - (camT.forward * 0.004f), right, up, coreR, ReticleCoreWhiteColor, 0.007f);
+        DrawPinchCircle(ringLr, ringMat, center, right, up, outerR, ringCol, fadeState.lastIsPinchActive ? 0.011f : 0.0085f);
+        DrawPinchCircle(coreLr, coreMat, center - (camT.forward * 0.004f), right, up, coreR, coreCol, 0.007f);
     }
 
     /// <summary>
@@ -877,6 +1276,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         secondaryReticleCrossHRenderer = null;
         secondaryReticleCrossVRenderer = null;
         secondaryReticleOuterMat = null;
+        secondaryReticleInnerMat = null;
+        secondaryReticleCrossMat = null;
         pinchRingRenderer = null;
         pinchCoreRenderer = null;
         pinchRingMat = null;
@@ -884,5 +1285,6 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         secondaryPinchRingRenderer = null;
         secondaryPinchCoreRenderer = null;
         secondaryPinchRingMat = null;
+        secondaryPinchCoreMat = null;
     }
 }

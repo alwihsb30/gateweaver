@@ -193,6 +193,12 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     private bool isInitialized = false;
     private float lastBuiltGridAspectScale = -1f;
+    private float dynamicMinPanX = -MaxPanOffsetX;
+    private float dynamicMaxPanX = MaxPanOffsetX;
+    private float dynamicMinPanY = -MaxPanOffsetY;
+    private float dynamicMaxPanY = MaxPanOffsetY;
+    private Camera lastKnownMainCam;
+    private float lastKnownWorkbenchDepth = 3.82f;
 
     public Transform StageRoot => stageRootTransform;
     public float CurrentZoomScale => currentZoomScale;
@@ -494,6 +500,37 @@ public sealed class AirWeavingStageController : MonoBehaviour
         hasTwoHandOrbitDepthAnchor = true;
     }
 
+    private void RefreshDynamicPanBounds(Camera mainCam, float workbenchDepth, float zoomScale, float panZ)
+    {
+        float safeZoom = Mathf.Clamp(zoomScale, MinZoomScale, MaxZoomScale);
+        float zoomApproachZ = safeZoom > 1.0f
+            ? -Mathf.Min(1.15f, (safeZoom - 1.0f) * 0.58f)
+            : Mathf.Min(0.85f, (1.0f - safeZoom) * 0.90f);
+        float nearClip = mainCam != null ? mainCam.nearClipPlane : 0.15f;
+        float minSafePivotZ = Mathf.Max(0.95f, nearClip + 0.65f);
+        float effectivePivotZ = Mathf.Clamp(workbenchDepth + panZ + zoomApproachZ, minSafePivotZ, 7.20f);
+
+        float halfFovRad = (mainCam != null ? mainCam.fieldOfView : 60f) * 0.5f * Mathf.Deg2Rad;
+        float aspect = (mainCam != null && mainCam.aspect > 0.1f) ? mainCam.aspect : (16f / 9f);
+        float frustumHalfH = effectivePivotZ * Mathf.Tan(halfFovRad);
+        float frustumHalfW = frustumHalfH * aspect;
+
+        float aspectScale = ComputeAspectScale(mainCam);
+        float stageHalfW = 1.45f * aspectScale * safeZoom;
+        float stageHalfH = 0.88f * safeZoom;
+
+        // Perluas area geser ke seluruh bidang layar kamera sesuai FOV & zoom, sambil menjaga minimal ~35% hologram tetap terlihat
+        float zoomInspectExtraX = Mathf.Max(0f, (stageHalfW * 0.72f) - (frustumHalfW * 0.35f));
+        float zoomInspectExtraY = Mathf.Max(0f, (stageHalfH * 0.72f) - (frustumHalfH * 0.35f));
+        float maxScreenX = Mathf.Clamp((frustumHalfW * 0.88f) + zoomInspectExtraX, MaxPanOffsetX, 8.50f);
+        float maxScreenY = Mathf.Clamp((frustumHalfH * 0.84f) + zoomInspectExtraY, MaxPanOffsetY, 5.50f);
+
+        dynamicMinPanX = -maxScreenX;
+        dynamicMaxPanX = maxScreenX;
+        dynamicMinPanY = -maxScreenY - StagePivotCameraOffsetY;
+        dynamicMaxPanY = maxScreenY - StagePivotCameraOffsetY;
+    }
+
     /// <summary>
     /// Menerapkan delta Quaternion Arcball 360° bebas penuh tanpa pitch clamp dan tanpa gimbal lock
     /// (pre-multiply pada sumbu layar kamera <c>camT.up</c>, <c>camT.right</c>, dan <c>camT.forward</c>),
@@ -559,19 +596,28 @@ public sealed class AirWeavingStageController : MonoBehaviour
         float zoomRatio = newZoom / prevZoom;
         targetZoomScale = newZoom;
 
-        // Focal-Point Zoom kalem: geser pan XY proporsional terhadap titik tengah kedua tangan tanpa sentakan
+        RefreshDynamicPanBounds(lastKnownMainCam, lastKnownWorkbenchDepth, targetZoomScale, targetPanOffset.z);
+
+        // Focal-Point Zoom kalem: clamp jarak fokus agar zoom dari tepi kosong layar tetap nyaman & tidak melempar hologram
         if (Mathf.Abs(zoomRatio - 1.0f) > 0.0001f)
         {
             Vector2 focalOffsetFromStage = focalMidpointCameraXY - new Vector2(targetPanOffset.x, targetPanOffset.y);
-            Vector2 focalShift = focalOffsetFromStage * (1.0f - zoomRatio) * 0.55f;
-            targetPanOffset.x = Mathf.Clamp(targetPanOffset.x + focalShift.x, -MaxPanOffsetX, MaxPanOffsetX);
-            targetPanOffset.y = Mathf.Clamp(targetPanOffset.y + focalShift.y, -MaxPanOffsetY, MaxPanOffsetY);
+            float focalMagSqr = focalOffsetFromStage.sqrMagnitude;
+            const float maxFocalOffset = 1.85f;
+            if (focalMagSqr > maxFocalOffset * maxFocalOffset)
+            {
+                focalOffsetFromStage *= maxFocalOffset / Mathf.Sqrt(focalMagSqr);
+            }
+
+            Vector2 focalShift = focalOffsetFromStage * (1.0f - zoomRatio) * 0.50f;
+            targetPanOffset.x = Mathf.Clamp(targetPanOffset.x + focalShift.x, dynamicMinPanX, dynamicMaxPanX);
+            targetPanOffset.y = Mathf.Clamp(targetPanOffset.y + focalShift.y, dynamicMinPanY, dynamicMaxPanY);
         }
     }
 
     /// <summary>
-    /// Menerapkan Free Air-Pan 3D (1 Tangan Pinch + 1 Tangan Fist): menggeser panggung meja bebas ke kiri/kanan/atas/bawah
-    /// serta maju/mundur mengikuti kedalaman kedua tangan. Zero-GC.
+    /// Menerapkan Free Air-Pan 3D (1 Tangan Pinch + 1 Tangan Fist): menggeser panggung meja bebas ke seluruh area layar kamera
+    /// serta maju/mundur mengikuti kedalaman kedua tangan dengan clamp aman relatif FOV &amp; zoom. Zero-GC.
     /// </summary>
     public void ApplyTwoHandFreePan(Vector2 panDeltaXY, float desiredPanZ)
     {
@@ -580,9 +626,11 @@ public sealed class AirWeavingStageController : MonoBehaviour
         {
             return;
         }
-        targetPanOffset.x = Mathf.Clamp(targetPanOffset.x + panDeltaXY.x, -MaxPanOffsetX, MaxPanOffsetX);
-        targetPanOffset.y = Mathf.Clamp(targetPanOffset.y + panDeltaXY.y, -MaxPanOffsetY, MaxPanOffsetY);
+
         targetPanOffset.z = Mathf.Clamp(desiredPanZ, -MaxPanDepthPullCloserZ, MaxPanDepthPushFartherZ);
+        RefreshDynamicPanBounds(lastKnownMainCam, lastKnownWorkbenchDepth, targetZoomScale, targetPanOffset.z);
+        targetPanOffset.x = Mathf.Clamp(targetPanOffset.x + panDeltaXY.x, dynamicMinPanX, dynamicMaxPanX);
+        targetPanOffset.y = Mathf.Clamp(targetPanOffset.y + panDeltaXY.y, dynamicMinPanY, dynamicMaxPanY);
     }
 
     private void CommitAntiKickCoastOnRelease(float nowTime)
@@ -752,6 +800,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
             stageRootObj.SetActive(true);
         }
 
+        lastKnownMainCam = mainCam;
+        lastKnownWorkbenchDepth = workbenchDepth;
+        RefreshDynamicPanBounds(mainCam, workbenchDepth, targetZoomScale, targetPanOffset.z);
+
         if (isUiOverlayOpen)
         {
             isTwoHandManipulationActive = false;
@@ -888,14 +940,14 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 if (coastPanVelocity.sqrMagnitude > StageCoastStopEpsilon * StageCoastStopEpsilon)
                 {
                     float nextPanX = targetPanOffset.x + (coastPanVelocity.x * dt);
-                    if (nextPanX <= -MaxPanOffsetX)
+                    if (nextPanX <= dynamicMinPanX)
                     {
-                        targetPanOffset.x = -MaxPanOffsetX;
+                        targetPanOffset.x = dynamicMinPanX;
                         coastPanVelocity.x = 0f;
                     }
-                    else if (nextPanX >= MaxPanOffsetX)
+                    else if (nextPanX >= dynamicMaxPanX)
                     {
-                        targetPanOffset.x = MaxPanOffsetX;
+                        targetPanOffset.x = dynamicMaxPanX;
                         coastPanVelocity.x = 0f;
                     }
                     else
@@ -904,14 +956,14 @@ public sealed class AirWeavingStageController : MonoBehaviour
                     }
 
                     float nextPanY = targetPanOffset.y + (coastPanVelocity.y * dt);
-                    if (nextPanY <= -MaxPanOffsetY)
+                    if (nextPanY <= dynamicMinPanY)
                     {
-                        targetPanOffset.y = -MaxPanOffsetY;
+                        targetPanOffset.y = dynamicMinPanY;
                         coastPanVelocity.y = 0f;
                     }
-                    else if (nextPanY >= MaxPanOffsetY)
+                    else if (nextPanY >= dynamicMaxPanY)
                     {
-                        targetPanOffset.y = MaxPanOffsetY;
+                        targetPanOffset.y = dynamicMaxPanY;
                         coastPanVelocity.y = 0f;
                     }
                     else
@@ -946,6 +998,11 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 if (coastPanVelocity.sqrMagnitude <= StageCoastStopEpsilon * StageCoastStopEpsilon) coastPanVelocity = Vector3.zero;
             }
         }
+
+        // Pastikan targetPanOffset tetap aman di dalam batas frustum terkini (mis. pasca zoom-out dari deep inspection)
+        targetPanOffset.x = Mathf.Clamp(targetPanOffset.x, dynamicMinPanX, dynamicMaxPanX);
+        targetPanOffset.y = Mathf.Clamp(targetPanOffset.y, dynamicMinPanY, dynamicMaxPanY);
+        targetPanOffset.z = Mathf.Clamp(targetPanOffset.z, -MaxPanDepthPullCloserZ, MaxPanDepthPushFartherZ);
 
         // 1. Smoothing Quaternion.Slerp eksponensial Air-Orbit 360° + pegas analitik Air-Zoom & Free Air-Pan 3D
         float orbitSlerpAlpha = dt > 0.00001f ? (1f - Mathf.Exp(-OrbitSlerpRate * dt)) : 1f;

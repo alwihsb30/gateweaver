@@ -30,11 +30,231 @@ public enum SummonHandPose
     OpenFiveBloom = 6
 }
 
+/// <summary>
+/// Filter One-Euro 1D murni Zero-GC (Casiez et al.) mendukung mode single-call <c>Filter()</c>
+/// maupun mode render-rate kontinu <c>PushSample()</c> + <c>Tick(dt)</c> untuk kehalusan 60-120 Hz.
+/// </summary>
+public struct OneEuroFilter1D
+{
+    private const float TwoPi = 6.283185307f;
+
+    private bool initialized;
+    private float xPrev;
+    private float dxPrev;
+    private float targetSample;
+    private float prevRawSample;
+    private float activeCutoffHz;
+
+    public bool IsInitialized => initialized;
+    public float CurrentValue => xPrev;
+    public float TargetSample => targetSample;
+
+    public void Reset()
+    {
+        initialized = false;
+        xPrev = 0f;
+        dxPrev = 0f;
+        targetSample = 0f;
+        prevRawSample = 0f;
+        activeCutoffHz = 1.4f;
+    }
+
+    public float PushSample(
+        float rawValue,
+        float sampleDt,
+        float minCutoff,
+        float beta,
+        float dCutoff,
+        float velocityScale = 1f)
+    {
+        if (!initialized)
+        {
+            initialized = true;
+            xPrev = rawValue;
+            targetSample = rawValue;
+            prevRawSample = rawValue;
+            dxPrev = 0f;
+            activeCutoffHz = minCutoff;
+            return xPrev;
+        }
+
+        float safeDt = Mathf.Clamp(sampleDt, 0.004f, 0.200f);
+        float rawDx = ((rawValue - prevRawSample) * velocityScale) / safeDt;
+        prevRawSample = rawValue;
+        targetSample = rawValue;
+
+        float alphaD = ComputeAlpha(safeDt, dCutoff);
+        dxPrev += alphaD * (rawDx - dxPrev);
+        activeCutoffHz = minCutoff + (beta * Mathf.Abs(dxPrev));
+        return xPrev;
+    }
+
+    public float Tick(float dt)
+    {
+        if (!initialized)
+        {
+            return xPrev;
+        }
+
+        float safeDt = Mathf.Clamp(dt, 0.0005f, 0.050f);
+        float alphaX = ComputeAlpha(safeDt, activeCutoffHz);
+        xPrev += alphaX * (targetSample - xPrev);
+        return xPrev;
+    }
+
+    public float Filter(
+        float rawValue,
+        float dt,
+        float minCutoff,
+        float beta,
+        float dCutoff,
+        float velocityScale = 1f)
+    {
+        if (!initialized)
+        {
+            initialized = true;
+            xPrev = rawValue;
+            targetSample = rawValue;
+            prevRawSample = rawValue;
+            dxPrev = 0f;
+            activeCutoffHz = minCutoff;
+            return xPrev;
+        }
+
+        float safeDt = Mathf.Clamp(dt, 0.004f, 0.200f);
+        float rawDx = ((rawValue - xPrev) * velocityScale) / safeDt;
+        prevRawSample = rawValue;
+        targetSample = rawValue;
+
+        float alphaD = ComputeAlpha(safeDt, dCutoff);
+        dxPrev += alphaD * (rawDx - dxPrev);
+        activeCutoffHz = minCutoff + (beta * Mathf.Abs(dxPrev));
+
+        float alphaX = ComputeAlpha(safeDt, activeCutoffHz);
+        xPrev += alphaX * (rawValue - xPrev);
+        return xPrev;
+    }
+
+    public static float ComputeAlpha(float dt, float cutoffHz)
+    {
+        float omegaDt = TwoPi * Mathf.Max(0.01f, cutoffHz) * dt;
+        return omegaDt / (1f + omegaDt);
+    }
+}
+
+/// <summary>
+/// Filter One-Euro 3D isotropik murni Zero-GC (kecepatan 3D menyatu antar-sumbu agar lintasan diagonal/melingkar
+/// tidak terdistorsi) dengan dukungan <c>PushSample()</c> pada laju kamera + <c>Tick(dt)</c> pada laju render.
+/// </summary>
+public struct OneEuroFilter3D
+{
+    private bool initialized;
+    private Vector3 posPrev;
+    private Vector3 velPrev;
+    private Vector3 targetSample;
+    private Vector3 prevRawSample;
+    private float activeCutoffHz;
+
+    public bool IsInitialized => initialized;
+    public Vector3 CurrentValue => posPrev;
+    public Vector3 TargetSample => targetSample;
+
+    public void Reset()
+    {
+        initialized = false;
+        posPrev = Vector3.zero;
+        velPrev = Vector3.zero;
+        targetSample = Vector3.zero;
+        prevRawSample = Vector3.zero;
+        activeCutoffHz = 1.4f;
+    }
+
+    public Vector3 PushSample(
+        Vector3 rawValue,
+        float sampleDt,
+        float minCutoff,
+        float beta,
+        float dCutoff,
+        float velocityScale = 1f)
+    {
+        if (!initialized)
+        {
+            initialized = true;
+            posPrev = rawValue;
+            targetSample = rawValue;
+            prevRawSample = rawValue;
+            velPrev = Vector3.zero;
+            activeCutoffHz = minCutoff;
+            return posPrev;
+        }
+
+        float safeDt = Mathf.Clamp(sampleDt, 0.004f, 0.200f);
+        Vector3 rawVel = (rawValue - prevRawSample) / safeDt;
+        prevRawSample = rawValue;
+        targetSample = rawValue;
+
+        float alphaD = OneEuroFilter1D.ComputeAlpha(safeDt, dCutoff);
+        velPrev += alphaD * (rawVel - velPrev);
+
+        float scaledSpeed = velPrev.magnitude * velocityScale;
+        activeCutoffHz = minCutoff + (beta * scaledSpeed);
+        return posPrev;
+    }
+
+    public Vector3 Tick(float dt)
+    {
+        if (!initialized)
+        {
+            return posPrev;
+        }
+
+        float safeDt = Mathf.Clamp(dt, 0.0005f, 0.050f);
+        float alphaX = OneEuroFilter1D.ComputeAlpha(safeDt, activeCutoffHz);
+        posPrev += alphaX * (targetSample - posPrev);
+        return posPrev;
+    }
+
+    public Vector3 Filter(
+        Vector3 rawValue,
+        float dt,
+        float minCutoff,
+        float beta,
+        float dCutoff,
+        float velocityScale = 1f)
+    {
+        if (!initialized)
+        {
+            initialized = true;
+            posPrev = rawValue;
+            targetSample = rawValue;
+            prevRawSample = rawValue;
+            velPrev = Vector3.zero;
+            activeCutoffHz = minCutoff;
+            return posPrev;
+        }
+
+        float safeDt = Mathf.Clamp(dt, 0.004f, 0.200f);
+        Vector3 rawVel = (rawValue - posPrev) / safeDt;
+        prevRawSample = rawValue;
+        targetSample = rawValue;
+
+        float alphaD = OneEuroFilter1D.ComputeAlpha(safeDt, dCutoff);
+        velPrev += alphaD * (rawVel - velPrev);
+
+        float scaledSpeed = velPrev.magnitude * velocityScale;
+        activeCutoffHz = minCutoff + (beta * scaledSpeed);
+
+        float alphaX = OneEuroFilter1D.ComputeAlpha(safeDt, activeCutoffHz);
+        posPrev += alphaX * (rawValue - posPrev);
+        return posPrev;
+    }
+}
+
 public sealed class AirWeavingHandGestureDetector
 {
-    // Quality Gate: edge deadzone [0.04, 0.96], min raw palm scale sebelum clamp, hand-entry warm-up 120 ms, EMA ringan 20 ms
-    private const float EdgeDeadzoneMin = 0.04f;
-    private const float EdgeDeadzoneMax = 0.96f;
+    // Quality Gate: edge deadzone longgar [0.015, 0.985] agar gestur di pinggir layar & 2-tangan global tetap lengket
+    private const float EdgeDeadzoneMin = 0.015f;
+    private const float EdgeDeadzoneMax = 0.985f;
     private const float MinValidRawPalmScale2D = 0.045f;
     private const float MinValidPalmSpan3DMeters = 0.035f;
     private const float MinPalmScaleClamp = 0.055f;
@@ -42,15 +262,24 @@ public sealed class AirWeavingHandGestureDetector
     private const float MetricEmaTauSeconds = 0.020f;
     private const float DefaultReferenceDepth = 3.82f;
 
+    // Parameter One-Euro 3D kursor interaksi (minCutoff rendah 1.35-1.45 Hz bunuh micro-jitter, beta 0.055-0.065 nol-lag, dCutoff = 1.0 Hz)
+    private const float CursorOneEuroPalmMinCutoff = 1.40f;
+    private const float CursorOneEuroPalmBeta = 0.060f;
+    private const float CursorOneEuroPinchMinCutoff = 1.35f;
+    private const float CursorOneEuroPinchBeta = 0.055f;
+    private const float CursorOneEuroIndexMinCutoff = 1.40f;
+    private const float CursorOneEuroIndexBeta = 0.065f;
+    private const float CursorOneEuroDCutoff = 1.00f;
+    private const float CursorOneEuroWorldSpeedScale = 22.0f;
+
     // Parameter True 3D Hand Depth Tracking berbasis Rigid Metacarpal Palm Span (Tahap 4.7 v8.0)
     public const float DefaultComfortPalmSpan = 0.172f;
     private const float MinRigidPalmSpanClamp = 0.048f;
     private const float MaxRigidPalmSpanClamp = 0.620f;
-    private const float PalmSpanOneEuroMinCutoff = 1.10f;
-    private const float PalmSpanOneEuroBeta = 0.18f;
-    private const float PalmSpanOneEuroDCutoff = 2.00f;
+    private const float PalmSpanOneEuroMinCutoff = 1.15f;
+    private const float PalmSpanOneEuroBeta = 0.08f;
+    private const float PalmSpanOneEuroDCutoff = 1.00f;
     private const float PalmSpanMicroDeadzoneRatio = 0.020f;
-    private const float TwoPi = 6.283185307f;
 
     // Ambang sudut sendi 3D per jari (derajat) — kebal jarak kamera & rotasi miring
     private const float FingerExtendMaxPipDipDeg = 48.0f;
@@ -157,6 +386,7 @@ public sealed class AirWeavingHandGestureDetector
     // State Quality Gate
     private bool isUsingWorld3DMetrics = false;
     private bool isInEdgeDeadzone = false;
+    private bool isPalmCenterInSafeFrame = false;
     private bool isPalmScaleValid = false;
     private float entryWarmupTimer = HandEntryWarmupSeconds;
     private bool wasDetectedInTick = false;
@@ -206,11 +436,18 @@ public sealed class AirWeavingHandGestureDetector
     private float lastLandmarkUpdateUnscaledTime = -1f;
 
     // State 1D One-Euro Filter + Micro-Deadzone untuk Rigid Metacarpal Palm Span (True 3D Depth Tracking Tahap 4.7)
-    private bool palmSpanFilterInitialized = false;
-    private float palmSpanPrevFiltered = DefaultComfortPalmSpan;
-    private float palmSpanPrevDx = 0f;
+    private OneEuroFilter1D palmSpanOneEuroFilter;
     private float rawRigidPalmSpan = DefaultComfortPalmSpan;
     private float filteredPalmSpan = DefaultComfortPalmSpan;
+
+    // One-Euro Filter 3D Zero-GC untuk posisi kursor telapak, titik bidik Pinch (#4-#8), ujung telunjuk (#8), jempol (#4), & summon tip
+    private OneEuroFilter3D palmCursorFilter;
+    private OneEuroFilter3D pinchPointFilter;
+    private OneEuroFilter3D indexTipFilter;
+    private OneEuroFilter3D thumbTipFilter;
+    private OneEuroFilter3D activeSummonTipFilter;
+    private Transform cachedProjectionCamTransform;
+    private float cachedProjectionRefDepth = DefaultReferenceDepth;
 
     // State Summon 5 Gerbang & Identitas Jari Spesifik
     private readonly bool[] mainFingerExtended = new bool[4];
@@ -224,11 +461,13 @@ public sealed class AirWeavingHandGestureDetector
     public bool IsPalmScaleValid => isPalmScaleValid;
     public bool IsEntryWarmupComplete => entryWarmupTimer <= 0f;
     public bool IsQualityGatePassing => !isInEdgeDeadzone && isPalmScaleValid && entryWarmupTimer <= 0f;
+    public bool IsTwoHandQualityGatePassing => isPalmCenterInSafeFrame && isPalmScaleValid && entryWarmupTimer <= 0f;
 
     public bool IsFistActive => isFistActive;
     public bool FistJustStarted => fistJustStarted;
     public bool FistJustEnded => fistJustEnded;
     public bool IsPreFistCurling => isPreFistCurling;
+    public bool IsFormingFistIntent => isFistActive || isPreFistCurling;
     public float MeanCurlRatio => meanCurlRatio;
     public float MeanWeightedBendDeg => meanWeightedBendDeg;
     public int FoldedFingerCount => foldedFingerCount;
@@ -238,6 +477,8 @@ public sealed class AirWeavingHandGestureDetector
     public bool IsPinchActive => isPinchActive;
     public bool PinchJustStarted => pinchJustStarted;
     public bool PinchJustEnded => pinchJustEnded;
+    public bool IsPrePinchClosing => isPrePinchClosing;
+    public bool IsFormingPinchIntent => isPinchActive || isPrePinchGuardActive || isPrePinchClosing;
     public bool IsPinchReleaseIntent => currentPinchRatio > PinchReleaseIntentRatio;
     public bool IsPrePinchSuppressingSummon => isPinchActive || isPrePinchGuardActive;
     public float PinchRatio => currentPinchRatio;
@@ -268,6 +509,7 @@ public sealed class AirWeavingHandGestureDetector
     public float CursorSpeedUnitsPerSec { get; private set; }
     public Vector3 PalmCursorWorldPosition { get; private set; }
     public Vector2 PalmCursorLocalXY { get; private set; }
+    public Vector3 IndexTipWorldPosition { get; private set; }
     public Vector2 IndexTipLocalXY { get; private set; }
     public Vector2 ThumbTipLocalXY { get; private set; }
     public Vector2 ActiveSummonTipLocalXY { get; private set; }
@@ -276,9 +518,11 @@ public sealed class AirWeavingHandGestureDetector
     public void Reset()
     {
         ResetScalarEmaFilters();
+        ResetCursorFilters();
 
         isUsingWorld3DMetrics = false;
         isInEdgeDeadzone = false;
+        isPalmCenterInSafeFrame = false;
         isPalmScaleValid = false;
         entryWarmupTimer = HandEntryWarmupSeconds;
         wasDetectedInTick = false;
@@ -321,11 +565,11 @@ public sealed class AirWeavingHandGestureDetector
         prevRawPinchLocalXY = Vector2.zero;
         prevRawIndexTipLocalXY = Vector2.zero;
         lastLandmarkUpdateUnscaledTime = -1f;
-        palmSpanFilterInitialized = false;
-        palmSpanPrevFiltered = DefaultComfortPalmSpan;
-        palmSpanPrevDx = 0f;
+        palmSpanOneEuroFilter.Reset();
         rawRigidPalmSpan = DefaultComfortPalmSpan;
         filteredPalmSpan = DefaultComfortPalmSpan;
+        cachedProjectionCamTransform = null;
+        cachedProjectionRefDepth = DefaultReferenceDepth;
 
         for (int i = 0; i < 4; i++)
         {
@@ -343,14 +587,28 @@ public sealed class AirWeavingHandGestureDetector
         PalmCursorLocalXY = Vector2.zero;
         PinchPointWorldPosition = Vector3.zero;
         PinchPointLocalXY = Vector2.zero;
+        IndexTipWorldPosition = Vector3.zero;
         IndexTipLocalXY = Vector2.zero;
         ThumbTipLocalXY = Vector2.zero;
         ActiveSummonTipLocalXY = Vector2.zero;
     }
 
     /// <summary>
-    /// Memicu ulang warm-up masuk tangan 120 ms &amp; reset filter EMA skalar saat tangan baru muncul kembali atau
-    /// melompat di luar radius asosiasi, tanpa memutus paksa sticky hold yang sedang dievaluasi occlusion grace. Zero-GC.
+    /// Mereset seluruh filter One-Euro 3D kursor (telapak, Pinch #4-#8, telunjuk #8, jempol #4, &amp; summon tip)
+    /// saat fresh entry agar tidak pernah ada tarikan dari posisi lama. Zero-GC.
+    /// </summary>
+    public void ResetCursorFilters()
+    {
+        palmCursorFilter.Reset();
+        pinchPointFilter.Reset();
+        indexTipFilter.Reset();
+        thumbTipFilter.Reset();
+        activeSummonTipFilter.Reset();
+    }
+
+    /// <summary>
+    /// Memicu ulang warm-up masuk tangan 80 ms &amp; reset filter EMA skalar + One-Euro 3D kursor saat tangan baru muncul
+    /// kembali atau melompat di luar radius asosiasi, tanpa memutus paksa sticky hold occlusion grace. Zero-GC.
     /// </summary>
     public void RestartEntryWarmup()
     {
@@ -361,7 +619,9 @@ public sealed class AirWeavingHandGestureDetector
         pinchEnterHoldTimer = 0f;
         hasPrevSampleCursors = false;
         lastLandmarkUpdateUnscaledTime = -1f;
+        palmSpanOneEuroFilter.Reset();
         ResetScalarEmaFilters();
+        ResetCursorFilters();
     }
 
     private void ResetScalarEmaFilters()
@@ -406,26 +666,20 @@ public sealed class AirWeavingHandGestureDetector
         rawRigidPalmSpan = Mathf.Clamp(computedSpan, MinRigidPalmSpanClamp, MaxRigidPalmSpanClamp);
 
         float dt = Mathf.Clamp(sampleDt, 0.005f, 0.200f);
-        if (!palmSpanFilterInitialized)
+        bool wasInitialized = palmSpanOneEuroFilter.IsInitialized;
+        float oneEuroSpan = palmSpanOneEuroFilter.Filter(
+            rawRigidPalmSpan,
+            dt,
+            PalmSpanOneEuroMinCutoff,
+            PalmSpanOneEuroBeta,
+            PalmSpanOneEuroDCutoff,
+            velocityScale: 100.0f);
+
+        if (!wasInitialized)
         {
-            palmSpanFilterInitialized = true;
-            palmSpanPrevFiltered = rawRigidPalmSpan;
-            palmSpanPrevDx = 0f;
-            filteredPalmSpan = rawRigidPalmSpan;
+            filteredPalmSpan = Mathf.Clamp(oneEuroSpan, MinRigidPalmSpanClamp, MaxRigidPalmSpanClamp);
             return filteredPalmSpan;
         }
-
-        // 1D One-Euro Filter pada metrik Rigid Palm Span (skala x100 agar beta setara dengan filter landmark)
-        float scaledDiff = (rawRigidPalmSpan - palmSpanPrevFiltered) * 100.0f;
-        float rawDx = scaledDiff / dt;
-        float alphaD = ComputeOneEuroAlpha(dt, PalmSpanOneEuroDCutoff);
-        float smoothedDx = palmSpanPrevDx + (alphaD * (rawDx - palmSpanPrevDx));
-        float adaptiveCutoff = PalmSpanOneEuroMinCutoff + (PalmSpanOneEuroBeta * Mathf.Abs(smoothedDx));
-        float alphaX = ComputeOneEuroAlpha(dt, adaptiveCutoff);
-        float oneEuroSpan = palmSpanPrevFiltered + (alphaX * (rawRigidPalmSpan - palmSpanPrevFiltered));
-
-        palmSpanPrevFiltered = oneEuroSpan;
-        palmSpanPrevDx = smoothedDx;
 
         // Micro-deadzone halus (~2%) agar kedalaman 3D terkunci tenang saat tangan diam namun mulus tanpa lompatan saat bergerak
         float deadzoneRadius = Mathf.Max(0.0012f, filteredPalmSpan * PalmSpanMicroDeadzoneRatio);
@@ -447,18 +701,18 @@ public sealed class AirWeavingHandGestureDetector
 
     /// <summary>
     /// Memperbarui fitur geometris 3D metrik (<c>worldLandmarks</c>) bersama proyeksi layar (<c>landmarks</c>) setiap frame
-    /// inferensi baru masuk. Memproyeksikan seluruh koordinat interaksi pada sinar kamera <c>referenceDepth</c> konsisten.
-    /// Tidak memanggil ulang <c>UpdateRigidPalmSpanOnly</c> agar One-Euro depth tetap tepat 1x per inferensi. Zero-GC.
+    /// inferensi baru masuk. Memproyeksikan &amp; menyaring seluruh kursor interaksi memakai <c>OneEuroFilter3D</c> Zero-GC
+    /// pada sinar kamera <c>referenceDepth</c> konsisten. Tidak memanggil ulang <c>UpdateRigidPalmSpanOnly</c>. Zero-GC.
     /// </summary>
     public void UpdateFromLandmarks(
         List<NormalizedLandmark> landmarks,
         List<Landmark> worldLandmarks,
-        Vector3[] smoothedLandmarksWorld,
+        Vector3[] rawLandmarksWorld,
         Transform camTransform,
         float referenceDepth = DefaultReferenceDepth,
         float cameraAspect = 1.3333f)
     {
-        if (landmarks == null || landmarks.Count < 21 || smoothedLandmarksWorld == null || smoothedLandmarksWorld.Length < 21 || camTransform == null)
+        if (landmarks == null || landmarks.Count < 21 || rawLandmarksWorld == null || rawLandmarksWorld.Length < 21 || camTransform == null)
         {
             return;
         }
@@ -471,6 +725,8 @@ public sealed class AirWeavingHandGestureDetector
 
         float safeAspect = Mathf.Clamp(cameraAspect, 0.65f, 2.40f);
         float safeRefDepth = Mathf.Max(0.50f, referenceDepth);
+        cachedProjectionCamTransform = camTransform;
+        cachedProjectionRefDepth = safeRefDepth;
 
         NormalizedLandmark l0 = landmarks[0];
         NormalizedLandmark l4 = landmarks[4];
@@ -480,19 +736,18 @@ public sealed class AirWeavingHandGestureDetector
         NormalizedLandmark l13 = landmarks[13];
         NormalizedLandmark l17 = landmarks[17];
 
-        // 1. Quality Gate: validasi palmScale 2D mentah SEBELUM clamp & cek edge-of-frame deadzone [0.04, 0.96]
+        // 1. Quality Gate: validasi palmScale 2D mentah SEBELUM clamp & edge deadzone longgar [0.015, 0.985]
+        //    Fokus pada pusat telapak & ujung bidik utama (#4, #8, #9) agar pergelangan (#0) atau kelingking (#17) di tepi layar tidak memutus gestur.
         float rawPalmScale2D = 0.5f * (Dist2DCompensated(l0, l9, safeAspect) + Dist2DCompensated(l5, l17, safeAspect));
         isPalmScaleValid = rawPalmScale2D >= MinValidRawPalmScale2D;
 
         float cx2D = (l0.x + l5.x + l9.x + l13.x + l17.x) * 0.20f;
         float cy2D = (l0.y + l5.y + l9.y + l13.y + l17.y) * 0.20f;
-        isInEdgeDeadzone = !IsInsideSafeFrame(cx2D, cy2D)
-                           || !IsInsideSafeFrame(l0.x, l0.y)
+        isPalmCenterInSafeFrame = IsInsideSafeFrame(cx2D, cy2D);
+        isInEdgeDeadzone = !isPalmCenterInSafeFrame
                            || !IsInsideSafeFrame(l4.x, l4.y)
-                           || !IsInsideSafeFrame(l5.x, l5.y)
                            || !IsInsideSafeFrame(l8.x, l8.y)
-                           || !IsInsideSafeFrame(l9.x, l9.y)
-                           || !IsInsideSafeFrame(l17.x, l17.y);
+                           || !IsInsideSafeFrame(l9.x, l9.y);
 
         // 2. Pilih sumber vektor 3D: handWorldLandmarks (3D meter) dengan fallback 2D aspect-compensated bila kosong
         bool hasWorld3D = worldLandmarks != null && worldLandmarks.Count >= 21;
@@ -766,55 +1021,23 @@ public sealed class AirWeavingHandGestureDetector
             currentSummonPose = SummonHandPose.None;
         }
 
-        // 7. Proyeksi koordinat interaksi TERPADU pada sinar kamera bidang referensi konsisten (WorkbenchDepth)
-        //    Menjamin 100% sinkronisasi visual rig tangan <-> objek tertangkap & kecepatan konstan pada jarak tangan berapa pun
-        Vector3 rawPalmWorld = (smoothedLandmarksWorld[9] * 0.50f)
-                               + (smoothedLandmarksWorld[5] * 0.30f)
-                               + (smoothedLandmarksWorld[0] * 0.20f);
-        Vector2 rayPalmXY = ProjectWorldToRefRayPlane(camTransform, rawPalmWorld, safeRefDepth);
+        // 7. Proyeksi & One-Euro Filter 3D Zero-GC untuk koordinat interaksi pada sinar kamera bidang referensi (WorkbenchDepth):
+        //    Telapak, Pinch (#4-#8), Telunjuk (#8), Jempol (#4), & Summon Tip disaring satu lapis bersih tanpa tumpukan smoothing.
+        Vector3 rawPalmWorld = (rawLandmarksWorld[9] * 0.50f)
+                               + (rawLandmarksWorld[5] * 0.30f)
+                               + (rawLandmarksWorld[0] * 0.20f);
+        Vector3 rawPinchWorld = (rawLandmarksWorld[4] + rawLandmarksWorld[8]) * 0.5f;
+        Vector3 rawIndexTipWorld = rawLandmarksWorld[8];
+        Vector3 rawThumbTipWorld = rawLandmarksWorld[4];
 
-        Vector3 rawPinchWorld = (smoothedLandmarksWorld[4] + smoothedLandmarksWorld[8]) * 0.5f;
-        Vector2 rayPinchXY = ProjectWorldToRefRayPlane(camTransform, rawPinchWorld, safeRefDepth);
-
-        Vector2 rayIndexTipXY = ProjectWorldToRefRayPlane(camTransform, smoothedLandmarksWorld[8], safeRefDepth);
-        Vector2 rayThumbTipXY = ProjectWorldToRefRayPlane(camTransform, smoothedLandmarksWorld[4], safeRefDepth);
-
-        if (!hasPrevSampleCursors)
-        {
-            prevRawPalmLocalXY = rayPalmXY;
-            prevRawPinchLocalXY = rayPinchXY;
-            prevRawIndexTipLocalXY = rayIndexTipXY;
-            CursorSpeedUnitsPerSec = 0f;
-            PinchSpeedUnitsPerSec = 0f;
-            IndexTipSpeedUnitsPerSec = 0f;
-            hasPrevSampleCursors = true;
-        }
-        else
-        {
-            CursorSpeedUnitsPerSec = Vector2.Distance(rayPalmXY, prevRawPalmLocalXY) / sampleDt;
-            PinchSpeedUnitsPerSec = Vector2.Distance(rayPinchXY, prevRawPinchLocalXY) / sampleDt;
-            IndexTipSpeedUnitsPerSec = Vector2.Distance(rayIndexTipXY, prevRawIndexTipLocalXY) / sampleDt;
-            prevRawPalmLocalXY = rayPalmXY;
-            prevRawPinchLocalXY = rayPinchXY;
-            prevRawIndexTipLocalXY = rayIndexTipXY;
-        }
-
-        PalmCursorLocalXY = rayPalmXY;
-        PalmCursorWorldPosition = rawPalmWorld;
-
-        PinchPointLocalXY = rayPinchXY;
-        PinchPointWorldPosition = rawPinchWorld;
-
-        IndexTipLocalXY = rayIndexTipXY;
-        ThumbTipLocalXY = rayThumbTipXY;
-
+        Vector3 rawActiveSummonTipWorld;
         if (currentSummonPose == SummonHandPose.ThumbOnlyNot)
         {
-            ActiveSummonTipLocalXY = ThumbTipLocalXY;
+            rawActiveSummonTipWorld = rawThumbTipWorld;
         }
         else if (idxExt)
         {
-            ActiveSummonTipLocalXY = IndexTipLocalXY;
+            rawActiveSummonTipWorld = rawIndexTipWorld;
         }
         else
         {
@@ -827,15 +1050,88 @@ public sealed class AirWeavingHandGestureDetector
                     break;
                 }
             }
-            ActiveSummonTipLocalXY = ProjectWorldToRefRayPlane(camTransform, smoothedLandmarksWorld[activeTipLandmarkIdx], safeRefDepth);
+            rawActiveSummonTipWorld = rawLandmarksWorld[activeTipLandmarkIdx];
+        }
+
+        palmCursorFilter.PushSample(rawPalmWorld, sampleDt, CursorOneEuroPalmMinCutoff, CursorOneEuroPalmBeta, CursorOneEuroDCutoff, CursorOneEuroWorldSpeedScale);
+        pinchPointFilter.PushSample(rawPinchWorld, sampleDt, CursorOneEuroPinchMinCutoff, CursorOneEuroPinchBeta, CursorOneEuroDCutoff, CursorOneEuroWorldSpeedScale);
+        indexTipFilter.PushSample(rawIndexTipWorld, sampleDt, CursorOneEuroIndexMinCutoff, CursorOneEuroIndexBeta, CursorOneEuroDCutoff, CursorOneEuroWorldSpeedScale);
+        thumbTipFilter.PushSample(rawThumbTipWorld, sampleDt, CursorOneEuroPalmMinCutoff, CursorOneEuroPalmBeta, CursorOneEuroDCutoff, CursorOneEuroWorldSpeedScale);
+        activeSummonTipFilter.PushSample(rawActiveSummonTipWorld, sampleDt, CursorOneEuroIndexMinCutoff, CursorOneEuroIndexBeta, CursorOneEuroDCutoff, CursorOneEuroWorldSpeedScale);
+
+        SyncFilteredCursorOutputs();
+
+        Vector2 samplePalmRayXY = ProjectWorldToRefRayPlane(camTransform, rawPalmWorld, safeRefDepth);
+        Vector2 samplePinchRayXY = ProjectWorldToRefRayPlane(camTransform, rawPinchWorld, safeRefDepth);
+        Vector2 sampleIndexRayXY = ProjectWorldToRefRayPlane(camTransform, rawIndexTipWorld, safeRefDepth);
+
+        if (!hasPrevSampleCursors)
+        {
+            prevRawPalmLocalXY = samplePalmRayXY;
+            prevRawPinchLocalXY = samplePinchRayXY;
+            prevRawIndexTipLocalXY = sampleIndexRayXY;
+            CursorSpeedUnitsPerSec = 0f;
+            PinchSpeedUnitsPerSec = 0f;
+            IndexTipSpeedUnitsPerSec = 0f;
+            hasPrevSampleCursors = true;
+        }
+        else
+        {
+            CursorSpeedUnitsPerSec = Vector2.Distance(samplePalmRayXY, prevRawPalmLocalXY) / sampleDt;
+            PinchSpeedUnitsPerSec = Vector2.Distance(samplePinchRayXY, prevRawPinchLocalXY) / sampleDt;
+            IndexTipSpeedUnitsPerSec = Vector2.Distance(sampleIndexRayXY, prevRawIndexTipLocalXY) / sampleDt;
+            prevRawPalmLocalXY = samplePalmRayXY;
+            prevRawPinchLocalXY = samplePinchRayXY;
+            prevRawIndexTipLocalXY = sampleIndexRayXY;
         }
     }
 
+    private void StepCursorFilters(float dt)
+    {
+        palmCursorFilter.Tick(dt);
+        pinchPointFilter.Tick(dt);
+        indexTipFilter.Tick(dt);
+        thumbTipFilter.Tick(dt);
+        activeSummonTipFilter.Tick(dt);
+        SyncFilteredCursorOutputs();
+    }
+
+    private void SyncFilteredCursorOutputs()
+    {
+        if (cachedProjectionCamTransform == null)
+        {
+            return;
+        }
+
+        Vector3 filteredPalm = palmCursorFilter.CurrentValue;
+        Vector3 filteredPinch = pinchPointFilter.CurrentValue;
+        Vector3 filteredIndex = indexTipFilter.CurrentValue;
+        Vector3 filteredThumb = thumbTipFilter.CurrentValue;
+        Vector3 filteredSummonTip = activeSummonTipFilter.CurrentValue;
+
+        PalmCursorWorldPosition = filteredPalm;
+        PalmCursorLocalXY = ProjectWorldToRefRayPlane(cachedProjectionCamTransform, filteredPalm, cachedProjectionRefDepth);
+
+        PinchPointWorldPosition = filteredPinch;
+        PinchPointLocalXY = ProjectWorldToRefRayPlane(cachedProjectionCamTransform, filteredPinch, cachedProjectionRefDepth);
+
+        IndexTipWorldPosition = filteredIndex;
+        IndexTipLocalXY = ProjectWorldToRefRayPlane(cachedProjectionCamTransform, filteredIndex, cachedProjectionRefDepth);
+
+        ThumbTipLocalXY = ProjectWorldToRefRayPlane(cachedProjectionCamTransform, filteredThumb, cachedProjectionRefDepth);
+        ActiveSummonTipLocalXY = ProjectWorldToRefRayPlane(cachedProjectionCamTransform, filteredSummonTip, cachedProjectionRefDepth);
+    }
+
     /// <summary>
-    /// Memproses warm-up 120 ms, hysteresis 3D, enter debounce ganda (frame berturut-turut + durasi 70-75 ms),
-    /// asymmetric exit debounce, sticky-hold, &amp; occlusion grace untuk kanal Pinch &amp; Fist secara terpisah. Zero-GC.
+    /// Memproses warm-up 80 ms, kemajuan One-Euro 3D kursor per-frame render (<c>dt</c>), hysteresis 3D,
+    /// enter debounce ganda, asymmetric exit debounce, sticky-hold, &amp; occlusion grace untuk kanal Pinch &amp; Fist. Zero-GC.
     /// </summary>
-    public void TickTemporalState(float dt, bool isHandDetected, bool isFistStickyHoldActive = false, bool isPinchStickyHoldActive = false)
+    public void TickTemporalState(
+        float dt,
+        bool isHandDetected,
+        bool isFistStickyHoldActive = false,
+        bool isPinchStickyHoldActive = false,
+        bool relaxEdgeDeadzoneForTwoHand = false)
     {
         fistJustStarted = false;
         fistJustEnded = false;
@@ -849,6 +1145,8 @@ public sealed class AirWeavingHandGestureDetector
 
         if (isHandDetected)
         {
+            StepCursorFilters(dt);
+
             if (!wasDetectedInTick)
             {
                 wasDetectedInTick = true;
@@ -910,7 +1208,7 @@ public sealed class AirWeavingHandGestureDetector
             return;
         }
 
-        bool qualityGateOk = IsQualityGatePassing;
+        bool qualityGateOk = relaxEdgeDeadzoneForTwoHand ? IsTwoHandQualityGatePassing : IsQualityGatePassing;
 
         // ---------------------------------------------------------------------
         // KANAL 1: PINCH / CUBIT 3D (KHUSUS KABEL — DISJOINT DARI FIST)
@@ -1138,11 +1436,5 @@ public sealed class AirWeavingHandGestureDetector
         float dy = a.y - b.y;
         float dz = Mathf.Clamp(a.z - b.z, -0.18f, 0.18f) * 0.52f;
         return Mathf.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
-    }
-
-    private static float ComputeOneEuroAlpha(float dt, float cutoffHz)
-    {
-        float omegaDt = TwoPi * cutoffHz * dt;
-        return omegaDt / (1f + omegaDt);
     }
 }
