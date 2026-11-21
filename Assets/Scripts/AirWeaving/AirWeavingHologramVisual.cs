@@ -61,12 +61,20 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private Material reticleOuterMat;
     private Material reticleInnerMat;
     private Material reticleCrossMat;
+    private LineRenderer secondaryReticleOuterRenderer;
+    private LineRenderer secondaryReticleInnerRenderer;
+    private LineRenderer secondaryReticleCrossHRenderer;
+    private LineRenderer secondaryReticleCrossVRenderer;
+    private Material secondaryReticleOuterMat;
     private readonly Vector3[] reticleBuffer = new Vector3[ReticleSegments];
 
     private LineRenderer pinchRingRenderer;
     private LineRenderer pinchCoreRenderer;
     private Material pinchRingMat;
     private Material pinchCoreMat;
+    private LineRenderer secondaryPinchRingRenderer;
+    private LineRenderer secondaryPinchCoreRenderer;
+    private Material secondaryPinchRingMat;
     private readonly Vector3[] pinchRingBuffer = new Vector3[PinchRingSegments];
 
     // Visual Lock 2 Tangan (Air-Orbit 360°, Air-Zoom, & Dual-Fist Reset)
@@ -119,10 +127,20 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         reticleCrossHRenderer = CreateSegmentLine("Holo_PalmReticleCrossH", 0.006f, reticleCrossMat);
         reticleCrossVRenderer = CreateSegmentLine("Holo_PalmReticleCrossV", 0.006f, reticleCrossMat);
 
+        secondaryReticleOuterMat = CreateSafeSpritesMat(ReticleOpenColor, 3040);
+        secondaryReticleOuterRenderer = CreateLoopLine("Holo_SecPalmReticleOuter", ReticleSegments, 0.009f, secondaryReticleOuterMat);
+        secondaryReticleInnerRenderer = CreateLoopLine("Holo_SecPalmReticleInner", ReticleSegments, 0.0065f, reticleInnerMat);
+        secondaryReticleCrossHRenderer = CreateSegmentLine("Holo_SecPalmReticleCrossH", 0.006f, reticleCrossMat);
+        secondaryReticleCrossVRenderer = CreateSegmentLine("Holo_SecPalmReticleCrossV", 0.006f, reticleCrossMat);
+
         pinchRingMat = CreateSafeSpritesMat(PinchHoverColor, 3043);
         pinchCoreMat = CreateSafeSpritesMat(ReticleCoreWhiteColor, 3044);
         pinchRingRenderer = CreateLoopLine("Holo_PinchCursorRing", PinchRingSegments, 0.0085f, pinchRingMat);
         pinchCoreRenderer = CreateLoopLine("Holo_PinchCursorCore", PinchRingSegments, 0.0065f, pinchCoreMat);
+
+        secondaryPinchRingMat = CreateSafeSpritesMat(PinchHoverColor, 3043);
+        secondaryPinchRingRenderer = CreateLoopLine("Holo_SecPinchCursorRing", PinchRingSegments, 0.0085f, secondaryPinchRingMat);
+        secondaryPinchCoreRenderer = CreateLoopLine("Holo_SecPinchCursorCore", PinchRingSegments, 0.0065f, pinchCoreMat);
 
         twoHandBeamMat = CreateSafeSpritesMat(TwoHandOrbitCyanColor, 3045);
         twoHandAnchorMat = CreateSafeSpritesMat(TwoHandOrbitCyanColor, 3046);
@@ -166,7 +184,9 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         }
 
         SetReticleVisible(false);
+        SetSecondaryReticleVisible(false);
         SetPinchIndicatorVisible(false);
+        SetSecondaryPinchIndicatorVisible(false);
         SetTwoHandLinkVisible(false);
     }
 
@@ -328,7 +348,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     }
 
     /// <summary>
-    /// Memperbarui reticle kursor telapak tangan (tersembunyi otomatis saat tangan hilang / overlay / drag kabel). Zero-GC.
+    /// Memperbarui reticle kursor telapak tangan primer (tersembunyi otomatis saat tangan hilang / overlay / drag kabel). Zero-GC.
     /// </summary>
     public void UpdatePalmReticle(
         Transform camT,
@@ -339,6 +359,65 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         bool isTargetingPort,
         float meanCurlRatio)
     {
+        RenderPalmReticle(
+            camT,
+            isHandDetected,
+            hideReticle,
+            palmWorldPos,
+            isFistActive,
+            isTargetingPort,
+            meanCurlRatio,
+            reticleOuterRenderer,
+            reticleOuterMat,
+            reticleInnerRenderer,
+            reticleCrossHRenderer,
+            reticleCrossVRenderer,
+            isSecondary: false);
+    }
+
+    /// <summary>
+    /// Memperbarui reticle kursor telapak tangan sekunder agar kedua tangan sama-sama tampak siap pakai saat Idle. Zero-GC.
+    /// </summary>
+    public void UpdateSecondaryPalmReticle(
+        Transform camT,
+        bool isHandDetected,
+        bool hideReticle,
+        Vector3 palmWorldPos,
+        bool isFistActive,
+        bool isTargetingPort,
+        float meanCurlRatio)
+    {
+        RenderPalmReticle(
+            camT,
+            isHandDetected,
+            hideReticle,
+            palmWorldPos,
+            isFistActive,
+            isTargetingPort,
+            meanCurlRatio,
+            secondaryReticleOuterRenderer,
+            secondaryReticleOuterMat,
+            secondaryReticleInnerRenderer,
+            secondaryReticleCrossHRenderer,
+            secondaryReticleCrossVRenderer,
+            isSecondary: true);
+    }
+
+    private void RenderPalmReticle(
+        Transform camT,
+        bool isHandDetected,
+        bool hideReticle,
+        Vector3 palmWorldPos,
+        bool isFistActive,
+        bool isTargetingPort,
+        float meanCurlRatio,
+        LineRenderer outerLr,
+        Material outerMat,
+        LineRenderer innerLr,
+        LineRenderer crossHLr,
+        LineRenderer crossVLr,
+        bool isSecondary)
+    {
         if (!isInitialized)
         {
             return;
@@ -347,7 +426,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         bool show = isHandDetected && !hideReticle && camT != null;
         if (!show)
         {
-            SetReticleVisible(false);
+            if (isSecondary) SetSecondaryReticleVisible(false);
+            else SetReticleVisible(false);
             return;
         }
 
@@ -364,17 +444,17 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             ? ReticleFistColor
             : (isTargetingPort ? ReticlePortAimColor : ReticleOpenColor);
 
-        DrawReticleCircle(reticleOuterRenderer, reticleOuterMat, center, right, up, outerRadius, color, isFistActive ? 0.013f : 0.009f);
-        DrawReticleCircle(reticleInnerRenderer, reticleInnerMat, center - (camT.forward * 0.004f), right, up, innerRadius, ReticleCoreWhiteColor, isFistActive ? 0.009f : 0.006f);
-        if (reticleCrossHRenderer != null && reticleCrossVRenderer != null)
+        DrawReticleCircle(outerLr, outerMat, center, right, up, outerRadius, color, isFistActive ? 0.013f : 0.009f);
+        DrawReticleCircle(innerLr, reticleInnerMat, center - (camT.forward * 0.004f), right, up, innerRadius, ReticleCoreWhiteColor, isFistActive ? 0.009f : 0.006f);
+        if (crossHLr != null && crossVLr != null)
         {
             Vector3 crossCenter = center - (camT.forward * 0.006f);
-            reticleCrossHRenderer.enabled = true;
-            reticleCrossHRenderer.SetPosition(0, crossCenter - (right * crossHalf));
-            reticleCrossHRenderer.SetPosition(1, crossCenter + (right * crossHalf));
-            reticleCrossVRenderer.enabled = true;
-            reticleCrossVRenderer.SetPosition(0, crossCenter - (up * crossHalf));
-            reticleCrossVRenderer.SetPosition(1, crossCenter + (up * crossHalf));
+            crossHLr.enabled = true;
+            crossHLr.SetPosition(0, crossCenter - (right * crossHalf));
+            crossHLr.SetPosition(1, crossCenter + (right * crossHalf));
+            crossVLr.enabled = true;
+            crossVLr.SetPosition(0, crossCenter - (up * crossHalf));
+            crossVLr.SetPosition(1, crossCenter + (up * crossHalf));
         }
     }
 
@@ -389,6 +469,55 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         bool isPinchActive,
         bool isSnappedToPort)
     {
+        RenderPinchIndicator(
+            camT,
+            isHandDetected,
+            isAllowedAndRelevant,
+            pinchWorldPos,
+            isPinchActive,
+            isSnappedToPort,
+            pinchRingRenderer,
+            pinchRingMat,
+            pinchCoreRenderer,
+            isSecondary: false);
+    }
+
+    /// <summary>
+    /// Menampilkan indikator cincin cubit untuk tangan kedua saat membidik port di mode Idle ambidextrous. Zero-GC.
+    /// </summary>
+    public void UpdateSecondaryPinchIndicator(
+        Transform camT,
+        bool isHandDetected,
+        bool isAllowedAndRelevant,
+        Vector3 pinchWorldPos,
+        bool isPinchActive,
+        bool isSnappedToPort)
+    {
+        RenderPinchIndicator(
+            camT,
+            isHandDetected,
+            isAllowedAndRelevant,
+            pinchWorldPos,
+            isPinchActive,
+            isSnappedToPort,
+            secondaryPinchRingRenderer,
+            secondaryPinchRingMat,
+            secondaryPinchCoreRenderer,
+            isSecondary: true);
+    }
+
+    private void RenderPinchIndicator(
+        Transform camT,
+        bool isHandDetected,
+        bool isAllowedAndRelevant,
+        Vector3 pinchWorldPos,
+        bool isPinchActive,
+        bool isSnappedToPort,
+        LineRenderer ringLr,
+        Material ringMat,
+        LineRenderer coreLr,
+        bool isSecondary)
+    {
         if (!isInitialized)
         {
             return;
@@ -397,7 +526,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         bool show = isHandDetected && isAllowedAndRelevant && camT != null;
         if (!show)
         {
-            SetPinchIndicatorVisible(false);
+            if (isSecondary) SetSecondaryPinchIndicatorVisible(false);
+            else SetPinchIndicatorVisible(false);
             return;
         }
 
@@ -409,8 +539,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         float coreR = isPinchActive ? 0.0085f : 0.0065f;
         Color ringCol = isSnappedToPort ? PinchSnappedColor : (isPinchActive ? PinchActiveDragColor : PinchHoverColor);
 
-        DrawPinchCircle(pinchRingRenderer, pinchRingMat, center, right, up, outerR, ringCol, isPinchActive ? 0.011f : 0.0085f);
-        DrawPinchCircle(pinchCoreRenderer, pinchCoreMat, center - (camT.forward * 0.004f), right, up, coreR, ReticleCoreWhiteColor, 0.007f);
+        DrawPinchCircle(ringLr, ringMat, center, right, up, outerR, ringCol, isPinchActive ? 0.011f : 0.0085f);
+        DrawPinchCircle(coreLr, pinchCoreMat, center - (camT.forward * 0.004f), right, up, coreR, ReticleCoreWhiteColor, 0.007f);
     }
 
     /// <summary>
@@ -515,6 +645,26 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         }
     }
 
+    private void SetSecondaryReticleVisible(bool visible)
+    {
+        if (secondaryReticleOuterRenderer != null && secondaryReticleOuterRenderer.enabled != visible)
+        {
+            secondaryReticleOuterRenderer.enabled = visible;
+        }
+        if (secondaryReticleInnerRenderer != null && secondaryReticleInnerRenderer.enabled != visible)
+        {
+            secondaryReticleInnerRenderer.enabled = visible;
+        }
+        if (secondaryReticleCrossHRenderer != null && secondaryReticleCrossHRenderer.enabled != visible)
+        {
+            secondaryReticleCrossHRenderer.enabled = visible;
+        }
+        if (secondaryReticleCrossVRenderer != null && secondaryReticleCrossVRenderer.enabled != visible)
+        {
+            secondaryReticleCrossVRenderer.enabled = visible;
+        }
+    }
+
     private void SetPinchIndicatorVisible(bool visible)
     {
         if (pinchRingRenderer != null && pinchRingRenderer.enabled != visible)
@@ -524,6 +674,18 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         if (pinchCoreRenderer != null && pinchCoreRenderer.enabled != visible)
         {
             pinchCoreRenderer.enabled = visible;
+        }
+    }
+
+    private void SetSecondaryPinchIndicatorVisible(bool visible)
+    {
+        if (secondaryPinchRingRenderer != null && secondaryPinchRingRenderer.enabled != visible)
+        {
+            secondaryPinchRingRenderer.enabled = visible;
+        }
+        if (secondaryPinchCoreRenderer != null && secondaryPinchCoreRenderer.enabled != visible)
+        {
+            secondaryPinchCoreRenderer.enabled = visible;
         }
     }
 
@@ -710,9 +872,17 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         reticleOuterMat = null;
         reticleInnerMat = null;
         reticleCrossMat = null;
+        secondaryReticleOuterRenderer = null;
+        secondaryReticleInnerRenderer = null;
+        secondaryReticleCrossHRenderer = null;
+        secondaryReticleCrossVRenderer = null;
+        secondaryReticleOuterMat = null;
         pinchRingRenderer = null;
         pinchCoreRenderer = null;
         pinchRingMat = null;
         pinchCoreMat = null;
+        secondaryPinchRingRenderer = null;
+        secondaryPinchCoreRenderer = null;
+        secondaryPinchRingMat = null;
     }
 }

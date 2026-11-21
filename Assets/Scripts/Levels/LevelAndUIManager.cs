@@ -4734,14 +4734,25 @@ public class LevelAndUIManager : MonoBehaviour
                     if (node != null && node.isTracked && node.nodeType != NodeType.InputSource && node.nodeType != NodeType.OutputActuator)
                     {
                         int requiredInputs = node.GetMaxInputCount();
-                        if (node.connectedInputs.Count < requiredInputs)
+                        int connectedValidInputs = 0;
+                        if (node.connectedInputs != null)
+                        {
+                            for (int k = 0; k < node.connectedInputs.Count; k++)
+                            {
+                                if (node.connectedInputs[k] != null && node.connectedInputs[k].isTracked)
+                                {
+                                    connectedValidInputs++;
+                                }
+                            }
+                        }
+                        if (connectedValidInputs < requiredInputs)
                         {
                             if (txtFeedback != null)
                             {
                                 string emptyPinHint = isAirModeValidation
                                     ? "Sambungkan kabel sumber ke slot kosong gerbang tersebut."
                                     : "Dekatkan kartu sumber.";
-                                txtFeedback.text = $"Gagal! Slot pin gerbang {node.nodeType} masih kosong ('?') ({node.connectedInputs.Count}/{requiredInputs}). {emptyPinHint}";
+                                txtFeedback.text = $"Gagal! Slot pin gerbang {node.nodeType} masih kosong ('?') ({connectedValidInputs}/{requiredInputs}). {emptyPinHint}";
                                 txtFeedback.color = new Color(1.00f, 0.96f, 0.93f, 1f);
                             }
 

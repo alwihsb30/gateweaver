@@ -442,12 +442,6 @@ public class CircuitManager : MonoBehaviour
             for (int i = 0; i < manualConnections.Count; i++)
             {
                 ManualConnectionEdge edge = manualConnections[i];
-                int normalizedSlot = edge.targetSlotIndex == 1 ? 1 : 0;
-                if (normalizedSlot != slotPass)
-                {
-                    continue;
-                }
-
                 GateNode src = edge.source;
                 GateNode dst = edge.target;
                 if (src == null || dst == null || src == dst || !src.isTracked || !dst.isTracked)
@@ -458,10 +452,28 @@ public class CircuitManager : MonoBehaviour
                 {
                     continue;
                 }
-                if (dst.connectedInputs.Count >= dst.GetMaxInputCount())
+
+                int maxInputs = dst.GetMaxInputCount();
+                if (maxInputs <= 0)
                 {
                     continue;
                 }
+
+                int normalizedSlot = (edge.targetSlotIndex == 1 && maxInputs >= 2) ? 1 : 0;
+                if (normalizedSlot != slotPass)
+                {
+                    continue;
+                }
+
+                if (normalizedSlot == 0 && dst.connectedInputs.Count >= 1 && dst.connectedInputs[0] != null)
+                {
+                    continue;
+                }
+                if (normalizedSlot == 1 && dst.connectedInputs.Count >= 2 && dst.connectedInputs[1] != null)
+                {
+                    continue;
+                }
+
                 // Pengaman lapis kedua anti parallel duplicate edge: tolak pasangan (source, target) identik di slot kedua (zero-GC)
                 bool duplicateOnTarget = false;
                 for (int k = 0; k < dst.connectedInputs.Count; k++)
@@ -485,7 +497,34 @@ public class CircuitManager : MonoBehaviour
                 {
                     src.connectedTarget = dst;
                 }
-                dst.connectedInputs.Add(src);
+
+                // Ikat tepat ke indeks slot spesifik (#0 = Port_InA, #1 = Port_InB) tanpa mempromosikan Port #2 ke #1 saat Port #1 kosong
+                if (normalizedSlot == 1)
+                {
+                    if (dst.connectedInputs.Count == 0)
+                    {
+                        dst.connectedInputs.Add(null);
+                    }
+                    if (dst.connectedInputs.Count == 1)
+                    {
+                        dst.connectedInputs.Add(src);
+                    }
+                    else
+                    {
+                        dst.connectedInputs[1] = src;
+                    }
+                }
+                else
+                {
+                    if (dst.connectedInputs.Count == 0)
+                    {
+                        dst.connectedInputs.Add(src);
+                    }
+                    else
+                    {
+                        dst.connectedInputs[0] = src;
+                    }
+                }
             }
         }
     }

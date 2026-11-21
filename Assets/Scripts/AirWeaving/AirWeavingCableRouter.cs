@@ -113,8 +113,6 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private static readonly Color PortInConnectedHighOrbEmission = new Color(0.14f, 0.82f, 0.76f, 1f);
     private static readonly Color PortInConnectedLowOrbColor = new Color(0.78f, 0.28f, 0.12f, 1f);
     private static readonly Color PortInConnectedLowOrbEmission = new Color(0.32f, 0.08f, 0.02f, 1f);
-    private static readonly Color PortInConnectedDimOrbColor = new Color(0.20f, 0.44f, 0.38f, 1f);
-    private static readonly Color PortInConnectedDimOrbEmission = new Color(0.05f, 0.14f, 0.12f, 1f);
     private static readonly Color PortReplaceHintOrbColor = new Color(1.00f, 0.78f, 0.22f, 1f);
     private static readonly Color PortReplaceHintOrbEmission = new Color(0.76f, 0.48f, 0.06f, 1f);
     private static readonly Color PortHoverOrbColor = new Color(0.46f, 1.00f, 0.96f, 1f);
@@ -225,6 +223,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
 
     private bool isInitialized = false;
     private int hoveredPortIndex = -1;
+    private int secondaryHoveredPortIndex = -1;
     private int aimAssistTargetPortIndex = -1;
     private float aimAssistPullStrength = 0f;
     private bool isDraggingCable = false;
@@ -259,13 +258,58 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private Vector3 lastLockedTargetWorldPos = Vector3.zero;
 
     public bool IsHoveringPort => hoveredPortIndex >= 0 && hoveredPortIndex < activePorts.Count;
+    public bool IsSecondaryHoveringPort => secondaryHoveredPortIndex >= 0 && secondaryHoveredPortIndex < activePorts.Count;
     public bool IsDraggingCable => isDraggingCable;
     public bool IsSnappedTargetPort => isDraggingCable && snappedTargetPortIndex >= 0 && snappedTargetPortIndex < activePorts.Count;
     public GateNode HoveredPortNode => IsHoveringPort ? activePorts[hoveredPortIndex].node : null;
+    public GateNode SecondaryHoveredPortNode => IsSecondaryHoveringPort ? activePorts[secondaryHoveredPortIndex].node : null;
     public bool IsHoveringOutputNodePort => IsHoveringPort && activePorts[hoveredPortIndex].node != null && activePorts[hoveredPortIndex].node.nodeType == NodeType.OutputActuator;
     public int ActiveWireCount => wires.Count;
     public int TopologyVersion { get; private set; }
     public Vector3 AssistedPinchWorldPosition { get; private set; }
+
+    /// <summary>
+    /// Mereset offset magnetik aim-assist saat kendali hover kabel berpindah antar-slot tangan (ambidextrous Zero-GC).
+    /// </summary>
+    public void ResetAimAssistOffset()
+    {
+        currentMagnetOffsetLocalXY = Vector2.zero;
+        aimAssistTargetPortIndex = -1;
+        aimAssistPullStrength = 0f;
+    }
+
+    /// <summary>
+    /// Mengembalikan jarak ternormalisasi (0..1 di dalam hit radius port, &lt;1.6 dalam zona magnet, atau float.MaxValue)
+    /// terhadap port aktif terdekat untuk arbitrer ambidextrous 2 tangan. Zero-GC.
+    /// </summary>
+    public float QueryNearestPortNormalizedDistance(Vector2 cursorLocalXY, float stageZoomScale)
+    {
+        if (activePorts.Count == 0)
+        {
+            return float.MaxValue;
+        }
+
+        float zoomClamp = Mathf.Clamp(stageZoomScale, 0.45f, 2.50f);
+        float hitRadiusScale = Mathf.Clamp(zoomClamp, 0.55f, 2.05f);
+        float magnetLimit = HoverMagnetRadius * hitRadiusScale;
+        float bestNorm = float.MaxValue;
+
+        for (int i = 0; i < activePorts.Count; i++)
+        {
+            float hitRadius = (activePorts[i].isOutput ? PortOutHitRadius : PortInHitRadius) * hitRadiusScale;
+            float dist = Vector2.Distance(cursorLocalXY, activePorts[i].handleLocalXY);
+            if (dist <= Mathf.Max(hitRadius, magnetLimit))
+            {
+                float norm = dist / Mathf.Max(0.001f, hitRadius);
+                if (norm < bestNorm)
+                {
+                    bestNorm = norm;
+                }
+            }
+        }
+
+        return bestNorm;
+    }
 
     /// <summary>
     /// Mengembalikan identitas stabil &amp; posisi dunia soket port yang sedang di-hover (Zero-GC, untuk edge-triggered Hover Tick).
@@ -402,6 +446,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     {
         CancelActiveDrag();
         hoveredPortIndex = -1;
+        secondaryHoveredPortIndex = -1;
         aimAssistTargetPortIndex = -1;
         aimAssistPullStrength = 0f;
         hasLastValidPinchWorld = false;
@@ -461,7 +506,6 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             DisableCableTubesAndPacketsFrom(wires.Count);
             if (circuitManager != null)
             {
-                NormalizeAllTwoInputGateSlots();
                 circuitManager.SetManualConnections(wires);
             }
         }
@@ -519,7 +563,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         bool isPinchReleaseIntent = false,
         Transform stageRoot = null,
         float stageZoomScale = 1f,
-        bool allowBeginDrag = true)
+        bool allowBeginDrag = true,
+        bool hasSecondaryHoverHand = false,
+        Vector2 secondaryPinchLocalXY = default)
     {
         if (!isInitialized)
         {
@@ -590,6 +636,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
 
         // 3. Evaluasi interaksi port & drag kabel berbasis Pinch (Cubit #4-#8) + Sticky Snap + Release-Intent Freeze
+        secondaryHoveredPortIndex = -1;
         if (hardBlocked)
         {
             if (isDraggingCable)
@@ -711,10 +758,14 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             {
                 BeginCableDragFromPort(activePorts[hoveredPortIndex], circuitManager);
             }
+            else if (hasSecondaryHoverHand)
+            {
+                secondaryHoveredPortIndex = FindNearestPortIndex(secondaryPinchLocalXY, hitRadiusScale);
+            }
         }
 
         // 4. Perbarui seluruh Soket Port 3D, Kabel Tabung 3D Live Drag, & 100% Kabel Tabung 3D Terpasang + Paket Sinyal
-        RenderPortSockets(camT, stageRoot, circuitManager, isHandDetected && !hardBlocked, zoomClamp);
+        RenderPortSockets(camT, stageRoot, circuitManager, (isHandDetected || hasSecondaryHoverHand) && !hardBlocked, zoomClamp);
         RenderLiveDragTube(camT, stageRoot, zoomClamp, hasLastValidPinchWorld ? lastValidPinchWorldPos : assistedPinchWorldPos);
         RenderAllUniformTubeCables(camT, stageRoot, zoomClamp);
     }
@@ -797,7 +848,6 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             ManualConnectionEdge oldEdge = wires[existingIdx];
             wires.RemoveAt(existingIdx);
             TopologyVersion++;
-            NormalizeSingleWireSlotOnGate(port.node);
             DisableCableTubesAndPacketsFrom(wires.Count);
             if (circuitManager != null)
             {
@@ -877,7 +927,6 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     });
                 }
 
-                NormalizeSingleWireSlotOnGate(dstNode);
                 TopologyVersion++;
 
                 if (circuitManager != null)
@@ -966,55 +1015,15 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         return false;
     }
 
-    private int ResolveCommitSlotForTarget(GateNode dstNode, int preferredSlot)
+    private static int ResolveCommitSlotForTarget(GateNode dstNode, int preferredSlot)
     {
         if (dstNode == null || dstNode.GetMaxInputCount() < 2)
         {
             return 0;
         }
 
-        bool slot0Occupied = FindWireByTargetSlot(dstNode, 0) >= 0;
-        bool slot1Occupied = FindWireByTargetSlot(dstNode, 1) >= 0;
-
-        if (!slot0Occupied)
-        {
-            return 0;
-        }
-        if (!slot1Occupied)
-        {
-            return 1;
-        }
-
+        // Ikat persis ke soket yang dibidik (#0 = Input A, #1 = Input B) meskipun slot #0 masih kosong
         return preferredSlot == 1 ? 1 : 0;
-    }
-
-    private void NormalizeSingleWireSlotOnGate(GateNode gate)
-    {
-        if (gate == null || gate.GetMaxInputCount() < 2)
-        {
-            return;
-        }
-
-        int idx0 = FindWireByTargetSlot(gate, 0);
-        int idx1 = FindWireByTargetSlot(gate, 1);
-        if (idx0 < 0 && idx1 >= 0)
-        {
-            ManualConnectionEdge promoted = wires[idx1];
-            promoted.targetSlotIndex = 0;
-            wires[idx1] = promoted;
-        }
-    }
-
-    private void NormalizeAllTwoInputGateSlots()
-    {
-        for (int i = 0; i < wires.Count; i++)
-        {
-            GateNode target = wires[i].target;
-            if (target != null && target.GetMaxInputCount() >= 2)
-            {
-                NormalizeSingleWireSlotOnGate(target);
-            }
-        }
     }
 
     private static Vector2 ProjectWorldToCameraRayPlane(Transform camT, Vector3 worldPos, float workbenchDepth)
@@ -1210,25 +1219,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             for (int i = 0; i < activePorts.Count; i++)
             {
                 ActivePortEntry candidate = activePorts[i];
-                if (isDraggingCable)
+                if (isDraggingCable && !IsCompatibleDragTarget(candidate, circuitManager))
                 {
-                    if (!IsCompatibleDragTarget(candidate, circuitManager))
-                    {
-                        continue;
-                    }
-                    if (dragFromOutput && candidate.node != null && candidate.node.GetMaxInputCount() >= 2)
-                    {
-                        bool slot0Full = FindWireByTargetSlot(candidate.node, 0) >= 0;
-                        bool slot1Full = FindWireByTargetSlot(candidate.node, 1) >= 0;
-                        if (!slot0Full && candidate.slotIndex != 0)
-                        {
-                            continue;
-                        }
-                        if (slot0Full && !slot1Full && candidate.slotIndex != 1)
-                        {
-                            continue;
-                        }
-                    }
+                    continue;
                 }
 
                 float d = Vector2.Distance(rawCursorXY, candidate.handleLocalXY);
@@ -1300,7 +1293,6 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         bool hasValidLocked = false;
         float lockedEffDist = float.MaxValue;
         float lockedHandleDist = float.MaxValue;
-        GateNode lockedNode = null;
         float snapRadius = SnapMagnetRadius * hitRadiusScale;
         float gateAutoRadius = GateAutoSnapRadius * hitRadiusScale;
         float unlockRadius = SnapHysteresisUnlockRadius * hitRadiusScale;
@@ -1308,8 +1300,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         if (currentLockedPortIdx >= 0 && currentLockedPortIdx < activePorts.Count)
         {
             ActivePortEntry lockedEntry = activePorts[currentLockedPortIdx];
-            if (IsCompatibleDragTarget(lockedEntry, circuitManager)
-                && IsAllowedTwoInputSlotCandidate(lockedEntry))
+            if (IsCompatibleDragTarget(lockedEntry, circuitManager))
             {
                 lockedHandleDist = Vector2.Distance(cursorXY, lockedEntry.handleLocalXY);
                 if (dragFromOutput)
@@ -1326,13 +1317,11 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 if (lockedEffDist <= unlockRadius)
                 {
                     hasValidLocked = true;
-                    lockedNode = lockedEntry.node;
                 }
             }
         }
 
         int bestIdx = -1;
-        float bestDist = float.MaxValue;
         float bestHandleDist = float.MaxValue;
 
         for (int i = 0; i < activePorts.Count; i++)
@@ -1343,8 +1332,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
 
             ActivePortEntry candidate = activePorts[i];
-            if (!IsCompatibleDragTarget(candidate, circuitManager)
-                || !IsAllowedTwoInputSlotCandidate(candidate))
+            if (!IsCompatibleDragTarget(candidate, circuitManager))
             {
                 continue;
             }
@@ -1362,10 +1350,10 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     continue;
                 }
 
-                float effDist = Mathf.Min(distToHandle, distToGateZone);
-                if (effDist < bestDist)
+                // Pilih kandidat strictly berdasarkan jarak langsung ke soket port (distToHandle) agar Port #1 vs Port #2
+                // tidak pernah seri/terbias ke Port #1 akibat distToGateZone yang sama pada node 2-input.
+                if (distToHandle < bestHandleDist)
                 {
-                    bestDist = effDist;
                     bestHandleDist = distToHandle;
                     bestIdx = i;
                 }
@@ -1373,9 +1361,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             else
             {
                 float dist = Vector2.Distance(cursorXY, candidate.handleLocalXY);
-                if (dist <= snapRadius && dist < bestDist)
+                if (dist <= snapRadius && dist < bestHandleDist)
                 {
-                    bestDist = dist;
                     bestHandleDist = dist;
                     bestIdx = i;
                 }
@@ -1384,40 +1371,14 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
 
         if (hasValidLocked)
         {
-            if (bestIdx >= 0)
+            if (bestIdx >= 0 && bestHandleDist < lockedHandleDist * SnapTargetSwitchRatio)
             {
-                bool sameNode = activePorts[bestIdx].node == lockedNode;
-                float candMetric = sameNode ? bestHandleDist : bestDist;
-                float lockMetric = sameNode ? lockedHandleDist : lockedEffDist;
-                if (candMetric < lockMetric * SnapTargetSwitchRatio)
-                {
-                    return bestIdx;
-                }
+                return bestIdx;
             }
             return currentLockedPortIdx;
         }
 
         return bestIdx;
-    }
-
-    private bool IsAllowedTwoInputSlotCandidate(ActivePortEntry candidate)
-    {
-        if (!dragFromOutput || candidate.node == null || candidate.node.GetMaxInputCount() < 2)
-        {
-            return true;
-        }
-
-        bool slot0Full = FindWireByTargetSlot(candidate.node, 0) >= 0;
-        bool slot1Full = FindWireByTargetSlot(candidate.node, 1) >= 0;
-        if (!slot0Full && candidate.slotIndex != 0)
-        {
-            return false;
-        }
-        if (slot0Full && !slot1Full && candidate.slotIndex != 1)
-        {
-            return false;
-        }
-        return true;
     }
 
     private bool IsCompatibleDragTarget(ActivePortEntry candidate, CircuitManager circuitManager)
@@ -1503,24 +1464,6 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         return false;
     }
 
-    private bool HasEmptyInputSlot(GateNode node)
-    {
-        if (node == null)
-        {
-            return false;
-        }
-
-        int maxIn = node.GetMaxInputCount();
-        for (int s = 0; s < maxIn; s++)
-        {
-            if (FindWireByTargetSlot(node, s) < 0)
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
     private void PruneUntrackedWires(CircuitManager circuitManager)
     {
         bool changed = false;
@@ -1540,7 +1483,6 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             TopologyVersion++;
             if (circuitManager != null)
             {
-                NormalizeAllTwoInputGateSlots();
                 circuitManager.SetManualConnections(wires);
             }
         }
@@ -1594,7 +1536,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
 
             ActivePortEntry p = activePorts[i];
-            bool isHovered = allowHoverHighlight && !isDraggingCable && i == hoveredPortIndex;
+            bool isHovered = allowHoverHighlight && !isDraggingCable && (i == hoveredPortIndex || i == secondaryHoveredPortIndex);
             bool isSnapped = allowHoverHighlight && isDraggingCable && i == snappedTargetPortIndex;
             bool isCompatible = allowHoverHighlight && isDraggingCable && IsCompatibleDragTarget(p, circuitManager);
             bool isAimAssisted = allowHoverHighlight && i == aimAssistTargetPortIndex && aimAssistPullStrength > 0.08f;
@@ -1634,15 +1576,6 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     orbEmission = PortValidTargetOrbEmission * (0.92f + (0.28f * pulse));
                     targetRadiusFactor = 1.32f + (0.14f * pulse);
                     orbRatio = 0.64f;
-                }
-                else if (!p.isOutput && p.node.GetMaxInputCount() >= 2 && HasEmptyInputSlot(p.node))
-                {
-                    collarAlbedo = CollarDarkMetal;
-                    collarEmission = PortInConnectedDimOrbEmission;
-                    orbAlbedo = PortInConnectedDimOrbColor;
-                    orbEmission = PortInConnectedDimOrbEmission;
-                    targetRadiusFactor = 0.84f;
-                    orbRatio = 0.52f;
                 }
                 else if (!p.isOutput && p.isConnected)
                 {

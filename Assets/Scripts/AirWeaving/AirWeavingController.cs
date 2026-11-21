@@ -68,15 +68,25 @@ public class AirWeavingController : MonoBehaviour
     private const float MaxHandRigCameraDepth = 5.40f;
     private const float MinNearClipSafeOffsetMeters = 0.28f;
 
-    // Parameter Kontrol 2 Tangan Full Free-View 6-DoF (Both Pinch = Orbit/Zoom stabil 85 ms; 1 Pinch + 1 Fist = Free Air-Pan 3D stabil 160 ms; Both Fist = Reset)
-    private const float TwoHandOrbitYawDegPerUnit = 135.0f;
-    private const float TwoHandOrbitPitchDegPerUnit = 85.0f;
-    private const float TwoHandZoomSensitivity = 0.76f;
-    private const float TwoHandFreePanXYGain = 1.05f;
-    private const float TwoHandFreePanDepthGain = 0.94f;
-    private const float TwoHandFreePanDepthSpanMeters = 1.75f;
-    private const float TwoHandOrbitConfirmHoldSeconds = 0.085f;
-    private const float TwoHandFreePanConfirmHoldSeconds = 0.160f;
+    // Parameter Kontrol 2 Tangan Full Free-View 6-DoF Quaternion Arcball 360° (Both Pinch = Orbit/Roll/Zoom; 1 Pinch + 1 Fist = Free Air-Pan 3D; Both Fist = Reset)
+    private const float TwoHandOrbitYawDegPerUnit = 60.0f;
+    private const float TwoHandOrbitPitchDegPerUnit = 60.0f;
+    private const float TwoHandOrbitMaxAxisDeltaPerFrameDeg = 12.0f;
+    private const float TwoHandOrbitRollGain = 0.65f;
+    private const float TwoHandOrbitRollEmaRate = 18.0f;
+    private const float TwoHandOrbitRollMaxDeltaPerFrameDeg = 10.0f;
+    private const float TwoHandZoomSensitivity = 0.48f;
+    private const float TwoHandZoomDistEmaRate = 14.0f;
+    private const float TwoHandZoomMaxStepRatioPerFrame = 0.06f;
+    private const float TwoHandFreePanXYGain = 0.85f;
+    private const float TwoHandFreePanMaxDeltaXYPerFrame = 0.14f;
+    private const float TwoHandFreePanDepthGain = 0.65f;
+    private const float TwoHandFreePanDepthSpanMeters = 1.25f;
+    private const float TwoHandOrbitConfirmHoldSeconds = 0.040f;
+    private const float TwoHandOrbitHoldMaxPinchRatio = 0.66f;
+    private const float TwoHandPinchReleaseFreezeRatio = 0.50f;
+    private const float TwoHandFistReleaseFreezeMaxBendDeg = 92.0f;
+    private const float TwoHandFreePanConfirmHoldSeconds = 0.110f;
     private const float TwoHandFistResetHoldSeconds = 0.55f;
 
     // Parameter Quality Gate, Stabilisasi Dual-Hand, Exclusive Gesture Arbiter, & Velocity Gate (Tahap 5.5 v8.0)
@@ -86,10 +96,10 @@ public class AirWeavingController : MonoBehaviour
     private const float HandAssociationMaxDistNorm = 0.34f;
     private const float HandAssociationMatchedHandednessMaxDistNorm = 0.45f;
     private const float HandFrameDropGraceSeconds = 0.100f;
-    private const float CrossGestureNeutralCooldownSeconds = 0.200f;
+    private const float CrossGestureNeutralCooldownSeconds = 0.120f;
     private const float CablePinchEnterMaxSpeed = 1.65f;
     private const float GateGrabEnterMaxSpeed = 1.85f;
-    private const float InputSwitchEnterMaxSpeed = 0.85f;
+    private const float InputSwitchEnterMaxSpeed = 1.25f;
 
     // Critically Damped Spring-Damper analitik & Elastic Scale Pop (Tahap 4.5 v8.0 + Inertial Coasting Tahap 4.9)
     private const float GateDragSpringOmega = 30.0f;
@@ -131,15 +141,15 @@ public class AirWeavingController : MonoBehaviour
     private const float ParkedGateScale = 0.44f;
 
     // Parameter kompatibilitas Pinch lama (disimpan untuk fallback/referensi)
-    private const float PinchRatioActivateThreshold = 0.39f;
-    private const float PinchRatioReleaseThreshold = 0.55f;
+    private const float PinchRatioActivateThreshold = 0.48f;
+    private const float PinchRatioReleaseThreshold = 0.62f;
 
     // Radius akses lega (Fist badan gerbang, sentuh telunjuk sakelar Input A/B dengan dwell 140 ms & exit-to-rearm 1.35x)
     private const float GateHoverGrabRadius = 0.220f;
     private const float ParkedGateHoverRadius = 0.245f;
     private const float InputAirTapRadius = 0.195f;
     private const float InputAirTapRearmRadius = InputAirTapRadius * 1.35f;
-    private const float InputAirTapDwellSeconds = 0.140f;
+    private const float InputAirTapDwellSeconds = 0.105f;
     private const float InputAirTapCooldownSeconds = 0.40f;
     private const float InputTouchRippleDuration = 0.34f;
     private const float ParkReturnThresholdY = 0.56f;
@@ -424,13 +434,13 @@ public class AirWeavingController : MonoBehaviour
     private float currentPinchRatio = 1f;
     private float inputATapCooldown = 0f;
     private float inputBTapCooldown = 0f;
-    private float inputADwellTimer = 0f;
-    private float inputBDwellTimer = 0f;
-    private bool inputARequiresExitRearm = false;
-    private bool inputBRequiresExitRearm = false;
+    private readonly float[] inputADwellTimers = new float[2];
+    private readonly float[] inputBDwellTimers = new float[2];
+    private readonly bool[] inputARequiresExitRearmBySlot = new bool[2];
+    private readonly bool[] inputBRequiresExitRearmBySlot = new bool[2];
     private float inputATouchRippleTimer = 0f;
     private float inputBTouchRippleTimer = 0f;
-    private Vector2 inputSwitchMagnetOffsetXY = Vector2.zero;
+    private readonly Vector2[] inputSwitchMagnetOffsetBySlot = new Vector2[2];
     private ElasticScalePop inputAScalePop;
     private ElasticScalePop inputBScalePop;
 
@@ -478,8 +488,10 @@ public class AirWeavingController : MonoBehaviour
     private readonly Vector3[] pinchRingPoints = new Vector3[PinchRingSegments];
     private readonly Vector3[] hoverRingPoints = new Vector3[HoverRingSegments];
 
-    // State Exclusive Gesture Arbiter + Cross-Gesture Neutral Cooldown (200 ms) + Kontrol 2 Tangan 6-DoF
+    // State Exclusive Gesture Arbiter (Ambidextrous: activeInteractionHandSlot 0=primer, 1=sekunder, -1=bebas) + Kontrol 2 Tangan 6-DoF
     private ActiveInteractionMode activeInteractionMode = ActiveInteractionMode.Idle;
+    private int activeInteractionHandSlot = -1;
+    private int activeCableHoverHandSlot = -1;
     private float neutralCooldownTimer = 0f;
     private float twoHandOrbitConfirmTimer = 0f;
     private float twoHandFreePanConfirmTimer = 0f;
@@ -487,11 +499,15 @@ public class AirWeavingController : MonoBehaviour
     private bool twoHandFistResetLatched = false;
     private float twoHandFistResetTimer = 0f;
     private float twoHandPinchInitialDist = 0.25f;
+    private float twoHandPinchSmoothedDist = 0.25f;
     private float twoHandPinchInitialZoom = 1.0f;
     private Vector2 twoHandPinchPrevMidpointXY = Vector2.zero;
+    private float twoHandPinchSmoothedLineAngleDeg = 0f;
+    private bool wasTwoHandOrbitReleaseFrozen = false;
     private Vector2 twoHandPanPrevMidpointXY = Vector2.zero;
     private float twoHandPanInitialAvgSpan = AirWeavingHandGestureDetector.DefaultComfortPalmSpan;
     private float twoHandPanInitialPanZ = 0f;
+    private bool wasTwoHandPanReleaseFrozen = false;
     private float grabStartPalmSpan = AirWeavingHandGestureDetector.DefaultComfortPalmSpan;
     private float grabStartCameraDepth = WorkbenchDepth;
 
@@ -505,7 +521,9 @@ public class AirWeavingController : MonoBehaviour
     private readonly List<WorkbenchGateSlot> gateSlots = new List<WorkbenchGateSlot>(5);
     private int grabbedGateSlotIndex = -1;
     private int hoveredGateSlotIndex = -1;
+    private int secondaryHoveredGateSlotIndex = -1;
     private GateNode hoveredInputNode = null;
+    private GateNode secondaryHoveredInputNode = null;
 
     // $1 Unistroke Air-Draw Spawner (semua buffer pra-alokasi zero-GC)
     private readonly UnistrokeGestureRecognizer gestureRecognizer = new UnistrokeGestureRecognizer();
@@ -596,7 +614,11 @@ public class AirWeavingController : MonoBehaviour
     private CompactHudMenuController cachedHudMenu;
     private readonly AirWeavingHandGestureDetector handGestureDetector = new AirWeavingHandGestureDetector();
     private readonly AirWeavingHandGestureDetector secondaryHandGestureDetector = new AirWeavingHandGestureDetector();
-    private readonly AirWeavingCircleSummoner circleSummoner = new AirWeavingCircleSummoner();
+    private readonly AirWeavingCircleSummoner[] circleSummoners =
+    {
+        new AirWeavingCircleSummoner(),
+        new AirWeavingCircleSummoner()
+    };
     private readonly List<GateNode> activePlacedGatesBuffer = new List<GateNode>(5);
     private readonly AirWeavingStageController.ContactNodeDescriptor[] stageContactNodesBuffer = new AirWeavingStageController.ContactNodeDescriptor[8];
     private float fpsTimer = 0f;
@@ -648,13 +670,50 @@ public class AirWeavingController : MonoBehaviour
 
     public bool IsAirWeavingActive => isAirWeavingActive;
     public bool IsTransitioning => isTransitioning;
-    public bool IsHandDetected => isHandDetected;
+    public bool IsHandDetected => isHandDetected || isSecondaryHandDetected;
     public bool IsPinching => isPinching;
     public int DisplayedInferenceFps => displayedInferenceFps;
     public Vector3 PinchWorldPosition => pinchWorldPosition;
     public Vector3 IndexTipWorldPosition => indexTipWorldPosition;
+    private bool IsAnyHandDetected => isHandDetected || isSecondaryHandDetected;
+    private bool IsAnyCircleSummonActive => circleSummoners[0].IsActive || circleSummoners[1].IsActive;
     private bool IsAnyUiOverlayOpen => (levelManager != null && levelManager.IsUiOverlayOpen)
                                        || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen);
+
+    private bool IsHandSlotDetected(int handSlot)
+    {
+        return handSlot == 0 ? isHandDetected : (handSlot == 1 && isSecondaryHandDetected);
+    }
+
+    private AirWeavingHandGestureDetector GetHandDetector(int handSlot)
+    {
+        return handSlot == 1 ? secondaryHandGestureDetector : handGestureDetector;
+    }
+
+    private Vector3 GetHandIndexTipWorldPosition(int handSlot)
+    {
+        return handSlot == 1 ? secondarySmoothedLandmarksWorld[8] : smoothedLandmarksWorld[8];
+    }
+
+    private void ResetAllCircleSummoners()
+    {
+        circleSummoners[0].Reset();
+        circleSummoners[1].Reset();
+    }
+
+    private AirWeavingCircleSummoner GetActiveOrPreviewCircleSummoner()
+    {
+        if (activeInteractionMode == ActiveInteractionMode.CircleSummon
+            && (activeInteractionHandSlot == 0 || activeInteractionHandSlot == 1))
+        {
+            return circleSummoners[activeInteractionHandSlot];
+        }
+        if (circleSummoners[0].IsActive) return circleSummoners[0];
+        if (circleSummoners[1].IsActive) return circleSummoners[1];
+        if (circleSummoners[0].HasLivePoseIndicator) return circleSummoners[0];
+        if (circleSummoners[1].HasLivePoseIndicator) return circleSummoners[1];
+        return circleSummoners[0];
+    }
 
     public event Action<bool> OnAirWeavingModeChanged;
     public event Action OnOutputVerifyRequested;
@@ -715,13 +774,16 @@ public class AirWeavingController : MonoBehaviour
     {
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
+        secondaryHoveredGateSlotIndex = -1;
         hoveredInputNode = null;
+        secondaryHoveredInputNode = null;
+        activeCableHoverHandSlot = -1;
         postDropLockoutTimer = 0f;
         CancelAirDrawStrokeImmediate();
         handGestureDetector.Reset();
         secondaryHandGestureDetector.Reset();
         ResetExclusiveArbiterAndTwoHandState();
-        circleSummoner.Reset();
+        ResetAllCircleSummoners();
         lastSfxSummonStage = AirWeavingCircleSummoner.SummonStage.Idle;
         lastSfxSummonChargeStep = 0;
         wasGrabbedGateInDeleteZone = false;
@@ -761,13 +823,17 @@ public class AirWeavingController : MonoBehaviour
 
         if (mainCam != null)
         {
+            bool anyHandForStage = IsAnyHandDetected;
+            Vector2 stageParallaxPalmXY = isHandDetected
+                ? handGestureDetector.PalmCursorLocalXY
+                : secondaryHandGestureDetector.PalmCursorLocalXY;
             stageController?.TickStageTransform(
                 mainCam,
                 0.016f,
                 isAirWeavingActive,
                 IsAnyUiOverlayOpen,
-                isHandDetected,
-                handGestureDetector.PalmCursorLocalXY,
+                anyHandForStage,
+                stageParallaxPalmXY,
                 WorkbenchDepth);
             SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: true);
             UpdateWorkbenchGuideVisuals(mainCam);
@@ -853,29 +919,44 @@ public class AirWeavingController : MonoBehaviour
 
         TickHandSlotFrameDropGrace(dt);
 
-        bool isFistStickyDrag = activeInteractionMode == ActiveInteractionMode.GateGrab
-                                || activeInteractionMode == ActiveInteractionMode.TwoHandFreePan
-                                || activeInteractionMode == ActiveInteractionMode.TwoHandReset
-                                || activeInteractionMode == ActiveInteractionMode.OutputHold;
-        bool isPinchStickyDrag = activeInteractionMode == ActiveInteractionMode.CableDrag
-                                 || activeInteractionMode == ActiveInteractionMode.TwoHandOrbitZoom
-                                 || activeInteractionMode == ActiveInteractionMode.TwoHandFreePan;
-        bool isSecFistStickyDrag = activeInteractionMode == ActiveInteractionMode.TwoHandFreePan
+        bool isSingleHandFistSticky = activeInteractionMode == ActiveInteractionMode.GateGrab
+                                      || activeInteractionMode == ActiveInteractionMode.OutputHold;
+        bool isSingleHandPinchSticky = activeInteractionMode == ActiveInteractionMode.CableDrag;
+        bool isTwoHandFistSticky = activeInteractionMode == ActiveInteractionMode.TwoHandFreePan
                                    || activeInteractionMode == ActiveInteractionMode.TwoHandReset;
-        bool isSecPinchStickyDrag = activeInteractionMode == ActiveInteractionMode.TwoHandOrbitZoom
+        bool isTwoHandPinchSticky = activeInteractionMode == ActiveInteractionMode.TwoHandOrbitZoom
                                     || activeInteractionMode == ActiveInteractionMode.TwoHandFreePan;
+
+        bool isFistStickyDrag = isTwoHandFistSticky || (isSingleHandFistSticky && activeInteractionHandSlot == 0);
+        bool isPinchStickyDrag = isTwoHandPinchSticky || (isSingleHandPinchSticky && activeInteractionHandSlot == 0);
+        bool isSecFistStickyDrag = isTwoHandFistSticky || (isSingleHandFistSticky && activeInteractionHandSlot == 1);
+        bool isSecPinchStickyDrag = isTwoHandPinchSticky || (isSingleHandPinchSticky && activeInteractionHandSlot == 1);
         handGestureDetector.TickTemporalState(dt, isHandDetected, isFistStickyDrag, isPinchStickyDrag);
         secondaryHandGestureDetector.TickTemporalState(dt, isSecondaryHandDetected, isSecFistStickyDrag, isSecPinchStickyDrag);
         UpdateTwoHandStageManipulation(mainCam, dt);
         if (stageController != null)
         {
+            bool hasStageParallaxHand = IsAnyHandDetected;
+            Vector2 stageParallaxPalmXY;
+            if (activeInteractionHandSlot == 1 && isSecondaryHandDetected)
+            {
+                stageParallaxPalmXY = secondaryHandGestureDetector.PalmCursorLocalXY;
+            }
+            else if (isHandDetected)
+            {
+                stageParallaxPalmXY = handGestureDetector.PalmCursorLocalXY;
+            }
+            else
+            {
+                stageParallaxPalmXY = secondaryHandGestureDetector.PalmCursorLocalXY;
+            }
             stageController.TickStageTransform(
                 mainCam,
                 dt,
                 isAirWeavingActive,
                 IsAnyUiOverlayOpen,
-                isHandDetected,
-                handGestureDetector.PalmCursorLocalXY,
+                hasStageParallaxHand,
+                stageParallaxPalmXY,
                 WorkbenchDepth);
         }
         UpdateHandWakeAudioFeedback(dt);
@@ -1131,7 +1212,7 @@ public class AirWeavingController : MonoBehaviour
         outputTrigger?.HideImmediate();
         hologramVisual?.HideImmediate();
         cableRouter?.HideImmediate();
-        circleSummoner.Reset();
+        ResetAllCircleSummoners();
         summonVisual?.HideImmediate();
 
         // 8. Tata seluruh 8 GateNode (Input A, Input B, Output terkunci di papan roti; 5 gerbang di Rak Parkir Atas)
@@ -1155,7 +1236,10 @@ public class AirWeavingController : MonoBehaviour
         wasPinching = false;
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
+        secondaryHoveredGateSlotIndex = -1;
         hoveredInputNode = null;
+        secondaryHoveredInputNode = null;
+        activeCableHoverHandSlot = -1;
         inputATapCooldown = 0f;
         inputBTapCooldown = 0f;
         isIndexOnlyWandPose = false;
@@ -1179,7 +1263,7 @@ public class AirWeavingController : MonoBehaviour
 
         handGestureDetector.Reset();
         secondaryHandGestureDetector.Reset();
-        circleSummoner.Reset();
+        ResetAllCircleSummoners();
         lastSfxSummonStage = AirWeavingCircleSummoner.SummonStage.Idle;
         lastSfxSummonChargeStep = 0;
         wasGrabbedGateInDeleteZone = false;
@@ -1224,7 +1308,10 @@ public class AirWeavingController : MonoBehaviour
         gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
+        secondaryHoveredGateSlotIndex = -1;
         hoveredInputNode = null;
+        secondaryHoveredInputNode = null;
+        activeCableHoverHandSlot = -1;
         cableRouter?.ClearAllWires(circuitManager);
         circuitManager?.SetManualRoutingMode(false);
         SetFeedbackImmediate("[Air-Weaving v6] Mengembalikan kamera ke Mode Kartu (v5)...", FeedbackWaitingColor);
@@ -1249,7 +1336,10 @@ public class AirWeavingController : MonoBehaviour
         gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
+        secondaryHoveredGateSlotIndex = -1;
         hoveredInputNode = null;
+        secondaryHoveredInputNode = null;
+        activeCableHoverHandSlot = -1;
         cableRouter?.ClearAllWires(circuitManager);
         circuitManager?.SetManualRoutingMode(false);
         RestoreAirWeavingLabelReadabilityStyles();
@@ -1469,12 +1559,15 @@ public class AirWeavingController : MonoBehaviour
     private void ResetExclusiveArbiterAndTwoHandState()
     {
         activeInteractionMode = ActiveInteractionMode.Idle;
+        activeInteractionHandSlot = -1;
         neutralCooldownTimer = 0f;
         twoHandOrbitConfirmTimer = 0f;
         twoHandFreePanConfirmTimer = 0f;
         isTwoHandConfirming = false;
         twoHandFistResetLatched = false;
         twoHandFistResetTimer = 0f;
+        wasTwoHandOrbitReleaseFrozen = false;
+        wasTwoHandPanReleaseFrozen = false;
         stageController?.SetTwoHandManipulationState(false);
     }
 
@@ -1483,12 +1576,15 @@ public class AirWeavingController : MonoBehaviour
         if (IsAnyTwoHandModeActive)
         {
             activeInteractionMode = ActiveInteractionMode.Idle;
+            activeInteractionHandSlot = -1;
         }
         twoHandOrbitConfirmTimer = 0f;
         twoHandFreePanConfirmTimer = 0f;
         isTwoHandConfirming = false;
         twoHandFistResetLatched = false;
         twoHandFistResetTimer = 0f;
+        wasTwoHandOrbitReleaseFrozen = false;
+        wasTwoHandPanReleaseFrozen = false;
         stageController?.SetTwoHandManipulationState(false);
     }
 
@@ -1497,6 +1593,7 @@ public class AirWeavingController : MonoBehaviour
         if (activeInteractionMode == expectedMode)
         {
             activeInteractionMode = ActiveInteractionMode.Idle;
+            activeInteractionHandSlot = -1;
         }
         if (triggerNeutralCooldown)
         {
@@ -1507,10 +1604,10 @@ public class AirWeavingController : MonoBehaviour
     /// <summary>
     /// Kontrol 2 Tangan Full Free-View 6-DoF dengan Exclusive Gesture Arbiter (Tahap 5.5 v8.0, Zero-GC):
     /// - Dilarang membajak mode aktif 1-tangan (GateGrab / CableDrag / InputSwitch / CircleSummon / OutputHold).
-    /// - Both Hands Pinch: wajib kedua tangan <c>IsPinchActive &amp;&amp; !IsFistActive</c> stabil &gt;= 85 ms (tanpa bypass PinchRatio mentah).
-    /// - Free Air-Pan 3D: 1 Pinch murni + 1 Fist murni stabil &gt;= 160 ms.
+    /// - Both Hands Pinch: wajib kedua tangan <c>IsPinchActive &amp;&amp; !IsFistActive</c> stabil &gt;= 40 ms (tanpa bypass PinchRatio mentah).
+    /// - Free Air-Pan 3D: 1 Pinch murni + 1 Fist murni stabil &gt;= 110 ms.
     /// - Both Hands Fist: 2 Fist murni tahan 550 ms untuk reset panggung.
-    /// - Keluar dari mode 2-tangan mana pun otomatis memicu Cross-Gesture Neutral Cooldown 200 ms.
+    /// - Release-Intent Freeze Gate (&gt;0.50f / IsPinchReleaseIntent) membekukan injeksi delta &amp; coasting anti-kick sebelum keluar.
     /// </summary>
     private void UpdateTwoHandStageManipulation(Camera mainCam, float dt)
     {
@@ -1527,6 +1624,8 @@ public class AirWeavingController : MonoBehaviour
             twoHandFreePanConfirmTimer = 0f;
             twoHandFistResetTimer = 0f;
             twoHandFistResetLatched = false;
+            wasTwoHandOrbitReleaseFrozen = false;
+            wasTwoHandPanReleaseFrozen = false;
             stageController?.SetTwoHandManipulationState(false);
             return;
         }
@@ -1540,6 +1639,8 @@ public class AirWeavingController : MonoBehaviour
             twoHandFreePanConfirmTimer = 0f;
             twoHandFistResetTimer = 0f;
             twoHandFistResetLatched = false;
+            wasTwoHandOrbitReleaseFrozen = false;
+            wasTwoHandPanReleaseFrozen = false;
             stageController?.SetTwoHandManipulationState(false);
             return;
         }
@@ -1555,6 +1656,8 @@ public class AirWeavingController : MonoBehaviour
             twoHandFreePanConfirmTimer = 0f;
             twoHandFistResetTimer = 0f;
             twoHandFistResetLatched = false;
+            wasTwoHandOrbitReleaseFrozen = false;
+            wasTwoHandPanReleaseFrozen = false;
             stageController?.SetTwoHandManipulationState(false);
             return;
         }
@@ -1574,14 +1677,17 @@ public class AirWeavingController : MonoBehaviour
         // 1. Kelanjutan mode 2-tangan yang SUDAH terkunci (dilarang loncat paksa antar-mode 2-tangan)
         if (activeInteractionMode == ActiveInteractionMode.TwoHandOrbitZoom)
         {
-            if (bothPurePinch)
+            bool primaryHoldPinch = primaryPurePinch || (!handGestureDetector.IsFistActive && handGestureDetector.PinchRatio < TwoHandOrbitHoldMaxPinchRatio);
+            bool secondaryHoldPinch = secondaryPurePinch || (!secondaryHandGestureDetector.IsFistActive && secondaryHandGestureDetector.PinchRatio < TwoHandOrbitHoldMaxPinchRatio);
+            if (primaryHoldPinch && secondaryHoldPinch)
             {
-                StepTwoHandOrbitZoom(isStarting: false);
+                StepTwoHandOrbitZoom(mainCam, dt, isStarting: false);
                 return;
             }
 
             ExitInteractionMode(ActiveInteractionMode.TwoHandOrbitZoom, triggerNeutralCooldown: true);
             twoHandOrbitConfirmTimer = 0f;
+            wasTwoHandOrbitReleaseFrozen = false;
             stageController?.SetTwoHandManipulationState(false);
             return;
         }
@@ -1596,6 +1702,7 @@ public class AirWeavingController : MonoBehaviour
 
             ExitInteractionMode(ActiveInteractionMode.TwoHandFreePan, triggerNeutralCooldown: true);
             twoHandFreePanConfirmTimer = 0f;
+            wasTwoHandPanReleaseFrozen = false;
             stageController?.SetTwoHandManipulationState(false);
             return;
         }
@@ -1635,7 +1742,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // 2. Transisi masuk dari Idle: wajib lolos Neutral Cooldown (200 ms) & Quality Gate pada kedua tangan
+        // 2. Transisi masuk dari Idle: wajib lolos Neutral Cooldown & Quality Gate pada kedua tangan
         if (neutralCooldownTimer > 0f
             || !handGestureDetector.IsQualityGatePassing
             || !secondaryHandGestureDetector.IsQualityGatePassing)
@@ -1651,7 +1758,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // 2A. Masuk Both Pinch (Orbit 360° & Focal-Zoom): stabil >= 85 ms
+        // 2A. Masuk Both Pinch (Orbit 360° Diagonal Bebas & Focal-Zoom): stabil >= 40 ms
         if (bothPurePinch)
         {
             twoHandFreePanConfirmTimer = 0f;
@@ -1662,9 +1769,10 @@ public class AirWeavingController : MonoBehaviour
             {
                 twoHandOrbitConfirmTimer = 0f;
                 activeInteractionMode = ActiveInteractionMode.TwoHandOrbitZoom;
+                activeInteractionHandSlot = -1;
                 if (isRecordingAirDraw) CancelAirDrawStrokeImmediate();
-                if (circleSummoner.IsActive) circleSummoner.Reset();
-                StepTwoHandOrbitZoom(isStarting: true);
+                if (IsAnyCircleSummonActive) ResetAllCircleSummoners();
+                StepTwoHandOrbitZoom(mainCam, dt, isStarting: true);
             }
             else
             {
@@ -1674,7 +1782,7 @@ public class AirWeavingController : MonoBehaviour
         }
         twoHandOrbitConfirmTimer = 0f;
 
-        // 2B. Masuk Free Air-Pan 3D (1 Pinch + 1 Fist murni): stabil >= 160 ms
+        // 2B. Masuk Free Air-Pan 3D (1 Pinch + 1 Fist murni): stabil >= 110 ms
         if (validFreePanPose)
         {
             twoHandFistResetTimer = 0f;
@@ -1684,8 +1792,9 @@ public class AirWeavingController : MonoBehaviour
             {
                 twoHandFreePanConfirmTimer = 0f;
                 activeInteractionMode = ActiveInteractionMode.TwoHandFreePan;
+                activeInteractionHandSlot = -1;
                 if (isRecordingAirDraw) CancelAirDrawStrokeImmediate();
-                if (circleSummoner.IsActive) circleSummoner.Reset();
+                if (IsAnyCircleSummonActive) ResetAllCircleSummoners();
                 StepTwoHandFreePan(primaryPinchSecondaryFist, isStarting: true);
             }
             else
@@ -1700,9 +1809,10 @@ public class AirWeavingController : MonoBehaviour
         if (bothPureFists && !twoHandFistResetLatched)
         {
             activeInteractionMode = ActiveInteractionMode.TwoHandReset;
+            activeInteractionHandSlot = -1;
             twoHandFistResetTimer = 0f;
             if (isRecordingAirDraw) CancelAirDrawStrokeImmediate();
-            if (circleSummoner.IsActive) circleSummoner.Reset();
+            if (IsAnyCircleSummonActive) ResetAllCircleSummoners();
             stageController?.SetTwoHandManipulationState(true);
             return;
         }
@@ -1715,13 +1825,15 @@ public class AirWeavingController : MonoBehaviour
         stageController?.SetTwoHandManipulationState(false);
     }
 
-    private void StepTwoHandOrbitZoom(bool isStarting)
+    private void StepTwoHandOrbitZoom(Camera mainCam, float dt, bool isStarting)
     {
         // Koordinat sudah disatukan pada bidang sinar referensi konsisten (WorkbenchDepth)
         Vector2 p0 = handGestureDetector.PinchPointLocalXY;
         Vector2 p1 = secondaryHandGestureDetector.PinchPointLocalXY;
-        float curDist = Mathf.Max(0.08f, Vector2.Distance(p0, p1));
+        Vector2 handVec = p1 - p0;
+        float curDist = Mathf.Max(0.08f, handVec.magnitude);
         Vector2 curMid = (p0 + p1) * 0.5f;
+        float curLineAngleDeg = Mathf.Atan2(handVec.y, handVec.x) * Mathf.Rad2Deg;
 
         float span0 = Mathf.Max(0.055f, handGestureDetector.FilteredPalmSpan);
         float span1 = Mathf.Max(0.055f, secondaryHandGestureDetector.FilteredPalmSpan);
@@ -1731,26 +1843,93 @@ public class AirWeavingController : MonoBehaviour
         if (isStarting)
         {
             twoHandPinchInitialDist = Mathf.Max(0.14f, curDist);
+            twoHandPinchSmoothedDist = curDist;
             twoHandPinchInitialZoom = stageController != null ? stageController.TargetZoomScale : 1f;
             twoHandPinchPrevMidpointXY = curMid;
+            twoHandPinchSmoothedLineAngleDeg = curLineAngleDeg;
+            wasTwoHandOrbitReleaseFrozen = false;
             stageController?.BeginTwoHandOrbitZoomAnchor(leftScreenSpan, rightScreenSpan);
         }
         else
         {
+            // Release-Intent Freeze Gate: hentikan seluruh injeksi delta begitu salah satu tangan mulai membuka (>0.50f)
+            bool releaseIntentFreeze = !handGestureDetector.IsPinchActive
+                                       || !secondaryHandGestureDetector.IsPinchActive
+                                       || handGestureDetector.PinchRatio > TwoHandPinchReleaseFreezeRatio
+                                       || secondaryHandGestureDetector.PinchRatio > TwoHandPinchReleaseFreezeRatio
+                                       || handGestureDetector.IsPinchReleaseIntent
+                                       || secondaryHandGestureDetector.IsPinchReleaseIntent;
+            if (releaseIntentFreeze)
+            {
+                wasTwoHandOrbitReleaseFrozen = true;
+                stageController?.SetTwoHandReleaseFreeze(true);
+                return;
+            }
+
+            if (wasTwoHandOrbitReleaseFrozen)
+            {
+                wasTwoHandOrbitReleaseFrozen = false;
+                twoHandPinchPrevMidpointXY = curMid;
+                twoHandPinchSmoothedLineAngleDeg = curLineAngleDeg;
+                twoHandPinchInitialDist = Mathf.Max(0.14f, curDist);
+                twoHandPinchSmoothedDist = curDist;
+                twoHandPinchInitialZoom = stageController != null ? stageController.TargetZoomScale : 1f;
+                stageController?.ReanchorTwoHandOrbitDepth(leftScreenSpan, rightScreenSpan);
+                stageController?.SetTwoHandReleaseFreeze(false);
+                return;
+            }
+
+            stageController?.SetTwoHandReleaseFreeze(false);
+
             Vector2 midDelta = curMid - twoHandPinchPrevMidpointXY;
             twoHandPinchPrevMidpointXY = curMid;
 
-            float yawDelta = -midDelta.x * TwoHandOrbitYawDegPerUnit;
-            float pitchDelta = -midDelta.y * TwoHandOrbitPitchDegPerUnit;
-            float rawZoomRatio = curDist / twoHandPinchInitialDist;
-            float desiredZoom = twoHandPinchInitialZoom * Mathf.Pow(rawZoomRatio, TwoHandZoomSensitivity);
+            // Quaternion Arcball 360° langsung pada sumbu layar kamera (camT.up, camT.right, camT.forward) secara pre-multiply:
+            // bobot presisi 60 deg/unit & clamp maksimum per frame agar terasa berat, halus, dan anti-lonjakan.
+            float yawDelta = Mathf.Clamp(
+                -midDelta.x * TwoHandOrbitYawDegPerUnit,
+                -TwoHandOrbitMaxAxisDeltaPerFrameDeg,
+                TwoHandOrbitMaxAxisDeltaPerFrameDeg);
+            float pitchDelta = Mathf.Clamp(
+                midDelta.y * TwoHandOrbitPitchDegPerUnit,
+                -TwoHandOrbitMaxAxisDeltaPerFrameDeg,
+                TwoHandOrbitMaxAxisDeltaPerFrameDeg);
+
+            // Kemiringan sudut garis antar kedua tangan (roll camT.forward): redaman 0.65x + EMA ringan + clamp ketat <= 10°/frame
+            float safeDt = Mathf.Clamp(dt, 0.001f, 0.05f);
+            float rollDelta = 0f;
+            if (handVec.sqrMagnitude >= 0.0064f)
+            {
+                float rollAlpha = 1f - Mathf.Exp(-TwoHandOrbitRollEmaRate * safeDt);
+                float angleErr = Mathf.DeltaAngle(twoHandPinchSmoothedLineAngleDeg, curLineAngleDeg);
+                float smoothedStepDeg = angleErr * rollAlpha;
+                twoHandPinchSmoothedLineAngleDeg += smoothedStepDeg;
+                rollDelta = Mathf.Clamp(
+                    smoothedStepDeg * TwoHandOrbitRollGain,
+                    -TwoHandOrbitRollMaxDeltaPerFrameDeg,
+                    TwoHandOrbitRollMaxDeltaPerFrameDeg);
+            }
+
+            // Zoom kalem & proporsional: EMA ringan pada jarak kedua tangan + clamp langkah maksimum per frame
+            float zoomAlpha = 1f - Mathf.Exp(-TwoHandZoomDistEmaRate * safeDt);
+            twoHandPinchSmoothedDist = Mathf.Lerp(twoHandPinchSmoothedDist, curDist, zoomAlpha);
+            float rawZoomRatio = Mathf.Max(0.10f, twoHandPinchSmoothedDist) / Mathf.Max(0.14f, twoHandPinchInitialDist);
+            float uncappedZoom = twoHandPinchInitialZoom * Mathf.Pow(rawZoomRatio, TwoHandZoomSensitivity);
+            float prevTargetZoom = stageController != null ? Mathf.Max(0.10f, stageController.TargetZoomScale) : twoHandPinchInitialZoom;
+            float desiredZoom = Mathf.Clamp(
+                uncappedZoom,
+                prevTargetZoom * (1f - TwoHandZoomMaxStepRatioPerFrame),
+                prevTargetZoom * (1f + TwoHandZoomMaxStepRatioPerFrame));
+
             stageController?.ApplyTwoHandOrbitAndZoom(
                 yawDelta,
                 pitchDelta,
                 desiredZoom,
                 curMid,
                 leftScreenSpan,
-                rightScreenSpan);
+                rightScreenSpan,
+                rollDelta,
+                mainCam != null ? mainCam.transform : null);
         }
     }
 
@@ -1772,11 +1951,42 @@ public class AirWeavingController : MonoBehaviour
             twoHandPanPrevMidpointXY = curMid;
             twoHandPanInitialAvgSpan = curAvgSpan;
             twoHandPanInitialPanZ = stageController != null ? stageController.TargetPanOffset.z : 0f;
+            wasTwoHandPanReleaseFrozen = false;
             stageController?.SetTwoHandManipulationState(true);
         }
         else
         {
+            AirWeavingHandGestureDetector pinchDet = primaryPinchSecondaryFist ? handGestureDetector : secondaryHandGestureDetector;
+            AirWeavingHandGestureDetector fistDet = primaryPinchSecondaryFist ? secondaryHandGestureDetector : handGestureDetector;
+            bool releaseIntentFreeze = pinchDet.PinchRatio > TwoHandPinchReleaseFreezeRatio
+                                       || pinchDet.IsPinchReleaseIntent
+                                       || fistDet.MeanWeightedBendDeg < TwoHandFistReleaseFreezeMaxBendDeg
+                                       || fistDet.FoldedFingerCount <= 2;
+            if (releaseIntentFreeze)
+            {
+                wasTwoHandPanReleaseFrozen = true;
+                stageController?.SetTwoHandReleaseFreeze(true);
+                return;
+            }
+
+            if (wasTwoHandPanReleaseFrozen)
+            {
+                wasTwoHandPanReleaseFrozen = false;
+                twoHandPanPrevMidpointXY = curMid;
+                twoHandPanInitialAvgSpan = curAvgSpan;
+                twoHandPanInitialPanZ = stageController != null ? stageController.TargetPanOffset.z : 0f;
+                stageController?.SetTwoHandReleaseFreeze(false);
+                return;
+            }
+
+            stageController?.SetTwoHandReleaseFreeze(false);
+
             Vector2 panDeltaXY = (curMid - twoHandPanPrevMidpointXY) * TwoHandFreePanXYGain;
+            float panDeltaMag = panDeltaXY.magnitude;
+            if (panDeltaMag > TwoHandFreePanMaxDeltaXYPerFrame)
+            {
+                panDeltaXY *= TwoHandFreePanMaxDeltaXYPerFrame / panDeltaMag;
+            }
             twoHandPanPrevMidpointXY = curMid;
 
             float spanRatio = Mathf.Pow(curAvgSpan / Mathf.Max(0.055f, twoHandPanInitialAvgSpan), TwoHandFreePanDepthGain);
@@ -1808,27 +2018,22 @@ public class AirWeavingController : MonoBehaviour
             }
             CancelAirDrawStrokeImmediate();
             hoveredGateSlotIndex = -1;
+            secondaryHoveredGateSlotIndex = -1;
             hoveredInputNode = null;
-            inputADwellTimer = 0f;
-            inputBDwellTimer = 0f;
-            inputSwitchMagnetOffsetXY = Vector2.zero;
+            secondaryHoveredInputNode = null;
+            inputADwellTimers[0] = 0f;
+            inputADwellTimers[1] = 0f;
+            inputBDwellTimers[0] = 0f;
+            inputBDwellTimers[1] = 0f;
+            inputSwitchMagnetOffsetBySlot[0] = Vector2.zero;
+            inputSwitchMagnetOffsetBySlot[1] = Vector2.zero;
             isPinching = false;
             wasPinching = false;
             SetHoverRingVisible(false);
             return;
         }
 
-        // 1. Kelola seret badan gerbang 3D nyata (Mode Meja Catur 3D) memakai status Kepal (Fist) + Rigid Palm Span Depth Tracking
-        //    aimXY & palmXY sudah disatukan pada bidang sinar referensi konsisten (WorkbenchDepth)
-        bool fistActive = handGestureDetector.IsFistActive;
-        bool fistJustStarted = handGestureDetector.FistJustStarted;
-        Vector2 palmXY = handGestureDetector.PalmCursorLocalXY;
-        Vector2 aimXY = fistJustStarted ? handGestureDetector.StabilizedCursorLocalXY : palmXY;
-        Vector3 palmWorldPos = handGestureDetector.PalmCursorWorldPosition;
-        Vector3 aimWorldPos = mainCam != null
-            ? mainCam.transform.TransformPoint(new Vector3(aimXY.x, aimXY.y, WorkbenchDepth))
-            : palmWorldPos;
-
+        // 1. Kelola seret badan gerbang 3D nyata (Mode Meja Catur 3D) memakai slot tangan yang mengunci GateGrab (0=primer / 1=sekunder)
         if (grabbedGateSlotIndex >= 0 && grabbedGateSlotIndex < gateSlots.Count)
         {
             if (isRecordingAirDraw)
@@ -1836,17 +2041,24 @@ public class AirWeavingController : MonoBehaviour
                 CancelAirDrawStrokeImmediate();
             }
 
+            int grabSlot = (activeInteractionHandSlot == 0 || activeInteractionHandSlot == 1) ? activeInteractionHandSlot : 0;
+            AirWeavingHandGestureDetector grabDetector = GetHandDetector(grabSlot);
+            bool grabHandDetected = IsHandSlotDetected(grabSlot);
+            bool grabFistActive = grabDetector.IsFistActive;
+            Vector2 grabPalmXY = grabDetector.PalmCursorLocalXY;
+            Vector3 grabPalmWorldPos = grabDetector.PalmCursorWorldPosition;
+
             WorkbenchGateSlot grabbed = gateSlots[grabbedGateSlotIndex];
-            if (fistActive)
+            if (grabFistActive)
             {
                 isPinching = true;
                 float liftedTargetHeightY = grabbed.currentLocalZ;
 
-                if (isHandDetected && mainCam != null)
+                if (grabHandDetected && mainCam != null)
                 {
                     Transform camT = mainCam.transform;
                     Vector3 camPos = camT.position;
-                    Vector3 handRayDir = palmWorldPos - camPos;
+                    Vector3 handRayDir = grabPalmWorldPos - camPos;
                     if (handRayDir.sqrMagnitude < 0.00001f)
                     {
                         handRayDir = camT.forward;
@@ -1858,7 +2070,7 @@ public class AirWeavingController : MonoBehaviour
 
                     // Hitung target jarak kamera 3D nyata khusus kamera depan (Front-Cam Mirror Depth):
                     // Tangan didorong maju ke arah layar (PalmSpan membesar) -> targetCamDepth bertambah (objek terdorong masuk ke dalam meja)
-                    float currentFilteredPalmSpan = Mathf.Max(0.055f, handGestureDetector.FilteredPalmSpan);
+                    float currentFilteredPalmSpan = Mathf.Max(0.055f, grabDetector.FilteredPalmSpan);
                     float spanDepthRatio = Mathf.Pow(currentFilteredPalmSpan / Mathf.Max(0.055f, grabStartPalmSpan), FistGrabDepthGain);
                     float targetCamDepth = Mathf.Clamp(grabStartCameraDepth * spanDepthRatio, MinGrabCameraDepth, MaxGrabCameraDepth);
                     Vector3 targetWorldPos = camPos + (handRayDir * targetCamDepth);
@@ -1875,7 +2087,7 @@ public class AirWeavingController : MonoBehaviour
                     }
                     else
                     {
-                        targetStageXZ = palmXY;
+                        targetStageXZ = grabPalmXY;
                         liftedTargetHeightY = ComputeArenaBaseHoverHeightY(targetStageXZ, aspectScale, grabbed.slotIndex) + GrabExtraLiftHeight;
                     }
 
@@ -1949,11 +2161,16 @@ public class AirWeavingController : MonoBehaviour
                 ExitInteractionMode(ActiveInteractionMode.GateGrab, triggerNeutralCooldown: true);
             }
 
-            hoveredGateSlotIndex = grabbedGateSlotIndex;
+            hoveredGateSlotIndex = grabSlot == 0 ? grabbedGateSlotIndex : -1;
+            secondaryHoveredGateSlotIndex = grabSlot == 1 ? grabbedGateSlotIndex : -1;
             hoveredInputNode = null;
-            inputADwellTimer = 0f;
-            inputBDwellTimer = 0f;
-            DecayInputSwitchMagnetOffset(dt);
+            secondaryHoveredInputNode = null;
+            inputADwellTimers[0] = 0f;
+            inputADwellTimers[1] = 0f;
+            inputBDwellTimers[0] = 0f;
+            inputBDwellTimers[1] = 0f;
+            DecayInputSwitchMagnetOffset(0, dt);
+            DecayInputSwitchMagnetOffset(1, dt);
             wasPinching = isPinching;
             SetHoverRingVisible(false);
             return;
@@ -1964,10 +2181,11 @@ public class AirWeavingController : MonoBehaviour
             ExitInteractionMode(ActiveInteractionMode.GateGrab, triggerNeutralCooldown: true);
         }
 
-        // 2. Tidak sedang memegang gerbang: sinkronkan status Kepal
-        isPinching = fistActive;
+        // 2. Tidak sedang memegang gerbang: sinkronkan status Kepal ambidextrous
+        isPinching = (isHandDetected && handGestureDetector.IsFistActive)
+                     || (isSecondaryHandDetected && secondaryHandGestureDetector.IsFistActive);
 
-        if (!isHandDetected)
+        if (!IsAnyHandDetected)
         {
             if (isRecordingAirDraw)
             {
@@ -1978,19 +2196,17 @@ public class AirWeavingController : MonoBehaviour
                 ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
             }
             hoveredGateSlotIndex = -1;
+            secondaryHoveredGateSlotIndex = -1;
             hoveredInputNode = null;
-            inputADwellTimer = 0f;
-            inputBDwellTimer = 0f;
-            inputSwitchMagnetOffsetXY = Vector2.zero;
-            inputARequiresExitRearm = false;
-            inputBRequiresExitRearm = false;
+            secondaryHoveredInputNode = null;
+            ResetInputTouchState();
             wasPinching = false;
             SetHoverRingVisible(false);
             return;
         }
 
-        // 2B. Prioritas Drag Kabel (Pinch aktif) & Summon Aktif: badan gerbang & Input A/B mengalah
-        if ((cableRouter != null && cableRouter.IsDraggingCable) || handGestureDetector.IsPinchActive || circleSummoner.IsActive)
+        // 2B. Prioritas Drag Kabel & Summon Aktif: badan gerbang & Input A/B mengalah
+        if ((cableRouter != null && cableRouter.IsDraggingCable) || IsAnyCircleSummonActive)
         {
             if (isRecordingAirDraw)
             {
@@ -2001,107 +2217,112 @@ public class AirWeavingController : MonoBehaviour
                 ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
             }
             hoveredGateSlotIndex = -1;
+            secondaryHoveredGateSlotIndex = -1;
             hoveredInputNode = null;
-            inputADwellTimer = 0f;
-            inputBDwellTimer = 0f;
-            DecayInputSwitchMagnetOffset(dt);
+            secondaryHoveredInputNode = null;
+            inputADwellTimers[0] = 0f;
+            inputADwellTimers[1] = 0f;
+            inputBDwellTimers[0] = 0f;
+            inputBDwellTimers[1] = 0f;
+            DecayInputSwitchMagnetOffset(0, dt);
+            DecayInputSwitchMagnetOffset(1, dt);
             wasPinching = isPinching;
             SetHoverRingVisible(false);
             return;
         }
 
-        // 3. Zona badan Output menang prioritas atas hover gerbang di dekatnya saat tidak sedang menggenggam
-        bool cursorInOutputZone = IsCursorInsideOutputPriorityZone(mainCam, aimWorldPos, aspectScale);
-        if (cursorInOutputZone || activeInteractionMode == ActiveInteractionMode.InputSwitch)
-        {
-            if (isRecordingAirDraw)
-            {
-                CancelAirDrawStrokeImmediate();
-            }
-            hoveredGateSlotIndex = -1;
-        }
-        else
-        {
-            hoveredGateSlotIndex = FindNearestGateSlotIndex(mainCam, aimWorldPos, GateHoverGrabRadius, ParkedGateHoverRadius);
-        }
-
-        // 4. Sentuh ringan ujung telunjuk (#8) pada sakelar Input A & Input B (pose telunjuk tegas, velocity gate <= 0.85 u/s, dwell 140 ms)
+        // 3. Evaluasi Ambidextrous untuk KEDUA TANGAN (slot 0 = primer DAN slot 1 = sekunder)
+        //    Saat Idle: kedua tangan dievaluasi penuh untuk hover gerbang, sakelar Input A/B, & rising-edge Fist GateGrab.
+        //    Tangan mana pun yang lebih dulu memicu gestur langsung mengunci activeInteractionHandSlot sampai selesai/dilepas.
+        hoveredGateSlotIndex = -1;
+        secondaryHoveredGateSlotIndex = -1;
         hoveredInputNode = null;
-        if (hoveredGateSlotIndex < 0)
-        {
-            HandleInputIndexTouch(mainCam, aspectScale, dt);
-        }
-        else
-        {
-            inputADwellTimer = 0f;
-            inputBDwellTimer = 0f;
-            DecayInputSwitchMagnetOffset(dt);
-        }
+        secondaryHoveredInputNode = null;
 
-        // 5. Mulai genggam badan gerbang pada rising-edge Open -> Fist (wajib Idle, lolos Neutral Cooldown, Quality Gate, & Velocity Gate <= 1.85 u/s)
-        bool canBeginGateGrab = activeInteractionMode == ActiveInteractionMode.Idle
-                                && neutralCooldownTimer <= 0f
-                                && !isTwoHandConfirming
-                                && handGestureDetector.IsQualityGatePassing
-                                && handGestureDetector.CursorSpeedUnitsPerSec <= GateGrabEnterMaxSpeed;
-        if (canBeginGateGrab && fistJustStarted && hoveredGateSlotIndex >= 0 && hoveredGateSlotIndex < gateSlots.Count)
+        for (int handSlot = 0; handSlot < 2; handSlot++)
         {
-            CancelAirDrawStrokeImmediate();
-            grabbedGateSlotIndex = hoveredGateSlotIndex;
-            activeInteractionMode = ActiveInteractionMode.GateGrab;
+            bool slotDetected = IsHandSlotDetected(handSlot);
+            AirWeavingHandGestureDetector det = GetHandDetector(handSlot);
+            bool lockedToOtherHand = activeInteractionMode == ActiveInteractionMode.InputSwitch
+                                     && activeInteractionHandSlot >= 0
+                                     && activeInteractionHandSlot != handSlot;
 
-            WorkbenchGateSlot grabbed = gateSlots[grabbedGateSlotIndex];
-            grabStartPalmSpan = Mathf.Max(0.055f, handGestureDetector.FilteredPalmSpan);
-            if (grabbed.node != null && mainCam != null)
+            if (!slotDetected || det.IsPinchActive || lockedToOtherHand)
             {
-                grabStartCameraDepth = Mathf.Clamp(
-                    Vector3.Distance(mainCam.transform.position, grabbed.node.transform.position),
-                    MinGrabCameraDepth,
-                    MaxGrabCameraDepth);
+                if (!slotDetected)
+                {
+                    inputARequiresExitRearmBySlot[handSlot] = false;
+                    inputBRequiresExitRearmBySlot[handSlot] = false;
+                }
+                inputADwellTimers[handSlot] = 0f;
+                inputBDwellTimers[handSlot] = 0f;
+                DecayInputSwitchMagnetOffset(handSlot, dt);
+                if (activeInteractionMode == ActiveInteractionMode.InputSwitch && activeInteractionHandSlot == handSlot)
+                {
+                    ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
+                }
+                continue;
+            }
+
+            Vector2 palmXY = det.PalmCursorLocalXY;
+            Vector2 aimXY = det.FistJustStarted ? det.StabilizedCursorLocalXY : palmXY;
+            Vector3 aimWorldPos = mainCam != null
+                ? mainCam.transform.TransformPoint(new Vector3(aimXY.x, aimXY.y, WorkbenchDepth))
+                : det.PalmCursorWorldPosition;
+
+            // Zona badan Output menang prioritas atas hover gerbang di dekatnya saat tidak sedang menggenggam
+            bool cursorInOutputZone = IsCursorInsideOutputPriorityZone(mainCam, aimWorldPos, aspectScale, det);
+            int slotHoveredGate;
+            if (cursorInOutputZone || activeInteractionMode == ActiveInteractionMode.InputSwitch)
+            {
+                if (isRecordingAirDraw)
+                {
+                    CancelAirDrawStrokeImmediate();
+                }
+                slotHoveredGate = -1;
             }
             else
             {
-                grabStartCameraDepth = WorkbenchDepth;
+                slotHoveredGate = FindNearestGateSlotIndex(mainCam, aimWorldPos, GateHoverGrabRadius, ParkedGateHoverRadius);
             }
-            grabbed.isPlacedOnWorkbench = true;
-            grabbed.coastVelocityXY = Vector2.zero;
-            grabbed.isCoasting = false;
-            grabbed.scalePop.Trigger(GateGrabPopAmplitude);
 
-            if (grabbed.node != null && mainCam != null)
+            if (handSlot == 0) hoveredGateSlotIndex = slotHoveredGate;
+            else secondaryHoveredGateSlotIndex = slotHoveredGate;
+
+            // 4. Sentuh ringan ujung telunjuk (#8) pada sakelar Input A & Input B untuk tangan ini
+            GateNode slotHoveredInput = null;
+            if (slotHoveredGate < 0)
             {
-                float gatePhase = 1.15f + (grabbed.slotIndex * 1.27f);
-                float arcYaw = ComputeArenaArcYawDeg(grabbed.currentLocalXY.x, aspectScale);
-                float stageZoom = stageController != null ? stageController.CurrentZoomScale : 1f;
-                ComputeStageNodePose(
-                    mainCam.transform,
-                    new Vector3(grabbed.currentLocalXY.x, grabbed.currentLocalZ, grabbed.currentLocalXY.y),
-                    arcYaw,
-                    gatePhase,
-                    isGrabbed: true,
-                    grabbed.currentInertiaTiltDeg,
-                    out Vector3 worldPos,
-                    out Quaternion worldRot);
-                grabbed.node.transform.localScale = Vector3.one * (grabbed.currentScale * stageZoom);
-                grabbed.node.SetExternalSpatialPose(true, worldPos, worldRot);
-                grabbed.node.TriggerTapFeedback();
-                if (spatialSfx != null)
+                HandleInputIndexTouchForSlot(handSlot, det, mainCam, aspectScale, dt, out slotHoveredInput);
+            }
+            else
+            {
+                inputADwellTimers[handSlot] = 0f;
+                inputBDwellTimers[handSlot] = 0f;
+                DecayInputSwitchMagnetOffset(handSlot, dt);
+                if (activeInteractionMode == ActiveInteractionMode.InputSwitch && activeInteractionHandSlot == handSlot)
                 {
-                    spatialSfx.PlayGateGrab(worldPos);
+                    ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
                 }
             }
-            else if (grabbed.node != null && spatialSfx != null)
+
+            if (handSlot == 0) hoveredInputNode = slotHoveredInput;
+            else secondaryHoveredInputNode = slotHoveredInput;
+
+            // 5. Mulai genggam badan gerbang pada rising-edge Open -> Fist oleh tangan mana pun yang lebih dulu memicu
+            bool canBeginGateGrab = activeInteractionMode == ActiveInteractionMode.Idle
+                                    && neutralCooldownTimer <= 0f
+                                    && !isTwoHandConfirming
+                                    && det.IsQualityGatePassing
+                                    && det.CursorSpeedUnitsPerSec <= GateGrabEnterMaxSpeed;
+            if (canBeginGateGrab && det.FistJustStarted && slotHoveredGate >= 0 && slotHoveredGate < gateSlots.Count)
             {
-                spatialSfx.PlayGateGrab(grabbed.node.transform.position);
+                BeginGateGrabWithHandSlot(handSlot, det, slotHoveredGate, mainCam, aspectScale);
+                break;
             }
-            hoverSfxPostActionSuppressTimer = HoverPostActionSuppressSeconds;
-            lastHoverSfxCategory = HoverSfxCategory.GateBody;
-            lastHoverSfxNode = grabbed.node;
-            lastHoverSfxSubId = grabbed.slotIndex + 1;
-            hoverSfxNoneGraceTimer = 0f;
-            wasGrabbedGateInDeleteZone = IsOutsideAssemblyZone(grabbed.currentLocalXY, aspectScale);
         }
-        else if (EnableLegacyAirDraw)
+
+        if (grabbedGateSlotIndex < 0 && EnableLegacyAirDraw && isHandDetected)
         {
             // Air-Draw lama dicadangkan nonaktif di Fase 3 (siap dikembangkan ulang di Fase 4)
             UpdateAirDrawInteraction(mainCam, aspectScale, dt);
@@ -2111,13 +2332,86 @@ public class AirWeavingController : MonoBehaviour
         SetHoverRingVisible(false);
     }
 
-    private bool IsCursorInsideOutputPriorityZone(Camera mainCam, Vector3 cursorWorldPos, float aspectScale)
+    private void BeginGateGrabWithHandSlot(
+        int handSlot,
+        AirWeavingHandGestureDetector grabDetector,
+        int targetGateSlotIndex,
+        Camera mainCam,
+        float aspectScale)
+    {
+        CancelAirDrawStrokeImmediate();
+        grabbedGateSlotIndex = targetGateSlotIndex;
+        activeInteractionMode = ActiveInteractionMode.GateGrab;
+        activeInteractionHandSlot = handSlot;
+
+        hoveredGateSlotIndex = handSlot == 0 ? targetGateSlotIndex : -1;
+        secondaryHoveredGateSlotIndex = handSlot == 1 ? targetGateSlotIndex : -1;
+        hoveredInputNode = null;
+        secondaryHoveredInputNode = null;
+
+        WorkbenchGateSlot grabbed = gateSlots[grabbedGateSlotIndex];
+        grabStartPalmSpan = Mathf.Max(0.055f, grabDetector.FilteredPalmSpan);
+        if (grabbed.node != null && mainCam != null)
+        {
+            grabStartCameraDepth = Mathf.Clamp(
+                Vector3.Distance(mainCam.transform.position, grabbed.node.transform.position),
+                MinGrabCameraDepth,
+                MaxGrabCameraDepth);
+        }
+        else
+        {
+            grabStartCameraDepth = WorkbenchDepth;
+        }
+        grabbed.isPlacedOnWorkbench = true;
+        grabbed.coastVelocityXY = Vector2.zero;
+        grabbed.isCoasting = false;
+        grabbed.scalePop.Trigger(GateGrabPopAmplitude);
+
+        if (grabbed.node != null && mainCam != null)
+        {
+            float gatePhase = 1.15f + (grabbed.slotIndex * 1.27f);
+            float arcYaw = ComputeArenaArcYawDeg(grabbed.currentLocalXY.x, aspectScale);
+            float stageZoom = stageController != null ? stageController.CurrentZoomScale : 1f;
+            ComputeStageNodePose(
+                mainCam.transform,
+                new Vector3(grabbed.currentLocalXY.x, grabbed.currentLocalZ, grabbed.currentLocalXY.y),
+                arcYaw,
+                gatePhase,
+                isGrabbed: true,
+                grabbed.currentInertiaTiltDeg,
+                out Vector3 worldPos,
+                out Quaternion worldRot);
+            grabbed.node.transform.localScale = Vector3.one * (grabbed.currentScale * stageZoom);
+            grabbed.node.SetExternalSpatialPose(true, worldPos, worldRot);
+            grabbed.node.TriggerTapFeedback();
+            if (spatialSfx != null)
+            {
+                spatialSfx.PlayGateGrab(worldPos);
+            }
+        }
+        else if (grabbed.node != null && spatialSfx != null)
+        {
+            spatialSfx.PlayGateGrab(grabbed.node.transform.position);
+        }
+        hoverSfxPostActionSuppressTimer = HoverPostActionSuppressSeconds;
+        lastHoverSfxCategory = HoverSfxCategory.GateBody;
+        lastHoverSfxNode = grabbed.node;
+        lastHoverSfxSubId = grabbed.slotIndex + 1;
+        hoverSfxNoneGraceTimer = 0f;
+        wasGrabbedGateInDeleteZone = IsOutsideAssemblyZone(grabbed.currentLocalXY, aspectScale);
+    }
+
+    private bool IsCursorInsideOutputPriorityZone(
+        Camera mainCam,
+        Vector3 cursorWorldPos,
+        float aspectScale,
+        AirWeavingHandGestureDetector detector)
     {
         if (grabbedGateSlotIndex >= 0 || postDropLockoutTimer > 0f)
         {
             return false;
         }
-        if ((cableRouter != null && cableRouter.IsDraggingCable) || handGestureDetector.IsPinchActive)
+        if ((cableRouter != null && cableRouter.IsDraggingCable) || (detector != null && detector.IsPinchActive))
         {
             return false;
         }
@@ -2141,7 +2435,7 @@ public class AirWeavingController : MonoBehaviour
                                        || rawPinching
                                        || hoveredGateSlotIndex >= 0
                                        || hoveredInputNode != null
-                                       || IsCursorInsideOutputPriorityZone(mainCam, indexTipWorldPosition, aspectScale)
+                                       || IsCursorInsideOutputPriorityZone(mainCam, indexTipWorldPosition, aspectScale, handGestureDetector)
                                        || (levelManager != null && levelManager.IsVerifying);
 
         if (blockedByHigherPriority)
@@ -2492,21 +2786,24 @@ public class AirWeavingController : MonoBehaviour
 
     private void ResetInputTouchState()
     {
-        inputADwellTimer = 0f;
-        inputBDwellTimer = 0f;
-        inputARequiresExitRearm = false;
-        inputBRequiresExitRearm = false;
+        for (int s = 0; s < 2; s++)
+        {
+            inputADwellTimers[s] = 0f;
+            inputBDwellTimers[s] = 0f;
+            inputARequiresExitRearmBySlot[s] = false;
+            inputBRequiresExitRearmBySlot[s] = false;
+            inputSwitchMagnetOffsetBySlot[s] = Vector2.zero;
+        }
         inputATouchRippleTimer = 0f;
         inputBTouchRippleTimer = 0f;
-        inputSwitchMagnetOffsetXY = Vector2.zero;
         inputAScalePop.Reset();
         inputBScalePop.Reset();
     }
 
-    private void DecayInputSwitchMagnetOffset(float dt)
+    private void DecayInputSwitchMagnetOffset(int handSlot, float dt)
     {
         float blendAlpha = 1f - Mathf.Exp(-SoftMagnetOffsetBlendSpeed * Mathf.Max(0.0001f, dt));
-        inputSwitchMagnetOffsetXY = Vector2.Lerp(inputSwitchMagnetOffsetXY, Vector2.zero, blendAlpha);
+        inputSwitchMagnetOffsetBySlot[handSlot] = Vector2.Lerp(inputSwitchMagnetOffsetBySlot[handSlot], Vector2.zero, blendAlpha);
     }
 
     private bool IsTipInsideInputSwitchZone(Camera mainCam, Vector3 tipWorldPos, float aspectScale)
@@ -2525,19 +2822,27 @@ public class AirWeavingController : MonoBehaviour
     }
 
     /// <summary>
-    /// Sentuh ringan ujung telunjuk (#8) pada sakelar Input A &amp; Input B berbasis proyeksi sinar 3D (Tahap 5.5):
-    /// Wajib pose telunjuk teracung tegas (<c>IsIndexSwitchPoseValid</c>), Quality Gate, Velocity Gate (&lt;= 0.85 u/s),
-    /// magnet kalem (R=0.24, maxPull=0.22), dwell 140 ms, exit-to-rearm berbasis posisi jari mentah (1.35x radius),
-    /// serta penguncian Exclusive Arbiter (<c>ActiveInteractionMode.InputSwitch</c>). Zero-GC.
+    /// Sentuh ringan ujung telunjuk (#8) pada sakelar Input A &amp; Input B berbasis proyeksi sinar 3D (Ambidextrous, slot 0 atau 1):
+    /// Wajib pose telunjuk teracung tegas (<c>IsIndexSwitchPoseValid</c>), Quality Gate, Velocity Gate, magnet kalem,
+    /// dwell, exit-to-rearm per-slot berbasis posisi jari mentah (1.35x radius), serta penguncian Exclusive Arbiter. Zero-GC.
     /// </summary>
-    private void HandleInputIndexTouch(Camera mainCam, float aspectScale, float dt)
+    private void HandleInputIndexTouchForSlot(
+        int handSlot,
+        AirWeavingHandGestureDetector detector,
+        Camera mainCam,
+        float aspectScale,
+        float dt,
+        out GateNode slotHoveredInput)
     {
+        slotHoveredInput = null;
+        bool isOwner = activeInteractionMode == ActiveInteractionMode.InputSwitch && activeInteractionHandSlot == handSlot;
+
         if (levelManager != null && levelManager.IsVerifying)
         {
-            inputADwellTimer = 0f;
-            inputBDwellTimer = 0f;
-            DecayInputSwitchMagnetOffset(dt);
-            if (activeInteractionMode == ActiveInteractionMode.InputSwitch)
+            inputADwellTimers[handSlot] = 0f;
+            inputBDwellTimers[handSlot] = 0f;
+            DecayInputSwitchMagnetOffset(handSlot, dt);
+            if (isOwner)
             {
                 ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
             }
@@ -2545,7 +2850,7 @@ public class AirWeavingController : MonoBehaviour
         }
 
         float zoomScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, 0.55f, 2.05f) : 1f;
-        Vector2 rawTipXY = handGestureDetector.IndexTipLocalXY;
+        Vector2 rawTipXY = detector.IndexTipLocalXY;
         Vector2 inputAXY = inputANode != null
             ? (ProjectWorldToCameraRayPlane(mainCam, inputANode.transform.position) - new Vector2(0.04f * zoomScale, 0f))
             : new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputATerminalY);
@@ -2560,36 +2865,36 @@ public class AirWeavingController : MonoBehaviour
         float scaledTapRadius = InputAirTapRadius * zoomScale;
 
         // Logika Exit-to-Rearm WAJIB memakai posisi ujung jari mentah (rawDistA/rawDistB) agar tidak pernah nyangkut oleh magnet
-        if (inputARequiresExitRearm && rawDistA > scaledRearmRadius)
+        if (inputARequiresExitRearmBySlot[handSlot] && rawDistA > scaledRearmRadius)
         {
-            inputARequiresExitRearm = false;
+            inputARequiresExitRearmBySlot[handSlot] = false;
         }
-        if (inputBRequiresExitRearm && rawDistB > scaledRearmRadius)
+        if (inputBRequiresExitRearmBySlot[handSlot] && rawDistB > scaledRearmRadius)
         {
-            inputBRequiresExitRearm = false;
+            inputBRequiresExitRearmBySlot[handSlot] = false;
         }
 
         // Gerbang Anatomi, Quality Gate, Neutral Cooldown, & Velocity Gate ketat (cegah tangan lewat / terbuka lebar memicu sakelar)
-        float tipSpeed = handGestureDetector.IndexTipSpeedUnitsPerSec;
-        bool poseAllowed = handGestureDetector.IsIndexSwitchPoseValid
-                           && handGestureDetector.IsQualityGatePassing
+        float tipSpeed = detector.IndexTipSpeedUnitsPerSec;
+        bool poseAllowed = detector.IsIndexSwitchPoseValid
+                           && detector.IsQualityGatePassing
                            && !isTwoHandConfirming
-                           && (activeInteractionMode == ActiveInteractionMode.InputSwitch || neutralCooldownTimer <= 0f);
+                           && (isOwner || (activeInteractionMode == ActiveInteractionMode.Idle && neutralCooldownTimer <= 0f));
         bool speedAllowed = tipSpeed <= InputSwitchEnterMaxSpeed;
 
         if (!poseAllowed)
         {
-            inputADwellTimer = Mathf.Max(0f, inputADwellTimer - (dt * 6f));
-            inputBDwellTimer = Mathf.Max(0f, inputBDwellTimer - (dt * 6f));
-            DecayInputSwitchMagnetOffset(dt);
-            if (activeInteractionMode == ActiveInteractionMode.InputSwitch && inputADwellTimer <= 0f && inputBDwellTimer <= 0f)
+            inputADwellTimers[handSlot] = Mathf.Max(0f, inputADwellTimers[handSlot] - (dt * 6f));
+            inputBDwellTimers[handSlot] = Mathf.Max(0f, inputBDwellTimers[handSlot] - (dt * 6f));
+            DecayInputSwitchMagnetOffset(handSlot, dt);
+            if (isOwner && inputADwellTimers[handSlot] <= 0f && inputBDwellTimers[handSlot] <= 0f)
             {
                 ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
             }
             return;
         }
 
-        // Soft Magnetic Aim-Assist kalem menuju sakelar Input A/B terdekat (R = 0.24, maxPull = 0.22, 0 saat > 0.85 u/s)
+        // Soft Magnetic Aim-Assist kalem menuju sakelar Input A/B terdekat
         Vector2 desiredMagnetOffset = Vector2.zero;
         if (speedAllowed && tipSpeed < SoftMagnetMaxHandSpeed && scaledMagnetRadius > 0.0001f)
         {
@@ -2607,9 +2912,9 @@ public class AirWeavingController : MonoBehaviour
         }
 
         float blendAlpha = 1f - Mathf.Exp(-SoftMagnetOffsetBlendSpeed * Mathf.Max(0.0001f, dt));
-        inputSwitchMagnetOffsetXY = Vector2.Lerp(inputSwitchMagnetOffsetXY, desiredMagnetOffset, blendAlpha);
+        inputSwitchMagnetOffsetBySlot[handSlot] = Vector2.Lerp(inputSwitchMagnetOffsetBySlot[handSlot], desiredMagnetOffset, blendAlpha);
 
-        Vector2 assistedTipXY = rawTipXY + inputSwitchMagnetOffsetXY;
+        Vector2 assistedTipXY = rawTipXY + inputSwitchMagnetOffsetBySlot[handSlot];
         float distA = Vector2.Distance(assistedTipXY, inputAXY);
         float distB = Vector2.Distance(assistedTipXY, inputBXY);
 
@@ -2618,29 +2923,34 @@ public class AirWeavingController : MonoBehaviour
 
         if (inA && (!inB || distA <= distB))
         {
-            hoveredInputNode = inputANode;
-            inputBDwellTimer = Mathf.Max(0f, inputBDwellTimer - (dt * 4f));
-            if (speedAllowed && !inputARequiresExitRearm && inputATapCooldown <= 0f)
+            slotHoveredInput = inputANode;
+            inputBDwellTimers[handSlot] = Mathf.Max(0f, inputBDwellTimers[handSlot] - (dt * 4f));
+            if (speedAllowed && !inputARequiresExitRearmBySlot[handSlot] && inputATapCooldown <= 0f)
             {
                 if (activeInteractionMode == ActiveInteractionMode.Idle)
                 {
                     activeInteractionMode = ActiveInteractionMode.InputSwitch;
+                    activeInteractionHandSlot = handSlot;
+                    isOwner = true;
                 }
-                inputADwellTimer += dt;
-                if (inputADwellTimer >= InputAirTapDwellSeconds)
+                if (isOwner)
                 {
-                    inputADwellTimer = 0f;
-                    inputARequiresExitRearm = true;
-                    inputATapCooldown = InputAirTapCooldownSeconds;
-                    inputATouchRippleTimer = InputTouchRippleDuration;
-                    ToggleInputTerminalNode(isInputB: false);
-                    ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: true);
+                    inputADwellTimers[handSlot] += dt;
+                    if (inputADwellTimers[handSlot] >= InputAirTapDwellSeconds)
+                    {
+                        inputADwellTimers[handSlot] = 0f;
+                        inputARequiresExitRearmBySlot[handSlot] = true;
+                        inputATapCooldown = InputAirTapCooldownSeconds;
+                        inputATouchRippleTimer = InputTouchRippleDuration;
+                        ToggleInputTerminalNode(isInputB: false);
+                        ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: true);
+                    }
                 }
             }
             else
             {
-                inputADwellTimer = Mathf.Max(0f, inputADwellTimer - (dt * 4f));
-                if (activeInteractionMode == ActiveInteractionMode.InputSwitch && inputADwellTimer <= 0f && inputBDwellTimer <= 0f)
+                inputADwellTimers[handSlot] = Mathf.Max(0f, inputADwellTimers[handSlot] - (dt * 4f));
+                if (isOwner && inputADwellTimers[handSlot] <= 0f && inputBDwellTimers[handSlot] <= 0f)
                 {
                     ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
                 }
@@ -2648,29 +2958,34 @@ public class AirWeavingController : MonoBehaviour
         }
         else if (inB)
         {
-            hoveredInputNode = inputBNode;
-            inputADwellTimer = Mathf.Max(0f, inputADwellTimer - (dt * 4f));
-            if (speedAllowed && !inputBRequiresExitRearm && inputBTapCooldown <= 0f)
+            slotHoveredInput = inputBNode;
+            inputADwellTimers[handSlot] = Mathf.Max(0f, inputADwellTimers[handSlot] - (dt * 4f));
+            if (speedAllowed && !inputBRequiresExitRearmBySlot[handSlot] && inputBTapCooldown <= 0f)
             {
                 if (activeInteractionMode == ActiveInteractionMode.Idle)
                 {
                     activeInteractionMode = ActiveInteractionMode.InputSwitch;
+                    activeInteractionHandSlot = handSlot;
+                    isOwner = true;
                 }
-                inputBDwellTimer += dt;
-                if (inputBDwellTimer >= InputAirTapDwellSeconds)
+                if (isOwner)
                 {
-                    inputBDwellTimer = 0f;
-                    inputBRequiresExitRearm = true;
-                    inputBTapCooldown = InputAirTapCooldownSeconds;
-                    inputBTouchRippleTimer = InputTouchRippleDuration;
-                    ToggleInputTerminalNode(isInputB: true);
-                    ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: true);
+                    inputBDwellTimers[handSlot] += dt;
+                    if (inputBDwellTimers[handSlot] >= InputAirTapDwellSeconds)
+                    {
+                        inputBDwellTimers[handSlot] = 0f;
+                        inputBRequiresExitRearmBySlot[handSlot] = true;
+                        inputBTapCooldown = InputAirTapCooldownSeconds;
+                        inputBTouchRippleTimer = InputTouchRippleDuration;
+                        ToggleInputTerminalNode(isInputB: true);
+                        ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: true);
+                    }
                 }
             }
             else
             {
-                inputBDwellTimer = Mathf.Max(0f, inputBDwellTimer - (dt * 4f));
-                if (activeInteractionMode == ActiveInteractionMode.InputSwitch && inputADwellTimer <= 0f && inputBDwellTimer <= 0f)
+                inputBDwellTimers[handSlot] = Mathf.Max(0f, inputBDwellTimers[handSlot] - (dt * 4f));
+                if (isOwner && inputADwellTimers[handSlot] <= 0f && inputBDwellTimers[handSlot] <= 0f)
                 {
                     ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
                 }
@@ -2678,9 +2993,9 @@ public class AirWeavingController : MonoBehaviour
         }
         else
         {
-            inputADwellTimer = Mathf.Max(0f, inputADwellTimer - (dt * 4f));
-            inputBDwellTimer = Mathf.Max(0f, inputBDwellTimer - (dt * 4f));
-            if (activeInteractionMode == ActiveInteractionMode.InputSwitch && inputADwellTimer <= 0f && inputBDwellTimer <= 0f)
+            inputADwellTimers[handSlot] = Mathf.Max(0f, inputADwellTimers[handSlot] - (dt * 4f));
+            inputBDwellTimers[handSlot] = Mathf.Max(0f, inputBDwellTimers[handSlot] - (dt * 4f));
+            if (isOwner && inputADwellTimers[handSlot] <= 0f && inputBDwellTimers[handSlot] <= 0f)
             {
                 ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
             }
@@ -3560,9 +3875,12 @@ public class AirWeavingController : MonoBehaviour
         isIndexOnlyWandPose = false;
         hoveredGateSlotIndex = -1;
         hoveredInputNode = null;
-        inputADwellTimer = 0f;
-        inputBDwellTimer = 0f;
-        circleSummoner.ClearPoseVoteBuffer();
+        inputADwellTimers[0] = 0f;
+        inputBDwellTimers[0] = 0f;
+        inputARequiresExitRearmBySlot[0] = false;
+        inputBRequiresExitRearmBySlot[0] = false;
+        inputSwitchMagnetOffsetBySlot[0] = Vector2.zero;
+        circleSummoners[0].ClearPoseVoteBuffer();
         ResetLandmarkOneEuroFilters();
         SetHandRigVisible(false);
         SetHoverRingVisible(false);
@@ -3576,7 +3894,18 @@ public class AirWeavingController : MonoBehaviour
         secondarySlotHandedness = TrackedHandedness.Unknown;
         isSecondaryHandDetected = false;
         wasSecondaryHandDetected = false;
-        secondaryHandGestureDetector.Reset();
+        secondaryHoveredGateSlotIndex = -1;
+        secondaryHoveredInputNode = null;
+        inputADwellTimers[1] = 0f;
+        inputBDwellTimers[1] = 0f;
+        inputARequiresExitRearmBySlot[1] = false;
+        inputBRequiresExitRearmBySlot[1] = false;
+        inputSwitchMagnetOffsetBySlot[1] = Vector2.zero;
+        circleSummoners[1].ClearPoseVoteBuffer();
+        if (!secondaryHandGestureDetector.IsFistActive && !secondaryHandGestureDetector.IsPinchActive)
+        {
+            secondaryHandGestureDetector.Reset();
+        }
         ResetSecondaryLandmarkOneEuroFilters();
         SetSecondaryHandRigVisible(false);
     }
@@ -3885,7 +4214,7 @@ public class AirWeavingController : MonoBehaviour
 
         // Perbarui detektor 3D Metrik (handWorldLandmarks + proyeksi sinar WorkbenchDepth konsisten)
         handGestureDetector.UpdateFromLandmarks(landmarks, worldLandmarks, smoothedLandmarksWorld, camTransform, WorkbenchDepth, camAspect);
-        circleSummoner.RecordPoseSample(handGestureDetector.CurrentSummonPose);
+        circleSummoners[0].RecordPoseSample(handGestureDetector.CurrentSummonPose);
 
         // Sinkronkan status kompatibilitas Pinch legacy dengan rasio 3D metrik terbaru
         currentPinchRatio = handGestureDetector.PinchRatio;
@@ -4012,6 +4341,7 @@ public class AirWeavingController : MonoBehaviour
         timeSinceLastValidHand = 0f;
 
         secondaryHandGestureDetector.UpdateFromLandmarks(landmarks, worldLandmarks, secondarySmoothedLandmarksWorld, camTransform, WorkbenchDepth, camAspect);
+        circleSummoners[1].RecordPoseSample(secondaryHandGestureDetector.CurrentSummonPose);
         SetSecondaryHandRigVisible(true);
 
         if (secondaryJointSphereObjs != null)
@@ -4254,14 +4584,17 @@ public class AirWeavingController : MonoBehaviour
     private void UpdateHandWakeAudioFeedback(float dt)
     {
         bool overlayOrVerify = IsAnyUiOverlayOpen || (levelManager != null && levelManager.IsVerifying);
-        if (isHandDetected)
+        if (IsAnyHandDetected)
         {
             if (!wasHandDetectedForWakeSfx
                 && handAbsentForWakeSeconds >= HologramWakeMinAbsentSeconds
                 && !overlayOrVerify
                 && spatialSfx != null)
             {
-                spatialSfx.PlayHologramWake(handGestureDetector.PalmCursorWorldPosition);
+                Vector3 wakePos = isHandDetected
+                    ? handGestureDetector.PalmCursorWorldPosition
+                    : secondaryHandGestureDetector.PalmCursorWorldPosition;
+                spatialSfx.PlayHologramWake(wakePos);
             }
             wasHandDetectedForWakeSfx = true;
             handAbsentForWakeSeconds = 0f;
@@ -4284,7 +4617,7 @@ public class AirWeavingController : MonoBehaviour
         }
 
         bool overlayOrVerify = IsAnyUiOverlayOpen || (levelManager != null && levelManager.IsVerifying);
-        if (!isAirWeavingActive || !isHandDetected || overlayOrVerify || mainCam == null)
+        if (!isAirWeavingActive || !IsAnyHandDetected || overlayOrVerify || mainCam == null)
         {
             spatialSfx.StopHumImmediate();
             return;
@@ -4322,8 +4655,8 @@ public class AirWeavingController : MonoBehaviour
     }
 
     /// <summary>
-    /// Memicu micro-tick elektronik ringan tepat 1x per transisi target hover baru (orb port, badan gerbang, atau sakelar Input A/B).
-    /// Dilengkapi hysteresis lepas 90 ms & jeda pasca-aksi agar tidak spam saat tangan diam atau melepas objek/kabel. Zero-GC.
+    /// Memicu micro-tick elektronik ringan tepat 1x per transisi target hover baru (orb port, badan gerbang, atau sakelar Input A/B)
+    /// untuk kedua tangan secara ambidextrous. Zero-GC.
     /// </summary>
     private void UpdateHoverSfxFeedback(float dt)
     {
@@ -4336,11 +4669,9 @@ public class AirWeavingController : MonoBehaviour
         bool busyGesture = activeInteractionMode != ActiveInteractionMode.Idle
                            || grabbedGateSlotIndex >= 0
                            || (cableRouter != null && cableRouter.IsDraggingCable)
-                           || handGestureDetector.IsFistActive
-                           || handGestureDetector.IsPinchActive
-                           || circleSummoner.IsActive;
+                           || IsAnyCircleSummonActive;
 
-        if (!isAirWeavingActive || !isHandDetected || overlayOrVerify)
+        if (!isAirWeavingActive || !IsAnyHandDetected || overlayOrVerify)
         {
             ResetHoverSfxTracking();
             return;
@@ -4357,6 +4688,9 @@ public class AirWeavingController : MonoBehaviour
         int curSubId = 0;
         Vector3 curWorldPos = Vector3.zero;
 
+        GateNode anyHoveredInput = hoveredInputNode != null ? hoveredInputNode : secondaryHoveredInputNode;
+        int anyHoveredGateIdx = hoveredGateSlotIndex >= 0 ? hoveredGateSlotIndex : secondaryHoveredGateSlotIndex;
+
         if (cableRouter != null && cableRouter.TryGetHoveredPortInfo(out GateNode portNode, out bool portIsOutput, out int portSlot, out Vector3 portWorldPos))
         {
             curCategory = HoverSfxCategory.PortOrb;
@@ -4364,21 +4698,21 @@ public class AirWeavingController : MonoBehaviour
             curSubId = (portIsOutput ? 1 : 0) | ((portSlot & 3) << 1);
             curWorldPos = portWorldPos;
         }
-        else if (hoveredInputNode != null)
+        else if (anyHoveredInput != null)
         {
             curCategory = HoverSfxCategory.InputSwitch;
-            curNode = hoveredInputNode;
-            curSubId = hoveredInputNode == inputBNode ? 2 : 1;
-            curWorldPos = hoveredInputNode.transform.position;
+            curNode = anyHoveredInput;
+            curSubId = anyHoveredInput == inputBNode ? 2 : 1;
+            curWorldPos = anyHoveredInput.transform.position;
         }
-        else if (hoveredGateSlotIndex >= 0
-                 && hoveredGateSlotIndex < gateSlots.Count
-                 && gateSlots[hoveredGateSlotIndex] != null
-                 && gateSlots[hoveredGateSlotIndex].node != null)
+        else if (anyHoveredGateIdx >= 0
+                 && anyHoveredGateIdx < gateSlots.Count
+                 && gateSlots[anyHoveredGateIdx] != null
+                 && gateSlots[anyHoveredGateIdx].node != null)
         {
             curCategory = HoverSfxCategory.GateBody;
-            curNode = gateSlots[hoveredGateSlotIndex].node;
-            curSubId = gateSlots[hoveredGateSlotIndex].slotIndex + 1;
+            curNode = gateSlots[anyHoveredGateIdx].node;
+            curSubId = gateSlots[anyHoveredGateIdx].slotIndex + 1;
             curWorldPos = curNode.transform.position;
         }
 
@@ -4421,16 +4755,112 @@ public class AirWeavingController : MonoBehaviour
             }
         }
 
+        Transform stageRoot = stageController != null ? stageController.StageRoot : null;
+        float stageZoom = stageController != null ? stageController.CurrentZoomScale : 1f;
+
         bool blockedByArbiter = (activeInteractionMode != ActiveInteractionMode.Idle && activeInteractionMode != ActiveInteractionMode.CableDrag)
                                 || (activeInteractionMode == ActiveInteractionMode.Idle && isTwoHandConfirming);
-        bool blockedCable = blockedByArbiter || grabbedGateSlotIndex >= 0 || circleSummoner.IsActive || handGestureDetector.IsFistActive;
+        bool baseBlockedCable = blockedByArbiter || grabbedGateSlotIndex >= 0 || IsAnyCircleSummonActive;
+
+        int chosenSlot = -1;
+        int secondaryHoverSlot = -1;
+
+        if (activeInteractionMode == ActiveInteractionMode.CableDrag && (activeInteractionHandSlot == 0 || activeInteractionHandSlot == 1))
+        {
+            chosenSlot = activeInteractionHandSlot;
+        }
+        else if (!baseBlockedCable)
+        {
+            bool slot0Avail = isHandDetected && !handGestureDetector.IsFistActive;
+            bool slot1Avail = isSecondaryHandDetected && !secondaryHandGestureDetector.IsFistActive;
+
+            bool canStartBase = activeInteractionMode == ActiveInteractionMode.Idle
+                                && neutralCooldownTimer <= 0f
+                                && !isTwoHandConfirming;
+            bool slot0CanBegin = slot0Avail
+                                 && canStartBase
+                                 && handGestureDetector.PinchJustStarted
+                                 && handGestureDetector.IsQualityGatePassing
+                                 && handGestureDetector.PinchSpeedUnitsPerSec <= CablePinchEnterMaxSpeed;
+            bool slot1CanBegin = slot1Avail
+                                 && canStartBase
+                                 && secondaryHandGestureDetector.PinchJustStarted
+                                 && secondaryHandGestureDetector.IsQualityGatePassing
+                                 && secondaryHandGestureDetector.PinchSpeedUnitsPerSec <= CablePinchEnterMaxSpeed;
+
+            float d0 = slot0Avail
+                ? cableRouter.QueryNearestPortNormalizedDistance(
+                    slot0CanBegin ? handGestureDetector.StabilizedPinchLocalXY : handGestureDetector.PinchPointLocalXY,
+                    stageZoom)
+                : float.MaxValue;
+            float d1 = slot1Avail
+                ? cableRouter.QueryNearestPortNormalizedDistance(
+                    slot1CanBegin ? secondaryHandGestureDetector.StabilizedPinchLocalXY : secondaryHandGestureDetector.PinchPointLocalXY,
+                    stageZoom)
+                : float.MaxValue;
+
+            if (slot0CanBegin && !slot1CanBegin && d0 <= 1.25f)
+            {
+                chosenSlot = 0;
+            }
+            else if (slot1CanBegin && !slot0CanBegin && d1 <= 1.25f)
+            {
+                chosenSlot = 1;
+            }
+            else if (slot0CanBegin && slot1CanBegin)
+            {
+                chosenSlot = d1 < d0 ? 1 : 0;
+            }
+            else if (d1 < d0)
+            {
+                chosenSlot = 1;
+            }
+            else if (d0 < float.MaxValue)
+            {
+                chosenSlot = 0;
+            }
+            else if (slot0Avail)
+            {
+                chosenSlot = 0;
+            }
+            else if (slot1Avail)
+            {
+                chosenSlot = 1;
+            }
+
+            if (chosenSlot == 0 && slot1Avail)
+            {
+                secondaryHoverSlot = 1;
+            }
+            else if (chosenSlot == 1 && slot0Avail)
+            {
+                secondaryHoverSlot = 0;
+            }
+        }
+
+        if (chosenSlot != activeCableHoverHandSlot)
+        {
+            if (activeInteractionMode != ActiveInteractionMode.CableDrag)
+            {
+                cableRouter.ResetAimAssistOffset();
+            }
+            activeCableHoverHandSlot = chosenSlot;
+        }
+
+        bool hasChosenHand = chosenSlot >= 0 && IsHandSlotDetected(chosenSlot);
+        AirWeavingHandGestureDetector cableDet = chosenSlot >= 0 ? GetHandDetector(chosenSlot) : handGestureDetector;
+        bool blockedCable = baseBlockedCable || (chosenSlot >= 0 && cableDet.IsFistActive);
         bool allowBeginCableDrag = activeInteractionMode == ActiveInteractionMode.Idle
                                    && neutralCooldownTimer <= 0f
                                    && !isTwoHandConfirming
-                                   && handGestureDetector.IsQualityGatePassing
-                                   && handGestureDetector.PinchSpeedUnitsPerSec <= CablePinchEnterMaxSpeed;
-        Transform stageRoot = stageController != null ? stageController.StageRoot : null;
-        float stageZoom = stageController != null ? stageController.CurrentZoomScale : 1f;
+                                   && hasChosenHand
+                                   && cableDet.IsQualityGatePassing
+                                   && cableDet.PinchSpeedUnitsPerSec <= CablePinchEnterMaxSpeed;
+        bool hasSecondaryHoverHand = secondaryHoverSlot >= 0 && IsHandSlotDetected(secondaryHoverSlot) && !blockedCable;
+        Vector2 secondaryHoverPinchXY = hasSecondaryHoverHand
+            ? GetHandDetector(secondaryHoverSlot).PinchPointLocalXY
+            : Vector2.zero;
+
         cableRouter.Tick(
             mainCam,
             circuitManager,
@@ -4443,24 +4873,28 @@ public class AirWeavingController : MonoBehaviour
             IsAnyUiOverlayOpen,
             levelManager != null && levelManager.IsVerifying,
             blockedCable,
-            isHandDetected,
-            handGestureDetector.IsPinchActive,
-            handGestureDetector.PinchJustStarted,
-            handGestureDetector.PinchJustEnded,
-            handGestureDetector.StabilizedPinchLocalXY,
-            handGestureDetector.PinchPointLocalXY,
-            handGestureDetector.PinchPointWorldPosition,
+            hasChosenHand,
+            hasChosenHand && cableDet.IsPinchActive,
+            hasChosenHand && cableDet.PinchJustStarted,
+            hasChosenHand && cableDet.PinchJustEnded,
+            hasChosenHand ? cableDet.StabilizedPinchLocalXY : Vector2.zero,
+            hasChosenHand ? cableDet.PinchPointLocalXY : Vector2.zero,
+            hasChosenHand ? cableDet.PinchPointWorldPosition : Vector3.zero,
             Time.unscaledDeltaTime,
-            handGestureDetector.PinchSpeedUnitsPerSec,
-            handGestureDetector.PinchRatio,
-            handGestureDetector.IsPinchReleaseIntent,
+            hasChosenHand ? cableDet.PinchSpeedUnitsPerSec : 0f,
+            hasChosenHand ? cableDet.PinchRatio : 1f,
+            hasChosenHand && cableDet.IsPinchReleaseIntent,
             stageRoot,
             stageZoom,
-            allowBeginCableDrag);
+            allowBeginCableDrag,
+            hasSecondaryHoverHand,
+            secondaryHoverPinchXY);
 
         if (activeInteractionMode == ActiveInteractionMode.Idle && cableRouter.IsDraggingCable)
         {
             activeInteractionMode = ActiveInteractionMode.CableDrag;
+            activeInteractionHandSlot = chosenSlot >= 0 ? chosenSlot : 0;
+            activeCableHoverHandSlot = activeInteractionHandSlot;
         }
         else if (activeInteractionMode == ActiveInteractionMode.CableDrag && !cableRouter.IsDraggingCable)
         {
@@ -4475,10 +4909,15 @@ public class AirWeavingController : MonoBehaviour
         bool overlayOrVerify = IsAnyUiOverlayOpen || (levelManager != null && levelManager.IsVerifying);
         bool blockedByArbiter = (activeInteractionMode != ActiveInteractionMode.Idle && activeInteractionMode != ActiveInteractionMode.CableDrag)
                                 || IsAnyTwoHandModeActive;
-        bool blockedCable = overlayOrVerify || blockedByArbiter || grabbedGateSlotIndex >= 0 || circleSummoner.IsActive || handGestureDetector.IsFistActive;
+        int activeCableSlot = activeInteractionMode == ActiveInteractionMode.CableDrag
+            ? activeInteractionHandSlot
+            : activeCableHoverHandSlot;
+        bool hasCableSlot = activeCableSlot >= 0 && IsHandSlotDetected(activeCableSlot);
+        AirWeavingHandGestureDetector cableDet = activeCableSlot >= 0 ? GetHandDetector(activeCableSlot) : handGestureDetector;
+        bool blockedCable = overlayOrVerify || blockedByArbiter || grabbedGateSlotIndex >= 0 || IsAnyCircleSummonActive || (hasCableSlot && cableDet.IsFistActive);
         Vector3 effectivePinchWorld = cableRouter.AssistedPinchWorldPosition != Vector3.zero
             ? cableRouter.AssistedPinchWorldPosition
-            : handGestureDetector.PinchPointWorldPosition;
+            : (hasCableSlot ? cableDet.PinchPointWorldPosition : Vector3.zero);
         Transform stageRoot = stageController != null ? stageController.StageRoot : null;
         float stageZoom = stageController != null ? stageController.CurrentZoomScale : 1f;
         cableRouter.SyncVisualsAfterPoseUpdate(
@@ -4490,7 +4929,7 @@ public class AirWeavingController : MonoBehaviour
             activePlacedGatesBuffer,
             WorkbenchDepth,
             isAirWeavingActive,
-            isHandDetected && !blockedCable,
+            (hasCableSlot || cableRouter.IsSecondaryHoveringPort) && !blockedCable,
             effectivePinchWorld,
             stageRoot,
             stageZoom);
@@ -4502,16 +4941,19 @@ public class AirWeavingController : MonoBehaviour
         Transform camT = mainCam.transform;
         bool overlayOpen = IsAnyUiOverlayOpen;
         bool isVerifying = levelManager != null && levelManager.IsVerifying;
-        bool canShowHover = isHandDetected && !overlayOpen && !isVerifying;
+        bool canShowHover = IsAnyHandDetected && !overlayOpen && !isVerifying && !IsAnyTwoHandModeActive;
         hologramVisual.SetRootVisible(isAirWeavingActive);
 
         Transform stageRoot = stageController != null ? stageController.StageRoot : null;
         GateNode portFocusedNode = (canShowHover && cableRouter != null) ? cableRouter.HoveredPortNode : null;
+        GateNode secPortFocusedNode = (canShowHover && cableRouter != null) ? cableRouter.SecondaryHoveredPortNode : null;
+        bool inputAHovered = canShowHover && (hoveredInputNode == inputANode || secondaryHoveredInputNode == inputANode);
+        bool inputBHovered = canShowHover && (hoveredInputNode == inputBNode || secondaryHoveredInputNode == inputBNode);
         hologramVisual.UpdateNodeFrame(0, camT, inputANode, true, false, false,
-            (canShowHover && hoveredInputNode == inputANode) ? AirWeavingHologramVisual.NodeHoloState.BodyHovered : AirWeavingHologramVisual.NodeHoloState.Idle,
+            inputAHovered ? AirWeavingHologramVisual.NodeHoloState.BodyHovered : AirWeavingHologramVisual.NodeHoloState.Idle,
             stageRoot);
         hologramVisual.UpdateNodeFrame(1, camT, inputBNode, false, true, false,
-            (canShowHover && hoveredInputNode == inputBNode) ? AirWeavingHologramVisual.NodeHoloState.BodyHovered : AirWeavingHologramVisual.NodeHoloState.Idle,
+            inputBHovered ? AirWeavingHologramVisual.NodeHoloState.BodyHovered : AirWeavingHologramVisual.NodeHoloState.Idle,
             stageRoot);
         hologramVisual.UpdateNodeFrame(2, camT, outputNode, false, false, true, AirWeavingHologramVisual.NodeHoloState.Idle, stageRoot);
 
@@ -4539,11 +4981,11 @@ public class AirWeavingController : MonoBehaviour
                                  || Vector2.Distance(slot.currentLocalXY, homeXY) <= ParkSlotSnapRadius;
                 state = returning ? AirWeavingHologramVisual.NodeHoloState.ReturningToRack : AirWeavingHologramVisual.NodeHoloState.Grabbed;
             }
-            else if (canShowHover && portFocusedNode == slot.node)
+            else if (canShowHover && (portFocusedNode == slot.node || secPortFocusedNode == slot.node))
             {
                 state = AirWeavingHologramVisual.NodeHoloState.PortFocused;
             }
-            else if (canShowHover && hoveredGateSlotIndex == i)
+            else if (canShowHover && (hoveredGateSlotIndex == i || secondaryHoveredGateSlotIndex == i))
             {
                 state = AirWeavingHologramVisual.NodeHoloState.BodyHovered;
             }
@@ -4556,45 +4998,101 @@ public class AirWeavingController : MonoBehaviour
         }
 
         bool draggingCable = cableRouter != null && cableRouter.IsDraggingCable;
-        bool hoveringPort = cableRouter != null && cableRouter.IsHoveringPort;
-        bool isHoveringOrGrabbingGate = isGrabbingGate || hoveredGateSlotIndex >= 0;
+        bool hoveringPrimaryPort = cableRouter != null && cableRouter.IsHoveringPort;
+        bool hoveringSecondaryPort = cableRouter != null && cableRouter.IsSecondaryHoveringPort;
         bool twoHandVisualActive = !overlayOpen && !isVerifying && (IsTwoHandOrbitZoomActive || IsTwoHandFreePanActive || IsTwoHandFistResetCharging);
-        // Sembunyikan reticle telapak (+) saat menarik kabel, mode 2 tangan, atau saat sudah mengunci target hover/grab
-        bool hidePalmReticle = overlayOpen
-                               || isVerifying
-                               || twoHandVisualActive
-                               || draggingCable
-                               || hoveringPort
-                               || isHoveringOrGrabbingGate
-                               || hoveredInputNode != null
-                               || circleSummoner.IsActive;
+        bool anySummonActive = IsAnyCircleSummonActive;
+
+        int primaryCableSlot = draggingCable ? activeInteractionHandSlot : activeCableHoverHandSlot;
+        int otherCableSlot = primaryCableSlot == 0 ? 1 : (primaryCableSlot == 1 ? 0 : -1);
+
+        bool slot0PortHovering = (primaryCableSlot == 0 && (hoveringPrimaryPort || draggingCable))
+                                 || (otherCableSlot == 0 && hoveringSecondaryPort);
+        bool slot1PortHovering = (primaryCableSlot == 1 && (hoveringPrimaryPort || draggingCable))
+                                 || (otherCableSlot == 1 && hoveringSecondaryPort);
+
+        bool lockedOtherThanSlot0 = activeInteractionMode != ActiveInteractionMode.Idle && activeInteractionHandSlot != 0;
+        bool lockedOtherThanSlot1 = activeInteractionMode != ActiveInteractionMode.Idle && activeInteractionHandSlot != 1;
+
+        // Saat Idle, tampilkan reticle aktif untuk KEDUA tangan (slot 0 DAN slot 1) agar pengguna tahu kiri & kanan sama-sama siap pakai
+        bool hideSlot0Reticle = overlayOpen
+                                || isVerifying
+                                || twoHandVisualActive
+                                || lockedOtherThanSlot0
+                                || (isGrabbingGate && activeInteractionHandSlot == 0)
+                                || slot0PortHovering
+                                || hoveredGateSlotIndex >= 0
+                                || hoveredInputNode != null
+                                || circleSummoners[0].IsActive;
+
+        bool hideSlot1Reticle = overlayOpen
+                                || isVerifying
+                                || twoHandVisualActive
+                                || lockedOtherThanSlot1
+                                || (isGrabbingGate && activeInteractionHandSlot == 1)
+                                || slot1PortHovering
+                                || secondaryHoveredGateSlotIndex >= 0
+                                || secondaryHoveredInputNode != null
+                                || circleSummoners[1].IsActive;
 
         hologramVisual.UpdatePalmReticle(
             camT,
             isHandDetected,
-            hidePalmReticle,
+            hideSlot0Reticle,
             handGestureDetector.PalmCursorWorldPosition,
             handGestureDetector.IsFistActive,
-            hoveringPort,
+            slot0PortHovering,
             handGestureDetector.MeanCurlRatio);
 
-        bool showPinchRing = !overlayOpen
-                             && !isVerifying
-                             && !twoHandVisualActive
-                             && !isGrabbingGate
-                             && !handGestureDetector.IsFistActive
-                             && !circleSummoner.IsActive
-                             && (hoveringPort || draggingCable);
-        Vector3 pinchVisualWorldPos = (cableRouter != null && cableRouter.AssistedPinchWorldPosition != Vector3.zero)
+        hologramVisual.UpdateSecondaryPalmReticle(
+            camT,
+            isSecondaryHandDetected,
+            hideSlot1Reticle,
+            secondaryHandGestureDetector.PalmCursorWorldPosition,
+            secondaryHandGestureDetector.IsFistActive,
+            slot1PortHovering,
+            secondaryHandGestureDetector.MeanCurlRatio);
+
+        // Indikator cincin cubit presisi untuk tangan kabel aktif (baik slot 0 maupun slot 1) & tangan kedua bila ikut hover port saat Idle
+        bool hasPrimaryCableHand = primaryCableSlot >= 0 && IsHandSlotDetected(primaryCableSlot);
+        AirWeavingHandGestureDetector primaryCableDet = primaryCableSlot >= 0 ? GetHandDetector(primaryCableSlot) : handGestureDetector;
+        bool showPrimaryPinchRing = !overlayOpen
+                                    && !isVerifying
+                                    && !twoHandVisualActive
+                                    && !isGrabbingGate
+                                    && hasPrimaryCableHand
+                                    && !primaryCableDet.IsFistActive
+                                    && !anySummonActive
+                                    && (hoveringPrimaryPort || draggingCable);
+        Vector3 primaryPinchVisualWorldPos = (cableRouter != null && cableRouter.AssistedPinchWorldPosition != Vector3.zero)
             ? cableRouter.AssistedPinchWorldPosition
-            : handGestureDetector.PinchPointWorldPosition;
+            : (hasPrimaryCableHand ? primaryCableDet.PinchPointWorldPosition : Vector3.zero);
         hologramVisual.UpdatePinchIndicator(
             camT,
-            isHandDetected,
-            showPinchRing,
-            pinchVisualWorldPos,
-            handGestureDetector.IsPinchActive,
+            hasPrimaryCableHand,
+            showPrimaryPinchRing,
+            primaryPinchVisualWorldPos,
+            hasPrimaryCableHand && primaryCableDet.IsPinchActive,
             cableRouter != null && cableRouter.IsSnappedTargetPort);
+
+        bool hasOtherCableHand = otherCableSlot >= 0 && IsHandSlotDetected(otherCableSlot);
+        AirWeavingHandGestureDetector otherCableDet = otherCableSlot >= 0 ? GetHandDetector(otherCableSlot) : secondaryHandGestureDetector;
+        bool showSecondaryPinchRing = !overlayOpen
+                                      && !isVerifying
+                                      && !twoHandVisualActive
+                                      && !isGrabbingGate
+                                      && !draggingCable
+                                      && !anySummonActive
+                                      && hasOtherCableHand
+                                      && !otherCableDet.IsFistActive
+                                      && hoveringSecondaryPort;
+        hologramVisual.UpdateSecondaryPinchIndicator(
+            camT,
+            hasOtherCableHand,
+            showSecondaryPinchRing,
+            hasOtherCableHand ? otherCableDet.PinchPointWorldPosition : Vector3.zero,
+            hasOtherCableHand && otherCableDet.IsPinchActive,
+            isSnappedToPort: false);
 
         Vector3 handAWorld = (IsTwoHandFistResetCharging || (IsTwoHandFreePanActive && handGestureDetector.IsFistActive))
             ? handGestureDetector.PalmCursorWorldPosition
@@ -4642,80 +5140,109 @@ public class AirWeavingController : MonoBehaviour
         float aspectScale = ComputeHorizontalAspectScale(mainCam);
         bool overlayOrVerify = IsAnyUiOverlayOpen || (levelManager != null && levelManager.IsVerifying);
         bool draggingCable = cableRouter != null && cableRouter.IsDraggingCable;
-        bool pinchBusy = handGestureDetector.IsPinchActive || handGestureDetector.IsPrePinchSuppressingSummon;
         bool blockedByOtherMode = activeInteractionMode != ActiveInteractionMode.Idle
                                   && activeInteractionMode != ActiveInteractionMode.CircleSummon;
-        bool blocked;
-        if (circleSummoner.IsActive)
-        {
-            // Begitu sudah masuk Charging/Ready (terkunci di Arbiter), tangan kedua maupun hover tepi DILARANG membatalkan summon
-            blocked = overlayOrVerify || blockedByOtherMode || grabbedGateSlotIndex >= 0 || draggingCable || handGestureDetector.IsPinchActive;
-        }
-        else
-        {
-            bool cableBusy = draggingCable || pinchBusy || (cableRouter != null && cableRouter.IsHoveringPort);
-            bool inOutputZone = IsCursorInsideOutputPriorityZone(mainCam, handGestureDetector.PalmCursorWorldPosition, aspectScale);
-            bool tipNearInputSwitch = IsTipInsideInputSwitchZone(mainCam, indexTipWorldPosition, aspectScale);
-            bool blockedByCooldownOrQuality = neutralCooldownTimer > 0f
-                                              || !handGestureDetector.IsQualityGatePassing
-                                              || isTwoHandConfirming;
-            blocked = overlayOrVerify
-                      || blockedByOtherMode
-                      || blockedByCooldownOrQuality
-                      || grabbedGateSlotIndex >= 0
-                      || cableBusy
-                      || hoveredGateSlotIndex >= 0
-                      || hoveredInputNode != null
-                      || tipNearInputSwitch
-                      || inOutputZone;
-        }
 
         Vector2 assemblyMin = new Vector2(AssemblyMinBaseX * aspectScale, AssemblyMinY);
         Vector2 assemblyMax = new Vector2(AssemblyMaxBaseX * aspectScale, AssemblyMaxY);
 
-        circleSummoner.Tick(
-            dt,
-            isAirWeavingActive,
-            blocked,
-            isHandDetected,
-            handGestureDetector.IsFistActive,
-            handGestureDetector.FistJustStarted,
-            handGestureDetector.CurrentSummonPose,
-            handGestureDetector.IsRelaxedOpenFiveBloom,
-            handGestureDetector.ActiveSummonTipLocalXY,
-            handGestureDetector.ThumbTipLocalXY,
-            assemblyMin,
-            assemblyMax);
+        int lockedSlot = (activeInteractionMode == ActiveInteractionMode.CircleSummon
+                          && (activeInteractionHandSlot == 0 || activeInteractionHandSlot == 1))
+            ? activeInteractionHandSlot
+            : -1;
 
-        if (activeInteractionMode == ActiveInteractionMode.Idle && circleSummoner.IsActive)
+        for (int handSlot = 0; handSlot < 2; handSlot++)
         {
-            activeInteractionMode = ActiveInteractionMode.CircleSummon;
+            AirWeavingCircleSummoner summoner = circleSummoners[handSlot];
+            AirWeavingHandGestureDetector det = GetHandDetector(handSlot);
+            bool slotDetected = IsHandSlotDetected(handSlot);
+            bool slotBlockedByLock = lockedSlot >= 0 && lockedSlot != handSlot;
+
+            bool blocked;
+            if (slotBlockedByLock || blockedByOtherMode || overlayOrVerify || grabbedGateSlotIndex >= 0 || draggingCable)
+            {
+                blocked = true;
+            }
+            else if (summoner.IsActive)
+            {
+                // Begitu sudah masuk Charging/Ready (terkunci di Arbiter), tangan kedua maupun hover tepi DILARANG membatalkan summon
+                blocked = det.IsPinchActive;
+            }
+            else
+            {
+                bool pinchBusy = det.IsPinchActive || det.IsPrePinchSuppressingSummon;
+                bool slotHoveringPort = (cableRouter != null)
+                                        && ((activeCableHoverHandSlot == handSlot && cableRouter.IsHoveringPort)
+                                            || (activeCableHoverHandSlot != handSlot && cableRouter.IsSecondaryHoveringPort));
+                int slotHoveredGate = handSlot == 0 ? hoveredGateSlotIndex : secondaryHoveredGateSlotIndex;
+                GateNode slotHoveredInput = handSlot == 0 ? hoveredInputNode : secondaryHoveredInputNode;
+                bool inOutputZone = IsCursorInsideOutputPriorityZone(mainCam, det.PalmCursorWorldPosition, aspectScale, det);
+                bool tipNearInputSwitch = IsTipInsideInputSwitchZone(mainCam, GetHandIndexTipWorldPosition(handSlot), aspectScale);
+                bool blockedByCooldownOrQuality = neutralCooldownTimer > 0f
+                                                  || !det.IsQualityGatePassing
+                                                  || isTwoHandConfirming;
+                blocked = blockedByCooldownOrQuality
+                          || pinchBusy
+                          || slotHoveringPort
+                          || slotHoveredGate >= 0
+                          || slotHoveredInput != null
+                          || tipNearInputSwitch
+                          || inOutputZone;
+            }
+
+            summoner.Tick(
+                dt,
+                isAirWeavingActive,
+                blocked,
+                slotDetected,
+                det.IsFistActive,
+                det.FistJustStarted,
+                det.CurrentSummonPose,
+                det.IsRelaxedOpenFiveBloom,
+                det.ActiveSummonTipLocalXY,
+                det.ThumbTipLocalXY,
+                assemblyMin,
+                assemblyMax);
+
+            if (activeInteractionMode == ActiveInteractionMode.Idle && summoner.IsActive)
+            {
+                activeInteractionMode = ActiveInteractionMode.CircleSummon;
+                activeInteractionHandSlot = handSlot;
+                lockedSlot = handSlot;
+                circleSummoners[1 - handSlot].Reset();
+            }
+
+            if (summoner.BloomJustTriggeredThisFrame)
+            {
+                HandleCircleSummonBloomDeploy(mainCam, aspectScale, summoner.DeployedGateType, summoner.DeployedLocalXY);
+            }
         }
-        else if (activeInteractionMode == ActiveInteractionMode.CircleSummon && !circleSummoner.IsActive)
+
+        if (activeInteractionMode == ActiveInteractionMode.CircleSummon)
         {
-            ExitInteractionMode(ActiveInteractionMode.CircleSummon, triggerNeutralCooldown: !overlayOrVerify);
+            int ownerSlot = (activeInteractionHandSlot == 0 || activeInteractionHandSlot == 1) ? activeInteractionHandSlot : 0;
+            if (!circleSummoners[ownerSlot].IsActive)
+            {
+                ExitInteractionMode(ActiveInteractionMode.CircleSummon, triggerNeutralCooldown: !overlayOrVerify);
+            }
         }
 
         UpdateCircleSummonAudioFeedback(mainCam, overlayOrVerify);
-
-        if (circleSummoner.BloomJustTriggeredThisFrame)
-        {
-            HandleCircleSummonBloomDeploy(mainCam, aspectScale, circleSummoner.DeployedGateType, circleSummoner.DeployedLocalXY);
-        }
     }
 
     private void UpdateCircleSummonAudioFeedback(Camera mainCam, bool overlayOrVerify)
     {
-        AirWeavingCircleSummoner.SummonStage curStage = circleSummoner.Stage;
+        AirWeavingCircleSummoner activeSummoner = GetActiveOrPreviewCircleSummoner();
+        AirWeavingCircleSummoner.SummonStage curStage = activeSummoner.Stage;
         if (curStage != AirWeavingCircleSummoner.SummonStage.Idle && mainCam != null)
         {
-            Vector2 centerXY = circleSummoner.PreviewCenterLocalXY;
+            Vector2 centerXY = activeSummoner.PreviewCenterLocalXY;
             lastSfxSummonWorldPos = mainCam.transform.TransformPoint(new Vector3(centerXY.x, centerXY.y, WorkbenchDepth));
         }
 
         if (spatialSfx != null && !overlayOrVerify)
         {
-            NodeType curGateType = circleSummoner.ActiveGateType;
+            NodeType curGateType = activeSummoner.ActiveGateType;
             bool enteredChargingFromIdle = curStage == AirWeavingCircleSummoner.SummonStage.Charging
                                            && lastSfxSummonStage == AirWeavingCircleSummoner.SummonStage.Idle;
 
@@ -4742,7 +5269,7 @@ public class AirWeavingController : MonoBehaviour
             }
             else if (curStage == AirWeavingCircleSummoner.SummonStage.Charging)
             {
-                float prog = circleSummoner.ChargeProgress;
+                float prog = activeSummoner.ChargeProgress;
                 int desiredStep = prog >= 0.75f ? 3 : (prog >= 0.50f ? 2 : (prog >= 0.25f ? 1 : 0));
                 if (desiredStep > lastSfxSummonChargeStep)
                 {
@@ -4755,9 +5282,10 @@ public class AirWeavingController : MonoBehaviour
             }
             else if (curStage == AirWeavingCircleSummoner.SummonStage.Idle)
             {
-                bool cancelledByFist = circleSummoner.ConsumedFistCancelThisFrame;
+                bool cancelledByFist = circleSummoners[0].ConsumedFistCancelThisFrame || circleSummoners[1].ConsumedFistCancelThisFrame;
+                bool anyBloomTriggered = circleSummoners[0].BloomJustTriggeredThisFrame || circleSummoners[1].BloomJustTriggeredThisFrame;
                 bool expiredFromReady = lastSfxSummonStage == AirWeavingCircleSummoner.SummonStage.Ready
-                                        && !circleSummoner.BloomJustTriggeredThisFrame;
+                                        && !anyBloomTriggered;
                 if (cancelledByFist || expiredFromReady)
                 {
                     spatialSfx.PlaySoftReject(lastSfxSummonWorldPos);
@@ -4849,10 +5377,11 @@ public class AirWeavingController : MonoBehaviour
     private void UpdateCircleSummonVisuals(Camera mainCam, float dt)
     {
         if (summonVisual == null) return;
-        bool hasGateContext = circleSummoner.IsActive || circleSummoner.HasLivePoseIndicator;
-        NodeType visualGate = circleSummoner.IsActive ? circleSummoner.ActiveGateType : circleSummoner.LiveIndicatorGateType;
+        AirWeavingCircleSummoner activeSummoner = GetActiveOrPreviewCircleSummoner();
+        bool hasGateContext = activeSummoner.IsActive || activeSummoner.HasLivePoseIndicator;
+        NodeType visualGate = activeSummoner.IsActive ? activeSummoner.ActiveGateType : activeSummoner.LiveIndicatorGateType;
         bool alreadyOnBoard = hasGateContext && IsGateTypePlacedOnWorkbench(visualGate);
-        summonVisual.TickVisuals(mainCam, dt, isAirWeavingActive, WorkbenchDepth, circleSummoner, alreadyOnBoard);
+        summonVisual.TickVisuals(mainCam, dt, isAirWeavingActive, WorkbenchDepth, activeSummoner, alreadyOnBoard);
     }
 
     private bool IsGateTypePlacedOnWorkbench(NodeType gateType)
@@ -4877,8 +5406,32 @@ public class AirWeavingController : MonoBehaviour
             ? outputNode.transform.position
             : mainCam.transform.TransformPoint(new Vector3(fallbackOutputXY.x, fallbackOutputXY.y, WorkbenchDepth));
         Vector2 outputRayXY = ProjectWorldToCameraRayPlane(mainCam, outputWorldPos);
-        Vector2 palmRayXY = handGestureDetector.PalmCursorLocalXY;
         float stageZoom = stageController != null ? stageController.CurrentZoomScale : 1f;
+
+        int outputHandSlot = -1;
+        if (activeInteractionMode == ActiveInteractionMode.OutputHold
+            && (activeInteractionHandSlot == 0 || activeInteractionHandSlot == 1))
+        {
+            outputHandSlot = activeInteractionHandSlot;
+        }
+        else if (isHandDetected && isSecondaryHandDetected)
+        {
+            float dist0 = Vector2.Distance(handGestureDetector.PalmCursorLocalXY, outputRayXY);
+            float dist1 = Vector2.Distance(secondaryHandGestureDetector.PalmCursorLocalXY, outputRayXY);
+            outputHandSlot = dist1 < dist0 ? 1 : 0;
+        }
+        else if (isHandDetected)
+        {
+            outputHandSlot = 0;
+        }
+        else if (isSecondaryHandDetected)
+        {
+            outputHandSlot = 1;
+        }
+
+        bool outputHandDetected = outputHandSlot >= 0 && IsHandSlotDetected(outputHandSlot);
+        AirWeavingHandGestureDetector outDet = outputHandSlot >= 0 ? GetHandDetector(outputHandSlot) : handGestureDetector;
+        Vector2 palmRayXY = outputHandDetected ? outDet.PalmCursorLocalXY : Vector2.zero;
 
         OutputDebugGuidanceState guidanceState = EvaluateOutputDebugGuidance(outputWorldPos, out int passedRowCount);
 
@@ -4888,7 +5441,10 @@ public class AirWeavingController : MonoBehaviour
 
         bool outputBlockedByArbiter = (activeInteractionMode != ActiveInteractionMode.Idle && activeInteractionMode != ActiveInteractionMode.OutputHold)
                                       || (activeInteractionMode == ActiveInteractionMode.Idle
-                                          && (neutralCooldownTimer > 0f || !handGestureDetector.IsQualityGatePassing || isTwoHandConfirming));
+                                          && (neutralCooldownTimer > 0f || !outputHandDetected || !outDet.IsQualityGatePassing || isTwoHandConfirming));
+
+        int slotHoveredGate = outputHandSlot == 1 ? secondaryHoveredGateSlotIndex : hoveredGateSlotIndex;
+        bool anyConsumedFistCancel = circleSummoners[0].ConsumedFistCancelThisFrame || circleSummoners[1].ConsumedFistCancelThisFrame;
 
         Transform stageRoot = stageController != null ? stageController.StageRoot : null;
         outputTrigger.Tick(mainCam, dt, isAirWeavingActive,
@@ -4897,12 +5453,12 @@ public class AirWeavingController : MonoBehaviour
             levelManager != null && levelManager.IsCircuitCompleteLive,
             effectiveReadyForNext,
             IsAnyUiOverlayOpen,
-            isHandDetected, handGestureDetector.IsFistActive, palmRayXY,
+            outputHandDetected, outputHandDetected && outDet.IsFistActive, palmRayXY,
             outputRayXY, outputWorldPos,
-            grabbedGateSlotIndex >= 0, hoveredGateSlotIndex >= 0,
-            handGestureDetector.IsPinchActive,
+            grabbedGateSlotIndex >= 0, slotHoveredGate >= 0,
+            outputHandDetected && outDet.IsPinchActive,
             cableRouter != null && cableRouter.IsDraggingCable,
-            isRecordingAirDraw || circleSummoner.IsActive || circleSummoner.ConsumedFistCancelThisFrame || outputBlockedByArbiter,
+            isRecordingAirDraw || IsAnyCircleSummonActive || anyConsumedFistCancel || outputBlockedByArbiter,
             postDropLockoutTimer,
             guidanceState,
             passedRowCount,
@@ -4913,6 +5469,7 @@ public class AirWeavingController : MonoBehaviour
         if (activeInteractionMode == ActiveInteractionMode.Idle && outputTrigger.IsCharging)
         {
             activeInteractionMode = ActiveInteractionMode.OutputHold;
+            activeInteractionHandSlot = outputHandSlot >= 0 ? outputHandSlot : 0;
         }
         else if (activeInteractionMode == ActiveInteractionMode.OutputHold && !outputTrigger.IsCharging)
         {
@@ -5228,7 +5785,7 @@ public class AirWeavingController : MonoBehaviour
             fpsTimer = 0f;
         }
 
-        if (isHandDetected)
+        if (IsAnyHandDetected)
         {
             if (noHandToastShown) { noHandToastShown = false; levelManager?.ClearLowPriorityNoHandToast(); }
             noHandAbsentTimer = 0f;
@@ -5769,6 +6326,11 @@ public class AirWeavingController : MonoBehaviour
         rawPinching = false;
         isPinching = false;
         wasPinching = false;
+        hoveredGateSlotIndex = -1;
+        secondaryHoveredGateSlotIndex = -1;
+        hoveredInputNode = null;
+        secondaryHoveredInputNode = null;
+        activeCableHoverHandSlot = -1;
         isIndexOnlyWandPose = false;
         CancelAirDrawStrokeImmediate();
         ResetLandmarkOneEuroFilters();
@@ -5784,7 +6346,7 @@ public class AirWeavingController : MonoBehaviour
         outputTrigger?.HideImmediate();
         hologramVisual?.HideImmediate();
         cableRouter?.HideImmediate();
-        circleSummoner.Reset();
+        ResetAllCircleSummoners();
         lastSfxSummonStage = AirWeavingCircleSummoner.SummonStage.Idle;
         lastSfxSummonChargeStep = 0;
         wasGrabbedGateInDeleteZone = false;

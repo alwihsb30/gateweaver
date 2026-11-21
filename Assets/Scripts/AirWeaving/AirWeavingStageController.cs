@@ -2,24 +2,22 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Pengendali Ruang Meja Hologram 3D Horizontal (GateWeaver AR v8.0 Tahap 4.5):
+/// Pengendali Ruang Meja Hologram 3D Horizontal (GateWeaver AR v8.0 Tahap 4.5 -> 5.5 Quaternion Arcball):
 /// - Pivot 3D <c>HologramStageRoot</c> di depan <c>Camera.main</c> dengan bidang meja horizontal nyata (bidang <c>XZ</c> lokal,
-///   normal atas meja = <c>+Y</c> / <c>stageRoot.up</c>) yang dilihat dari sudut depan-atas (<c>DefaultElevationPitchDeg = 36°</c>)
+///   normal atas meja = <c>+Y</c> / <c>stageRoot.up</c>) pada kemiringan bawaan <c>DefaultElevationPitchDeg = 36°</c>
 ///   sehingga membentuk perspektif trapesium 3D yang tegas (tepi belakang lebih tinggi &amp; menyempit alami dibanding tepi depan).
-/// - 100% bebas kontrol Mouse / Touchscreen di Mode Udara: Orbit 360° (<c>Yaw</c> bebas 360°, <c>Pitch</c> 15°..68°),
-///   Air-Zoom (0.68x..1.65x), dan Reset Panggung dikendalikan sepenuhnya oleh gestur 2 tangan di udara (<c>Both Hands Pinch</c>
-///   &amp; <c>Both Hands Fist</c>) dari <c>AirWeavingController</c>, ditambah Dynamic 3D Hand Parallax (±7° yaw, ±4° pitch) saat 1 tangan.
+/// - 100% bebas kontrol Mouse / Touchscreen di Mode Udara: Orbit Quaternion Arcball 360° penuh bebas dari sumbu mana pun
+///   (tanpa pitch clamp &amp; tanpa gimbal lock — pre-multiply pada sumbu layar <c>camT.up</c>, <c>camT.right</c>, <c>camT.forward</c>),
+///   Air-Zoom (0.42x..2.85x), Free Air-Pan 3D, Inertial Coasting berbasis sumbu-kecepatan sudut Quaternion, dan Reset Panggung
+///   dikendalikan sepenuhnya oleh gestur 2 tangan di udara dari <c>AirWeavingController</c>, ditambah Dynamic 3D Hand Parallax.
 /// - Lantai Proyeksi Hologram 3D di bidang <c>XZ</c> (<c>y = 0</c>) + Cincin Bayangan Elips (Grounded Contact Rings) +
-///   Tiang Proyeksi Vertikal tegak lurus (<c>+Y</c>) menuju setiap node yang melayang di atas permukaan meja (<c>BaseHoverHeight = +0.26</c>,
-///   terangkat hingga <c>~+0.58</c> saat dikepal dengan pelebaran cincin bayangan <c>+55%</c>).
+///   Tiang Proyeksi Vertikal tegak lurus (<c>+Y</c>) menuju setiap node yang melayang di atas permukaan meja.
 /// - 100% Zero-GC di runtime loop, kompatibel Built-in Render Pipeline OpenGLES3, dan nonaktif bersih di Mode Kartu v5.
 /// </summary>
 public sealed class AirWeavingStageController : MonoBehaviour
 {
     public const float DefaultElevationPitchDeg = 36.0f;
-    public const float DefaultYawDeg = 0.0f;
-    public const float MinElevationPitchDeg = -80.0f;
-    public const float MaxElevationPitchDeg = 85.0f;
+    private static readonly Quaternion DefaultBaseTiltRotation = Quaternion.Euler(-DefaultElevationPitchDeg, 0f, 0f);
 
     public const float DefaultZoomScale = 1.00f;
     public const float MinZoomScale = 0.42f;
@@ -41,26 +39,32 @@ public sealed class AirWeavingStageController : MonoBehaviour
     public const float GrabExtraLiftHeight = 0.240f;
     public const float ContactRingLiftExpandFactor = 0.50f;
 
-    private const float OrbitSpringOmega = 15.0f;
+    private const float OrbitSlerpRate = 14.0f;
     private const float ZoomSpringOmega = 14.0f;
     private const float PanSpringOmega = 14.0f;
     private const float ParallaxSpringOmega = 7.5f;
 
-    // Parameter 3D Differential-Depth Twist & Anchor Z Halus pada Mode 2 Tangan Both Pinch (Tahap 4.8 -> Polish 4.9)
-    private const float TwoHandTwistAsymDeadzone = 0.025f;
-    private const float TwoHandTwistYawDegPerAsym = 140.0f;
-    private const float TwoHandOrbitDepthDeadzone = 0.040f;
-    private const float TwoHandOrbitDepthGain = 0.68f;
-    private const float TwoHandOrbitDepthSpanMeters = 1.05f;
+    // Parameter Anchor Kedalaman Z Halus pada Mode 2 Tangan Both Pinch (differential-depth twist dimatikan agar orbit Arcball tetap presisi)
+    private const float TwoHandOrbitDepthDeadzone = 0.065f;
+    private const float TwoHandOrbitDepthGain = 0.42f;
+    private const float TwoHandOrbitDepthSpanMeters = 0.65f;
 
-    // Parameter Inertial Coasting (efek ngerem / momentum meluncur halus pasca lepas 2 tangan) — Tahap 4.9
-    private const float StageCoastDamping = 4.8f;
-    private const float StageVelocityTrackRate = 14.0f;
-    private const float MaxCoastYawDegPerSec = 190.0f;
-    private const float MaxCoastPitchDegPerSec = 110.0f;
-    private const float MaxCoastZoomPerSec = 1.40f;
-    private const float MaxCoastPanUnitsPerSec = 2.10f;
+    // Parameter Inertial Coasting Quaternion Anti-Kick (ring-buffer tertunda 55-130 ms + deadzone lepas tenang)
+    private const float StageCoastDamping = 6.2f;
+    private const float StageVelocityTrackRate = 12.0f;
+    private const float MaxCoastAngularSpeedDegPerSec = 140.0f;
+    private const float CoastAngularStopSpeedDegPerSec = 0.25f;
+    private const float MaxCoastZoomPerSec = 0.75f;
+    private const float MaxCoastPanUnitsPerSec = 1.25f;
     private const float StageCoastStopEpsilon = 0.0005f;
+    private const int VelocityHistoryCapacity = 16;
+    private const float CoastDelayedWindowMinAgeSeconds = 0.055f;
+    private const float CoastDelayedWindowMaxAgeSeconds = 0.130f;
+    private const float CoastRecentPauseCheckMinAgeSeconds = 0.020f;
+    private const float CoastReleaseMaxFreezeHoldSeconds = 0.160f;
+    private const float CoastReleaseAngularDeadzoneDegPerSec = 18.0f;
+    private const float CoastReleaseZoomDeadzonePerSec = 0.18f;
+    private const float CoastReleasePanDeadzoneUnitsPerSec = 0.20f;
 
     private const int GridInternalVerticalLines = 9;
     private const int GridInternalHorizontalLines = 7;
@@ -139,13 +143,9 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private readonly Vector3[] ringLocalBuffer = new Vector3[ContactRingSegments];
     private readonly Vector3[] stemLocalBuffer = new Vector3[2];
 
-    // State Air-Orbit 360°, Air-Zoom, & Dynamic Hand Parallax
-    private float targetOrbitYawDeg = DefaultYawDeg;
-    private float targetOrbitPitchDeg = DefaultElevationPitchDeg;
-    private float currentOrbitYawDeg = DefaultYawDeg;
-    private float currentOrbitPitchDeg = DefaultElevationPitchDeg;
-    private float velocityOrbitYaw = 0f;
-    private float velocityOrbitPitch = 0f;
+    // State Air-Orbit 360° Quaternion Arcball Murni (tanpa Euler clamp / gimbal lock), Air-Zoom, & Dynamic Hand Parallax
+    private Quaternion targetOrbitRotation = Quaternion.identity;
+    private Quaternion currentOrbitRotation = Quaternion.identity;
 
     private float targetZoomScale = DefaultZoomScale;
     private float currentZoomScale = DefaultZoomScale;
@@ -160,23 +160,36 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private float velocityParallaxYaw = 0f;
     private float velocityParallaxPitch = 0f;
 
+    private struct StageVelocitySample
+    {
+        public float time;
+        public Vector3 angVelDegPerSec;
+        public float zoomVelPerSec;
+        public Vector3 panVelPerSec;
+    }
+
     private bool isTwoHandManipulationActive = false;
     private bool wasTwoHandManipulationActive = false;
     private bool hasTwoHandOrbitDepthAnchor = false;
-    private float twoHandAnchorAsym = 0f;
-    private float twoHandAppliedTwistYawDeg = 0f;
     private float twoHandAnchorAvgSpan = 0.172f;
     private float twoHandAnchorPanZ = 0f;
 
-    // State Inertial Coasting 2 Tangan (smoothed velocity & target snapshot) — Tahap 4.9
-    private float coastYawVelocityDeg = 0f;
-    private float coastPitchVelocityDeg = 0f;
+    // State Inertial Coasting Quaternion Anti-Kick 2 Tangan (ring-buffer kecepatan tertunda + freeze gate)
+    private Vector3 coastingAxis = Vector3.up;
+    private float coastingSpeedDegPerSec = 0f;
     private float coastZoomVelocity = 0f;
     private Vector3 coastPanVelocity = Vector3.zero;
-    private float prevManipTargetYawDeg = DefaultYawDeg;
-    private float prevManipTargetPitchDeg = DefaultElevationPitchDeg;
+    private Quaternion prevManipTargetOrbitRotation = Quaternion.identity;
     private float prevManipTargetZoomScale = DefaultZoomScale;
     private Vector3 prevManipTargetPanOffset = Vector3.zero;
+    private readonly StageVelocitySample[] velocityHistory = new StageVelocitySample[VelocityHistoryCapacity];
+    private int velocityHistoryWriteIdx = 0;
+    private int velocityHistoryCount = 0;
+    private bool isTwoHandReleaseFrozen = false;
+    private float releaseFreezeStartTime = -1f;
+    private Vector3 smoothedManipAngVel = Vector3.zero;
+    private float smoothedManipZoomVel = 0f;
+    private Vector3 smoothedManipPanVel = Vector3.zero;
 
     private bool isInitialized = false;
     private float lastBuiltGridAspectScale = -1f;
@@ -186,8 +199,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
     public float TargetZoomScale => targetZoomScale;
     public Vector3 CurrentPanOffset => currentPanOffset;
     public Vector3 TargetPanOffset => targetPanOffset;
-    public float EffectivePitchDeg => currentOrbitPitchDeg + currentParallaxPitchDeg;
-    public float EffectiveYawDeg => currentOrbitYawDeg + currentParallaxYawDeg;
+    public Quaternion TargetOrbitRotation => targetOrbitRotation;
+    public Quaternion CurrentOrbitRotation => currentOrbitRotation;
     public bool IsTwoHandManipulationActive => isTwoHandManipulationActive;
 
     public void EnsureInitialized(Camera mainCam)
@@ -328,12 +341,24 @@ public sealed class AirWeavingStageController : MonoBehaviour
         }
     }
 
+    private void ClearVelocityHistory()
+    {
+        velocityHistoryWriteIdx = 0;
+        velocityHistoryCount = 0;
+        isTwoHandReleaseFrozen = false;
+        releaseFreezeStartTime = -1f;
+        smoothedManipAngVel = Vector3.zero;
+        smoothedManipZoomVel = 0f;
+        smoothedManipPanVel = Vector3.zero;
+    }
+
     private void ClearInertialCoastVelocities()
     {
-        coastYawVelocityDeg = 0f;
-        coastPitchVelocityDeg = 0f;
+        coastingAxis = Vector3.up;
+        coastingSpeedDegPerSec = 0f;
         coastZoomVelocity = 0f;
         coastPanVelocity = Vector3.zero;
+        ClearVelocityHistory();
     }
 
     public void HideImmediate()
@@ -341,7 +366,6 @@ public sealed class AirWeavingStageController : MonoBehaviour
         isTwoHandManipulationActive = false;
         wasTwoHandManipulationActive = false;
         hasTwoHandOrbitDepthAnchor = false;
-        twoHandAppliedTwistYawDeg = 0f;
         ClearInertialCoastVelocities();
 
         if (!isInitialized)
@@ -367,27 +391,19 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     public void ResetViewToDefault(bool immediate = false)
     {
-        // Pantulkan yaw ke kelipatan 360° terdekat agar pegas selalu mengambil busur terpendek menuju 0°
-        float wrappedCurrentYaw = Mathf.Repeat(currentOrbitYawDeg + 180f, 360f) - 180f;
-        currentOrbitYawDeg = wrappedCurrentYaw;
-        targetOrbitYawDeg = DefaultYawDeg;
-        targetOrbitPitchDeg = DefaultElevationPitchDeg;
+        targetOrbitRotation = Quaternion.identity;
         targetZoomScale = DefaultZoomScale;
         targetPanOffset = Vector3.zero;
         isTwoHandManipulationActive = false;
         wasTwoHandManipulationActive = false;
         hasTwoHandOrbitDepthAnchor = false;
-        twoHandAppliedTwistYawDeg = 0f;
         ClearInertialCoastVelocities();
 
         if (immediate)
         {
-            currentOrbitYawDeg = DefaultYawDeg;
-            currentOrbitPitchDeg = DefaultElevationPitchDeg;
+            currentOrbitRotation = Quaternion.identity;
             currentZoomScale = DefaultZoomScale;
             currentPanOffset = Vector3.zero;
-            velocityOrbitYaw = 0f;
-            velocityOrbitPitch = 0f;
             velocityZoom = 0f;
             velocityPanOffset = Vector3.zero;
             currentParallaxYawDeg = 0f;
@@ -411,13 +427,61 @@ public sealed class AirWeavingStageController : MonoBehaviour
         if (!active)
         {
             hasTwoHandOrbitDepthAnchor = false;
-            twoHandAppliedTwistYawDeg = 0f;
+            if (!wasTwoHandManipulationActive)
+            {
+                isTwoHandReleaseFrozen = false;
+                releaseFreezeStartTime = -1f;
+            }
         }
     }
 
     /// <summary>
-    /// Mengunci jangkar awal kedalaman 2 tangan (kiri vs kanan layar) saat memasuki mode <c>Both Pinch</c>
-    /// untuk 3D Differential-Depth Twist (putar nampan) &amp; dorong-tarik Z halus. Zero-GC.
+    /// Membekukan injeksi delta &amp; pencatatan kecepatan saat salah satu tangan mulai membuka (release-intent)
+    /// agar tidak ada hentakan rotasi/zoom/pan pada 1-3 frame terakhir sebelum mode 2 tangan keluar. Zero-GC.
+    /// </summary>
+    public void SetTwoHandReleaseFreeze(bool frozen)
+    {
+        if (!isTwoHandManipulationActive)
+        {
+            isTwoHandReleaseFrozen = false;
+            releaseFreezeStartTime = -1f;
+            return;
+        }
+
+        if (frozen && !isTwoHandReleaseFrozen)
+        {
+            isTwoHandReleaseFrozen = true;
+            releaseFreezeStartTime = Time.unscaledTime;
+            prevManipTargetOrbitRotation = targetOrbitRotation;
+            prevManipTargetZoomScale = targetZoomScale;
+            prevManipTargetPanOffset = targetPanOffset;
+        }
+        else if (!frozen && isTwoHandReleaseFrozen)
+        {
+            isTwoHandReleaseFrozen = false;
+            releaseFreezeStartTime = -1f;
+            prevManipTargetOrbitRotation = targetOrbitRotation;
+            prevManipTargetZoomScale = targetZoomScale;
+            prevManipTargetPanOffset = targetPanOffset;
+        }
+    }
+
+    /// <summary>
+    /// Mengunci ulang jangkar kedalaman Z 2 tangan tanpa mereset histori kecepatan saat tangan kembali merapat
+    /// pasca jeda release-freeze singkat. Zero-GC.
+    /// </summary>
+    public void ReanchorTwoHandOrbitDepth(float leftScreenPalmSpan, float rightScreenPalmSpan)
+    {
+        float safeLeft = Mathf.Max(0.055f, leftScreenPalmSpan);
+        float safeRight = Mathf.Max(0.055f, rightScreenPalmSpan);
+        twoHandAnchorAvgSpan = 0.5f * (safeLeft + safeRight);
+        twoHandAnchorPanZ = targetPanOffset.z;
+        hasTwoHandOrbitDepthAnchor = true;
+    }
+
+    /// <summary>
+    /// Mengunci jangkar awal kedalaman 2 tangan saat memasuki mode <c>Both Pinch</c>
+    /// untuk dorong-tarik Z halus &amp; membersihkan histori kecepatan coasting. Zero-GC.
     /// </summary>
     public void BeginTwoHandOrbitZoomAnchor(float leftScreenPalmSpan, float rightScreenPalmSpan)
     {
@@ -425,17 +489,16 @@ public sealed class AirWeavingStageController : MonoBehaviour
         ClearInertialCoastVelocities();
         float safeLeft = Mathf.Max(0.055f, leftScreenPalmSpan);
         float safeRight = Mathf.Max(0.055f, rightScreenPalmSpan);
-        twoHandAnchorAsym = (safeRight - safeLeft) / Mathf.Max(0.001f, safeRight + safeLeft);
-        twoHandAppliedTwistYawDeg = 0f;
         twoHandAnchorAvgSpan = 0.5f * (safeLeft + safeRight);
         twoHandAnchorPanZ = targetPanOffset.z;
         hasTwoHandOrbitDepthAnchor = true;
     }
 
     /// <summary>
-    /// Menerapkan delta Air-Orbit Free-View (<c>yawDeltaDeg</c> bebas 360° penuh, <c>pitchDeltaDeg</c> bebas -80°..+85°),
-    /// target Air-Zoom (<c>desiredZoomScale</c> 0.42x..2.85x) dengan Focal-Point Zoom menuju titik tengah 2 tangan,
-    /// serta 3D Differential-Depth Twist &amp; dorong-tarik Z halus bila ukuran telapak kiri/kanan layar diberikan.
+    /// Menerapkan delta Quaternion Arcball 360° bebas penuh tanpa pitch clamp dan tanpa gimbal lock
+    /// (pre-multiply pada sumbu layar kamera <c>camT.up</c>, <c>camT.right</c>, dan <c>camT.forward</c>),
+    /// target Air-Zoom (<c>desiredZoomScale</c> 0.42x..2.85x) dengan Focal-Point Zoom kalem menuju titik tengah 2 tangan,
+    /// serta dorong-tarik Z halus (differential-depth twist dimatikan agar rotasi tetap presisi dan bebas putaran liar).
     /// </summary>
     public void ApplyTwoHandOrbitAndZoom(
         float yawDeltaDeg,
@@ -443,44 +506,31 @@ public sealed class AirWeavingStageController : MonoBehaviour
         float desiredZoomScale,
         Vector2 focalMidpointCameraXY = default,
         float leftScreenPalmSpan = -1f,
-        float rightScreenPalmSpan = -1f)
+        float rightScreenPalmSpan = -1f,
+        float rollDeltaDeg = 0f,
+        Transform camTransform = null)
     {
         isTwoHandManipulationActive = true;
-        float totalYawDeltaDeg = yawDeltaDeg;
+        if (isTwoHandReleaseFrozen)
+        {
+            return;
+        }
 
-        // 3D Differential-Depth Twist (Putar Meja Seperti Memegang Nampan) + Dorong-Tarik Z Halus (Front-Cam Mirror Depth)
+        // Dorong-Tarik Z Halus (Front-Cam Mirror Depth) tanpa menyuntikkan differential-depth twist liar ke sumbu Yaw
         if (leftScreenPalmSpan > 0f && rightScreenPalmSpan > 0f)
         {
             float safeLeft = Mathf.Max(0.055f, leftScreenPalmSpan);
             float safeRight = Mathf.Max(0.055f, rightScreenPalmSpan);
-            float curAsym = (safeRight - safeLeft) / Mathf.Max(0.001f, safeRight + safeLeft);
             float curAvgSpan = 0.5f * (safeLeft + safeRight);
 
             if (!hasTwoHandOrbitDepthAnchor)
             {
-                twoHandAnchorAsym = curAsym;
-                twoHandAppliedTwistYawDeg = 0f;
                 twoHandAnchorAvgSpan = curAvgSpan;
                 twoHandAnchorPanZ = targetPanOffset.z;
                 hasTwoHandOrbitDepthAnchor = true;
             }
             else
             {
-                // Mendorong tangan kanan layar maju ke lensa (rightSpan membesar -> deltaAsym > 0) -> Yaw negatif (sisi kanan meja masuk +Z)
-                // Mendorong tangan kiri layar maju ke lensa (leftSpan membesar -> deltaAsym < 0) -> Yaw positif (sisi kiri meja masuk +Z)
-                float rawDeltaAsym = curAsym - twoHandAnchorAsym;
-                float effectiveDeltaAsym = 0f;
-                if (Mathf.Abs(rawDeltaAsym) > TwoHandTwistAsymDeadzone)
-                {
-                    effectiveDeltaAsym = rawDeltaAsym - (Mathf.Sign(rawDeltaAsym) * TwoHandTwistAsymDeadzone);
-                }
-
-                float desiredTwistYawDeg = -effectiveDeltaAsym * TwoHandTwistYawDegPerAsym;
-                float twistYawDeltaDeg = desiredTwistYawDeg - twoHandAppliedTwistYawDeg;
-                twoHandAppliedTwistYawDeg = desiredTwistYawDeg;
-                totalYawDeltaDeg += twistYawDeltaDeg;
-
-                // Dorong kedua tangan maju bersama (curAvgSpan > anchor) -> meja masuk lebih dalam (+Z); tarik mundur -> meja mendekat (-Z)
                 float avgSpanRatio = Mathf.Pow(curAvgSpan / Mathf.Max(0.055f, twoHandAnchorAvgSpan), TwoHandOrbitDepthGain);
                 float deltaRatio = avgSpanRatio - 1.0f;
                 float effectiveDepthDelta = 0f;
@@ -494,19 +544,26 @@ public sealed class AirWeavingStageController : MonoBehaviour
             }
         }
 
-        targetOrbitYawDeg += totalYawDeltaDeg;
-        targetOrbitPitchDeg = Mathf.Clamp(targetOrbitPitchDeg + pitchDeltaDeg, MinElevationPitchDeg, MaxElevationPitchDeg);
+        // Pre-multiply Quaternion Arcball langsung pada sumbu layar kamera (camT.up, camT.right, camT.forward) -> 360° bebas penuh!
+        Quaternion deltaYaw = Quaternion.AngleAxis(yawDeltaDeg, camTransform != null ? camTransform.up : Vector3.up);
+        Quaternion deltaPitch = Quaternion.AngleAxis(pitchDeltaDeg, camTransform != null ? camTransform.right : Vector3.right);
+        Quaternion deltaRoll = Quaternion.AngleAxis(rollDeltaDeg, camTransform != null ? camTransform.forward : Vector3.forward);
+        Quaternion deltaWorld = deltaRoll * deltaPitch * deltaYaw;
+        Quaternion deltaCamLocal = camTransform != null
+            ? (Quaternion.Inverse(camTransform.rotation) * deltaWorld * camTransform.rotation)
+            : deltaWorld;
+        targetOrbitRotation = NormalizeQuaternion(deltaCamLocal * targetOrbitRotation);
 
         float prevZoom = Mathf.Max(0.10f, targetZoomScale);
         float newZoom = Mathf.Clamp(desiredZoomScale, MinZoomScale, MaxZoomScale);
         float zoomRatio = newZoom / prevZoom;
         targetZoomScale = newZoom;
 
-        // Focal-Point Zoom: geser pan XY proporsional terhadap titik tengah kedua tangan agar zoom langsung menuju sudut/area yang dibidik
+        // Focal-Point Zoom kalem: geser pan XY proporsional terhadap titik tengah kedua tangan tanpa sentakan
         if (Mathf.Abs(zoomRatio - 1.0f) > 0.0001f)
         {
             Vector2 focalOffsetFromStage = focalMidpointCameraXY - new Vector2(targetPanOffset.x, targetPanOffset.y);
-            Vector2 focalShift = focalOffsetFromStage * (1.0f - zoomRatio) * 0.85f;
+            Vector2 focalShift = focalOffsetFromStage * (1.0f - zoomRatio) * 0.55f;
             targetPanOffset.x = Mathf.Clamp(targetPanOffset.x + focalShift.x, -MaxPanOffsetX, MaxPanOffsetX);
             targetPanOffset.y = Mathf.Clamp(targetPanOffset.y + focalShift.y, -MaxPanOffsetY, MaxPanOffsetY);
         }
@@ -519,14 +576,156 @@ public sealed class AirWeavingStageController : MonoBehaviour
     public void ApplyTwoHandFreePan(Vector2 panDeltaXY, float desiredPanZ)
     {
         isTwoHandManipulationActive = true;
+        if (isTwoHandReleaseFrozen)
+        {
+            return;
+        }
         targetPanOffset.x = Mathf.Clamp(targetPanOffset.x + panDeltaXY.x, -MaxPanOffsetX, MaxPanOffsetX);
         targetPanOffset.y = Mathf.Clamp(targetPanOffset.y + panDeltaXY.y, -MaxPanOffsetY, MaxPanOffsetY);
         targetPanOffset.z = Mathf.Clamp(desiredPanZ, -MaxPanDepthPullCloserZ, MaxPanDepthPushFartherZ);
     }
 
+    private void CommitAntiKickCoastOnRelease(float nowTime)
+    {
+        bool hadFreeze = isTwoHandReleaseFrozen && releaseFreezeStartTime > 0f;
+        float freezeDuration = hadFreeze ? Mathf.Max(0f, nowTime - releaseFreezeStartTime) : 0f;
+        float refTime = hadFreeze ? releaseFreezeStartTime : nowTime;
+
+        Vector3 delayedAngSum = Vector3.zero;
+        float delayedZoomSum = 0f;
+        Vector3 delayedPanSum = Vector3.zero;
+        int delayedCount = 0;
+
+        Vector3 recentAngSum = Vector3.zero;
+        float recentZoomSum = 0f;
+        Vector3 recentPanSum = Vector3.zero;
+        int recentCount = 0;
+
+        for (int i = 0; i < velocityHistoryCount; i++)
+        {
+            StageVelocitySample s = velocityHistory[i];
+            float age = refTime - s.time;
+            if (age >= CoastDelayedWindowMinAgeSeconds && age <= CoastDelayedWindowMaxAgeSeconds)
+            {
+                delayedAngSum += s.angVelDegPerSec;
+                delayedZoomSum += s.zoomVelPerSec;
+                delayedPanSum += s.panVelPerSec;
+                delayedCount++;
+            }
+            else if (hadFreeze && age >= CoastRecentPauseCheckMinAgeSeconds && age < CoastDelayedWindowMinAgeSeconds)
+            {
+                recentAngSum += s.angVelDegPerSec;
+                recentZoomSum += s.zoomVelPerSec;
+                recentPanSum += s.panVelPerSec;
+                recentCount++;
+            }
+        }
+
+        ClearVelocityHistory();
+
+        if (freezeDuration > CoastReleaseMaxFreezeHoldSeconds || delayedCount == 0)
+        {
+            coastingAxis = Vector3.up;
+            coastingSpeedDegPerSec = 0f;
+            coastZoomVelocity = 0f;
+            coastPanVelocity = Vector3.zero;
+            targetOrbitRotation = currentOrbitRotation;
+            targetZoomScale = currentZoomScale;
+            velocityZoom = 0f;
+            targetPanOffset = currentPanOffset;
+            velocityPanOffset = Vector3.zero;
+            return;
+        }
+
+        float invDelayed = 1f / delayedCount;
+        Vector3 delayedAngVel = delayedAngSum * invDelayed;
+        float delayedZoomVel = delayedZoomSum * invDelayed;
+        Vector3 delayedPanVel = delayedPanSum * invDelayed;
+
+        // 1. Orbit Angular Coasting (deadzone ~18°/s; jika pelan/sempat diam -> coast = 0 & kunci target = current)
+        float angSpeed = delayedAngVel.magnitude;
+        if (recentCount > 0)
+        {
+            float recentAngSpeed = (recentAngSum / recentCount).magnitude;
+            if (recentAngSpeed < CoastReleaseAngularDeadzoneDegPerSec)
+            {
+                angSpeed = 0f;
+            }
+            else
+            {
+                angSpeed = Mathf.Min(angSpeed, recentAngSpeed);
+            }
+        }
+
+        if (angSpeed >= CoastReleaseAngularDeadzoneDegPerSec && delayedAngVel.sqrMagnitude > 0.001f)
+        {
+            coastingAxis = delayedAngVel.normalized;
+            coastingSpeedDegPerSec = Mathf.Min(angSpeed, MaxCoastAngularSpeedDegPerSec);
+        }
+        else
+        {
+            coastingAxis = Vector3.up;
+            coastingSpeedDegPerSec = 0f;
+            targetOrbitRotation = currentOrbitRotation;
+        }
+
+        // 2. Zoom Coasting (deadzone lepas tenang & kunci target = current saat pelan)
+        float absZoomVel = Mathf.Abs(delayedZoomVel);
+        if (recentCount > 0)
+        {
+            float recentAbsZoom = Mathf.Abs(recentZoomSum / recentCount);
+            if (recentAbsZoom < CoastReleaseZoomDeadzonePerSec)
+            {
+                absZoomVel = 0f;
+            }
+            else
+            {
+                absZoomVel = Mathf.Min(absZoomVel, recentAbsZoom);
+            }
+        }
+
+        if (absZoomVel >= CoastReleaseZoomDeadzonePerSec)
+        {
+            coastZoomVelocity = Mathf.Sign(delayedZoomVel) * Mathf.Min(absZoomVel, MaxCoastZoomPerSec);
+        }
+        else
+        {
+            coastZoomVelocity = 0f;
+            targetZoomScale = currentZoomScale;
+            velocityZoom = 0f;
+        }
+
+        // 3. Pan Coasting (deadzone lepas tenang & kunci target = current saat pelan)
+        float panSpeed = delayedPanVel.magnitude;
+        if (recentCount > 0)
+        {
+            float recentPanSpeed = (recentPanSum / recentCount).magnitude;
+            if (recentPanSpeed < CoastReleasePanDeadzoneUnitsPerSec)
+            {
+                panSpeed = 0f;
+            }
+            else
+            {
+                panSpeed = Mathf.Min(panSpeed, recentPanSpeed);
+            }
+        }
+
+        if (panSpeed >= CoastReleasePanDeadzoneUnitsPerSec && delayedPanVel.sqrMagnitude > 0.00001f)
+        {
+            coastPanVelocity = delayedPanVel.normalized * Mathf.Min(panSpeed, MaxCoastPanUnitsPerSec);
+        }
+        else
+        {
+            coastPanVelocity = Vector3.zero;
+            targetPanOffset = currentPanOffset;
+            velocityPanOffset = Vector3.zero;
+        }
+    }
+
     /// <summary>
-    /// Memperbarui pegas analitik Air-Orbit 360° (-80°..+85° pitch), Air-Zoom (0.42x..2.85x), Free Air-Pan 3D,
-    /// dan Dynamic Hand Parallax, lalu menerapkan transform dunia meja hologram horizontal <c>HologramStageRoot</c>. Zero-GC.
+    /// Memperbarui smoothing Quaternion.Slerp eksponensial Air-Orbit 360° tanpa batas, Inertial Coasting berbasis sumbu
+    /// rotasi Quaternion, Air-Zoom (0.42x..2.85x), Free Air-Pan 3D, dan Dynamic Hand Parallax, lalu menerapkan transform
+    /// dunia meja hologram horizontal <c>HologramStageRoot</c>. Zero-GC.
     /// </summary>
     public void TickStageTransform(
         Camera mainCam,
@@ -560,79 +759,111 @@ public sealed class AirWeavingStageController : MonoBehaviour
             ClearInertialCoastVelocities();
         }
 
-        // 0. Catat smoothed velocity saat manipulasi 2 tangan aktif & terapkan Inertial Coasting halus saat dilepas (Tahap 4.9)
+        // 0. Rekam kecepatan sudut Quaternion ke ring-buffer saat manipulasi 2 tangan aktif (beku saat release-intent)
+        //    dan komit Inertial Coasting tertunda anti-kick saat dilepas.
         if (isTwoHandManipulationActive)
         {
             if (!wasTwoHandManipulationActive)
             {
                 ClearInertialCoastVelocities();
-                prevManipTargetYawDeg = targetOrbitYawDeg;
-                prevManipTargetPitchDeg = targetOrbitPitchDeg;
+                prevManipTargetOrbitRotation = targetOrbitRotation;
                 prevManipTargetZoomScale = targetZoomScale;
                 prevManipTargetPanOffset = targetPanOffset;
                 wasTwoHandManipulationActive = true;
             }
+            else if (isTwoHandReleaseFrozen)
+            {
+                prevManipTargetOrbitRotation = targetOrbitRotation;
+                prevManipTargetZoomScale = targetZoomScale;
+                prevManipTargetPanOffset = targetPanOffset;
+            }
             else if (dt > 0.0001f)
             {
                 float invDt = 1f / dt;
-                float instYawVel = (targetOrbitYawDeg - prevManipTargetYawDeg) * invDt;
-                float instPitchVel = (targetOrbitPitchDeg - prevManipTargetPitchDeg) * invDt;
-                float instZoomVel = (targetZoomScale - prevManipTargetZoomScale) * invDt;
-                Vector3 instPanVel = (targetPanOffset - prevManipTargetPanOffset) * invDt;
-
                 float trackAlpha = 1f - Mathf.Exp(-StageVelocityTrackRate * dt);
-                coastYawVelocityDeg = Mathf.Clamp(
-                    Mathf.Lerp(coastYawVelocityDeg, instYawVel, trackAlpha),
-                    -MaxCoastYawDegPerSec,
-                    MaxCoastYawDegPerSec);
-                coastPitchVelocityDeg = Mathf.Clamp(
-                    Mathf.Lerp(coastPitchVelocityDeg, instPitchVel, trackAlpha),
-                    -MaxCoastPitchDegPerSec,
-                    MaxCoastPitchDegPerSec);
-                coastZoomVelocity = Mathf.Clamp(
-                    Mathf.Lerp(coastZoomVelocity, instZoomVel, trackAlpha),
-                    -MaxCoastZoomPerSec,
-                    MaxCoastZoomPerSec);
-                coastPanVelocity = Vector3.Lerp(coastPanVelocity, instPanVel, trackAlpha);
-                float panSpeedSqr = coastPanVelocity.sqrMagnitude;
-                if (panSpeedSqr > MaxCoastPanUnitsPerSec * MaxCoastPanUnitsPerSec)
+
+                Quaternion frameDelta = NormalizeQuaternion(targetOrbitRotation * Quaternion.Inverse(prevManipTargetOrbitRotation));
+                if (frameDelta.w < 0f)
                 {
-                    coastPanVelocity *= MaxCoastPanUnitsPerSec / Mathf.Sqrt(panSpeedSqr);
+                    frameDelta = new Quaternion(-frameDelta.x, -frameDelta.y, -frameDelta.z, -frameDelta.w);
                 }
 
-                prevManipTargetYawDeg = targetOrbitYawDeg;
-                prevManipTargetPitchDeg = targetOrbitPitchDeg;
+                frameDelta.ToAngleAxis(out float deltaAngleDeg, out Vector3 deltaAxis);
+                Vector3 instAngVel = Vector3.zero;
+                if (deltaAngleDeg > 0.001f
+                    && deltaAngleDeg < 179.9f
+                    && !float.IsNaN(deltaAxis.x)
+                    && !float.IsNaN(deltaAxis.y)
+                    && !float.IsNaN(deltaAxis.z)
+                    && deltaAxis.sqrMagnitude > 0.5f)
+                {
+                    instAngVel = deltaAxis.normalized * Mathf.Min(deltaAngleDeg * invDt, MaxCoastAngularSpeedDegPerSec);
+                }
+
+                smoothedManipAngVel = Vector3.Lerp(smoothedManipAngVel, instAngVel, trackAlpha);
+                float smoothedAngSpeed = smoothedManipAngVel.magnitude;
+                if (smoothedAngSpeed > MaxCoastAngularSpeedDegPerSec)
+                {
+                    smoothedManipAngVel *= MaxCoastAngularSpeedDegPerSec / smoothedAngSpeed;
+                }
+
+                float instZoomVel = Mathf.Clamp((targetZoomScale - prevManipTargetZoomScale) * invDt, -MaxCoastZoomPerSec, MaxCoastZoomPerSec);
+                Vector3 instPanVel = (targetPanOffset - prevManipTargetPanOffset) * invDt;
+                float instPanMagSqr = instPanVel.sqrMagnitude;
+                if (instPanMagSqr > MaxCoastPanUnitsPerSec * MaxCoastPanUnitsPerSec)
+                {
+                    instPanVel *= MaxCoastPanUnitsPerSec / Mathf.Sqrt(instPanMagSqr);
+                }
+
+                smoothedManipZoomVel = Mathf.Clamp(
+                    Mathf.Lerp(smoothedManipZoomVel, instZoomVel, trackAlpha),
+                    -MaxCoastZoomPerSec,
+                    MaxCoastZoomPerSec);
+                smoothedManipPanVel = Vector3.Lerp(smoothedManipPanVel, instPanVel, trackAlpha);
+                float panSpeedSqr = smoothedManipPanVel.sqrMagnitude;
+                if (panSpeedSqr > MaxCoastPanUnitsPerSec * MaxCoastPanUnitsPerSec)
+                {
+                    smoothedManipPanVel *= MaxCoastPanUnitsPerSec / Mathf.Sqrt(panSpeedSqr);
+                }
+
+                velocityHistory[velocityHistoryWriteIdx] = new StageVelocitySample
+                {
+                    time = Time.unscaledTime,
+                    angVelDegPerSec = smoothedManipAngVel,
+                    zoomVelPerSec = smoothedManipZoomVel,
+                    panVelPerSec = smoothedManipPanVel
+                };
+                velocityHistoryWriteIdx = (velocityHistoryWriteIdx + 1) % VelocityHistoryCapacity;
+                if (velocityHistoryCount < VelocityHistoryCapacity)
+                {
+                    velocityHistoryCount++;
+                }
+
+                prevManipTargetOrbitRotation = targetOrbitRotation;
                 prevManipTargetZoomScale = targetZoomScale;
                 prevManipTargetPanOffset = targetPanOffset;
             }
         }
         else
         {
-            wasTwoHandManipulationActive = false;
+            if (wasTwoHandManipulationActive)
+            {
+                wasTwoHandManipulationActive = false;
+                if (!isUiOverlayOpen)
+                {
+                    CommitAntiKickCoastOnRelease(Time.unscaledTime);
+                }
+                else
+                {
+                    ClearInertialCoastVelocities();
+                }
+            }
             if (!isUiOverlayOpen && dt > 0.00001f)
             {
-                if (Mathf.Abs(coastYawVelocityDeg) > StageCoastStopEpsilon)
+                if (coastingSpeedDegPerSec > CoastAngularStopSpeedDegPerSec && coastingAxis.sqrMagnitude > 0.5f)
                 {
-                    targetOrbitYawDeg += coastYawVelocityDeg * dt;
-                }
-
-                if (Mathf.Abs(coastPitchVelocityDeg) > StageCoastStopEpsilon)
-                {
-                    float nextPitch = targetOrbitPitchDeg + (coastPitchVelocityDeg * dt);
-                    if (nextPitch <= MinElevationPitchDeg)
-                    {
-                        targetOrbitPitchDeg = MinElevationPitchDeg;
-                        coastPitchVelocityDeg = 0f;
-                    }
-                    else if (nextPitch >= MaxElevationPitchDeg)
-                    {
-                        targetOrbitPitchDeg = MaxElevationPitchDeg;
-                        coastPitchVelocityDeg = 0f;
-                    }
-                    else
-                    {
-                        targetOrbitPitchDeg = nextPitch;
-                    }
+                    Quaternion coastDelta = Quaternion.AngleAxis(coastingSpeedDegPerSec * dt, coastingAxis);
+                    targetOrbitRotation = NormalizeQuaternion(coastDelta * targetOrbitRotation);
                 }
 
                 if (Mathf.Abs(coastZoomVelocity) > StageCoastStopEpsilon)
@@ -706,21 +937,19 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 }
 
                 float coastDecay = Mathf.Exp(-StageCoastDamping * dt);
-                coastYawVelocityDeg *= coastDecay;
-                coastPitchVelocityDeg *= coastDecay;
+                coastingSpeedDegPerSec *= coastDecay;
                 coastZoomVelocity *= coastDecay;
                 coastPanVelocity *= coastDecay;
 
-                if (Mathf.Abs(coastYawVelocityDeg) <= StageCoastStopEpsilon) coastYawVelocityDeg = 0f;
-                if (Mathf.Abs(coastPitchVelocityDeg) <= StageCoastStopEpsilon) coastPitchVelocityDeg = 0f;
+                if (coastingSpeedDegPerSec <= CoastAngularStopSpeedDegPerSec) coastingSpeedDegPerSec = 0f;
                 if (Mathf.Abs(coastZoomVelocity) <= StageCoastStopEpsilon) coastZoomVelocity = 0f;
                 if (coastPanVelocity.sqrMagnitude <= StageCoastStopEpsilon * StageCoastStopEpsilon) coastPanVelocity = Vector3.zero;
             }
         }
 
-        // 1. Step pegas analitik Air-Orbit, Air-Zoom, & Free Air-Pan 3D
-        currentOrbitYawDeg = StepCriticallyDampedSpring(currentOrbitYawDeg, targetOrbitYawDeg, ref velocityOrbitYaw, OrbitSpringOmega, dt);
-        currentOrbitPitchDeg = StepCriticallyDampedSpring(currentOrbitPitchDeg, targetOrbitPitchDeg, ref velocityOrbitPitch, OrbitSpringOmega, dt);
+        // 1. Smoothing Quaternion.Slerp eksponensial Air-Orbit 360° + pegas analitik Air-Zoom & Free Air-Pan 3D
+        float orbitSlerpAlpha = dt > 0.00001f ? (1f - Mathf.Exp(-OrbitSlerpRate * dt)) : 1f;
+        currentOrbitRotation = NormalizeQuaternion(Quaternion.Slerp(currentOrbitRotation, targetOrbitRotation, orbitSlerpAlpha));
         currentZoomScale = StepCriticallyDampedSpring(currentZoomScale, targetZoomScale, ref velocityZoom, ZoomSpringOmega, dt);
         currentPanOffset.x = StepCriticallyDampedSpring(currentPanOffset.x, targetPanOffset.x, ref velocityPanOffset.x, PanSpringOmega, dt);
         currentPanOffset.y = StepCriticallyDampedSpring(currentPanOffset.y, targetPanOffset.y, ref velocityPanOffset.y, PanSpringOmega, dt);
@@ -740,10 +969,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
         currentParallaxYawDeg = StepCriticallyDampedSpring(currentParallaxYawDeg, desiredParallaxYaw, ref velocityParallaxYaw, ParallaxSpringOmega, dt);
         currentParallaxPitchDeg = StepCriticallyDampedSpring(currentParallaxPitchDeg, desiredParallaxPitch, ref velocityParallaxPitch, ParallaxSpringOmega, dt);
 
-        // 3. Terapkan Transform Pivot HologramStageRoot dengan dukungan Zoom Dekat Ekstrem & Free Air-Pan 3D (aman nearClipPlane):
+        // 3. Terapkan Transform Pivot HologramStageRoot dengan Quaternion Arcball 360° penuh, Zoom Dekat Ekstrem, & Free Air-Pan 3D:
         Transform camT = mainCam.transform;
-        float effectivePitch = Mathf.Clamp(currentOrbitPitchDeg + currentParallaxPitchDeg, MinElevationPitchDeg, MaxElevationPitchDeg);
-        float effectiveYaw = currentOrbitYawDeg + currentParallaxYawDeg;
 
         // Saat zoom > 1.0x, majukan juga sedikit pivot Z secara proporsional agar deep inspection terasa benar-benar mendekati objek
         float zoomApproachZ = currentZoomScale > 1.0f
@@ -756,9 +983,12 @@ public sealed class AirWeavingStageController : MonoBehaviour
             currentPanOffset.x,
             StagePivotCameraOffsetY + currentPanOffset.y,
             effectivePivotZ));
+        Quaternion parallaxRotation = Quaternion.AngleAxis(-currentParallaxPitchDeg, Vector3.right)
+                                      * Quaternion.AngleAxis(currentParallaxYawDeg, Vector3.up);
         stageRootTransform.rotation = camT.rotation
-                                      * Quaternion.Euler(-effectivePitch, 0f, 0f)
-                                      * Quaternion.Euler(0f, effectiveYaw, 0f);
+                                      * parallaxRotation
+                                      * currentOrbitRotation
+                                      * DefaultBaseTiltRotation;
         stageRootTransform.localScale = Vector3.one * currentZoomScale;
     }
 
@@ -1369,6 +1599,17 @@ public sealed class AirWeavingStageController : MonoBehaviour
         mat.renderQueue = renderQueue;
         ownedMaterials.Add(mat);
         return mat;
+    }
+
+    private static Quaternion NormalizeQuaternion(Quaternion q)
+    {
+        float magSqr = (q.x * q.x) + (q.y * q.y) + (q.z * q.z) + (q.w * q.w);
+        if (magSqr < 1e-10f)
+        {
+            return Quaternion.identity;
+        }
+        float invMag = 1f / Mathf.Sqrt(magSqr);
+        return new Quaternion(q.x * invMag, q.y * invMag, q.z * invMag, q.w * invMag);
     }
 
     private static float StepCriticallyDampedSpring(float current, float target, ref float velocity, float omega, float dt)
