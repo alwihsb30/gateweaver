@@ -1,17 +1,22 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Landmark = Mediapipe.Tasks.Components.Containers.Landmark;
 using NormalizedLandmark = Mediapipe.Tasks.Components.Containers.NormalizedLandmark;
 
 /// <summary>
-/// Detektor gestur dual-kanal untuk GateWeaver AR v7.0 (Fase 3 + Fase 4 + Polishing Final):
-/// - Kanal Objek (Fist / Kepal vs Open): skala-invarian 4 jari utama, Schmitt-trigger hysteresis lebar (masuk < 0.88,
-///   keluar > 1.18 / sticky > 1.15 & <= 1 jari tertekuk), asymmetric debounce (45 ms masuk / 55-115 ms adaptif keluar),
-///   occlusion grace 180 ms, dan kursor telapak anti-lompat (#9/#5/#0).
-/// - Kanal Kabel (Pinch / Cubit #4-#8): skala-invarian (masuk < 0.34 selama 35 ms & bukan kepalan penuh, keluar > 0.50
-///   dengan debounce adaptif 55-110 ms & occlusion grace 180 ms), titik bidik presisi 0.5*(#4+#8), serta pre-pinch guard
-///   (< 0.42) yang menahan SummonHandPose agar cubit tidak pernah memicu 3 jari (XOR).
-/// - Kanal Circle Summon: klasifikasi berbasis jumlah jari utama terbuka (1=AND, 2=OR, 3=XOR, 4+jempol lipat=NAND,
-///   0+jempol kuat=NOT, OpenFiveBloom). 100% Zero-GC.
+/// Detektor gestur dual-kanal 3D Metrik untuk GateWeaver AR v8.0 (Tahap 5.5 — Overhaul Presisi Tracking):
+/// - Klasifikasi utama berbasis <c>handWorldLandmarks</c> (3D meter sejati, kebal perspektif &amp; rotasi telapak) dengan
+///   fallback 2D aspect-compensated otomatis bila <c>handWorldLandmarks</c> kosong.
+/// - Tekukan tiap jari dihitung melalui sudut sendi 3D (dot product vektor <c>Wrist-&gt;MCP</c>, <c>MCP-&gt;PIP</c>,
+///   <c>PIP-&gt;DIP</c>, <c>DIP-&gt;TIP</c>) dan jarak Pinch 3D <c>#4-#8</c> dinormalisasi terhadap <c>palmSpan3D</c>.
+/// - Quality Gate: deadzone tepi frame <c>[0.04, 0.96]</c>, validasi <c>palmScale</c> minimum sebelum clamp,
+///   hand-entry warm-up <c>120 ms</c>, filter EMA ringan Zero-GC pada metrik skalar, dan enter debounce ganda
+///   (minimal 2 frame inferensi valid berturut-turut DAN durasi 70-75 ms).
+/// - Pemisahan anatomi ketat antar-gestur: Pinch (#4-#8 rapat &amp; &gt;=2 jari lain tidak terlipat penuh), Fist (keempat jari
+///   utama menekuk tegas berdasarkan sudut sendi 3D, nol race condition Open-&gt;Fist), Input Switch (hanya telunjuk teracung
+///   tegas), dan Circle Summon berbasis identitas jari spesifik (AND/OR/XOR/NAND/NOT + Open-5 Bloom).
+/// - Seluruh koordinat interaksi <c>*LocalXY</c> dan kecepatan <c>*SpeedUnitsPerSec</c> disatukan pada sinar kamera
+///   bidang referensi konsisten (<c>referenceDepth</c> = <c>WorkbenchDepth</c>). 100% Zero-GC.
 /// </summary>
 public enum SummonHandPose
 {
@@ -26,14 +31,15 @@ public enum SummonHandPose
 
 public sealed class AirWeavingHandGestureDetector
 {
-    // Parameter Fist/Open: masuk rileks (0.94f, 30 ms), keluar sticky-drag Fase 3 TERKUNCI (1.15f, <= 1, 55-115 ms, 180 ms)
+    // Quality Gate: edge deadzone [0.04, 0.96], min raw palm scale sebelum clamp, hand-entry warm-up 120 ms, EMA ringan 20 ms
+    private const float EdgeDeadzoneMin = 0.04f;
+    private const float EdgeDeadzoneMax = 0.96f;
+    private const float MinValidRawPalmScale2D = 0.045f;
+    private const float MinValidPalmSpan3DMeters = 0.035f;
     private const float MinPalmScaleClamp = 0.055f;
-    private const float FistEnterMeanRatio = 0.94f;
-    private const float FistExitMeanRatio = 1.18f;
-    private const float FistStickyExitMeanRatio = 1.15f;
-    private const float FingerFoldedPalmRatio = 0.92f;
-    private const float FingerFoldedPipRatio = 1.04f;
-    private const float PreFistLatchMeanRatio = 1.05f;
+    private const float HandEntryWarmupSeconds = 0.120f;
+    private const float MetricEmaTauSeconds = 0.020f;
+    private const float DefaultReferenceDepth = 3.82f;
 
     // Parameter True 3D Hand Depth Tracking berbasis Rigid Metacarpal Palm Span (Tahap 4.7 v8.0)
     public const float DefaultComfortPalmSpan = 0.172f;
@@ -42,48 +48,130 @@ public sealed class AirWeavingHandGestureDetector
     private const float PalmSpanOneEuroMinCutoff = 1.10f;
     private const float PalmSpanOneEuroBeta = 0.18f;
     private const float PalmSpanOneEuroDCutoff = 2.00f;
-    private const float PalmSpanMicroDeadzoneRatio = 0.020f; // 2% micro-deadzone anti-getar saat tangan diam
+    private const float PalmSpanMicroDeadzoneRatio = 0.020f;
     private const float TwoPi = 6.283185307f;
 
-    private const float DebounceEnterSeconds = 0.030f;
-    private const float DebounceExitSlowSeconds = 0.055f;
-    private const float DebounceExitFastSeconds = 0.115f;
+    // Ambang sudut sendi 3D per jari (derajat) — kebal jarak kamera & rotasi miring
+    private const float FingerExtendMaxPipDipDeg = 48.0f;
+    private const float FingerExtendMaxWeightedDeg = 68.0f;
+    private const float FingerExtendMinPalmRatio = 1.04f;
+    private const float FingerUnextendMinPipDipDeg = 66.0f;
+    private const float FingerUnextendMinWeightedDeg = 90.0f;
+    private const float FingerUnextendMaxPalmRatio = 0.90f;
+
+    private const float FingerFirmFoldPipDipDeg = 88.0f;
+    private const float FingerFirmFoldWeightedDeg = 116.0f;
+    private const float FingerFirmFoldDeepWeightedDeg = 132.0f;
+    private const float FingerFirmFoldDeepPalmRatio = 1.02f;
+    private const float FingerFirmFoldTuckPipDipDeg = 74.0f;
+    private const float FingerFirmFoldTuckPalmRatio = 0.88f;
+
+    private const float FingerNotFullyFoldedMaxPipDipDeg = 92.0f;
+    private const float FingerNotFullyFoldedMaxWeightedDeg = 122.0f;
+
+    // Ambang Kanal Objek (Fist / Kepal 3D): wajib keempat jari utama menekuk tegas + sticky-drag hysteresis lebar
+    private const float FistEnterMeanWeightedBendDeg = 126.0f;
+    private const float FistEnterMaxMeanCurlRatio = 1.00f;
+    private const float FistExitMeanWeightedBendDeg = 86.0f;
+    private const float FistStickyExitMeanWeightedBendDeg = 80.0f;
+    private const float PreFistLatchMinWeightedBendDeg = 104.0f;
+
+    private const int FistEnterMinConsecutiveFrames = 2;
+    private const float FistEnterDebounceSeconds = 0.075f;
+    private const float FistExitSlowSeconds = 0.055f;
+    private const float FistExitFastSeconds = 0.115f;
     private const float SlowReleaseSpeedThreshold = 1.50f;
     private const float FastReleaseSpeedThreshold = 2.50f;
-    private const float OcclusionGraceSeconds = 0.180f;
-    private const float StickyOcclusionGraceSeconds = 0.180f;
+    private const float OcclusionGraceSeconds = 0.110f;
+    private const float StickyOcclusionGraceSeconds = 0.120f;
     private const float PreFistLatchMaxSeconds = 0.060f;
 
-    // Parameter Pinch / Cubit Kabel (rileks anti-kaku + guard anti-kepalan & anti-XOR)
-    private const float PinchEnterRatio = 0.42f;
-    private const float PinchExitRatio = 0.56f;
+    // Ambang Kanal Kabel (Pinch 3D #4-#8 / palmSpan3D): anatomi terpisah total dari Fist (nol race Open->Fist)
+    private const float PinchEnterRatio3D = 0.39f;
+    private const float PinchExitRatio3D = 0.55f;
     public const float PinchReleaseIntentRatio = 0.47f;
-    private const float PrePinchSuppressSummonRatio = 0.48f;
-    private const float PinchEnterDebounceSeconds = 0.025f;
+    private const float PrePinchSuppressSummonRatio3D = 0.46f;
+    private const int PinchMinOtherNotFullyFolded = 2;
+    private const float PinchMaxOtherThreeMeanBendDeg = 102.0f;
+    private const float PinchMinIndexPalmRatio = 0.78f;
+    private const float PinchMaxIndexWeightedBendDeg = 138.0f;
+
+    private const int PinchEnterMinConsecutiveFrames = 2;
+    private const float PinchEnterDebounceSeconds = 0.070f;
     private const float PinchExitSlowSeconds = 0.045f;
     private const float PinchExitFastSeconds = 0.095f;
-    private const float PinchOcclusionGraceSeconds = 0.180f;
+    private const float PinchOcclusionGraceSeconds = 0.110f;
     private const float PrePinchLatchMaxSeconds = 0.055f;
 
-    // Parameter klasifikasi 5 pose Summon + Open-5 Bloom (Fase 4)
-    private const float SummonFingerExtendPalmRatio = 1.00f;
-    private const float SummonFingerExtendPipRatio = 1.02f;
-    private const float SummonFingerFoldPalmRatio = 0.88f;
-    private const float SummonFingerFoldPipRatio = 0.98f;
-    private const float ThumbBloomIndexRatio = 0.46f;
-    private const float ThumbBloomPinkyRatio = 0.90f;
-    private const float ThumbStrongNotIndexRatio = 0.52f;
-    private const float ThumbStrongNotPinkyRatio = 0.96f;
-    private const float OpenFiveBloomMeanRatio = 1.12f;
+    // Ambang Ibu Jari 3D (Open-5 Bloom, NAND jempol lipat, NOT jempol kuat)
+    private const float ThumbExtendEnterIndexRatio = 0.50f;
+    private const float ThumbExtendEnterPinkyRatio = 1.00f;
+    private const float ThumbExtendEnterMaxBendDeg = 60.0f;
+    private const float ThumbExtendExitIndexRatio = 0.44f;
+    private const float ThumbExtendExitPinkyRatio = 0.92f;
+    private const float ThumbExtendExitMinBendDeg = 72.0f;
 
-    private static readonly int[] FingerTipIndices = { 8, 12, 16, 20 };
+    private const float ThumbStrongNotIndexRatio = 0.60f;
+    private const float ThumbStrongNotPinkyRatio = 1.12f;
+    private const float ThumbStrongNotMaxBendDeg = 48.0f;
+
+    private const float OpenFiveBloomMaxMeanBendDeg = 65.0f;
+    private const float RelaxedOpenFiveMaxMeanBendDeg = 74.0f;
+
+    private static readonly int[] FingerMcpIndices = { 5, 9, 13, 17 };
     private static readonly int[] FingerPipIndices = { 6, 10, 14, 18 };
+    private static readonly int[] FingerDipIndices = { 7, 11, 15, 19 };
+    private static readonly int[] FingerTipIndices = { 8, 12, 16, 20 };
+
+    private struct ScalarEmaFilter
+    {
+        private bool initialized;
+        private float value;
+
+        public void Reset(float initialValue)
+        {
+            initialized = false;
+            value = initialValue;
+        }
+
+        public float Update(float sample, float dt, float tauSeconds)
+        {
+            if (!initialized)
+            {
+                initialized = true;
+                value = sample;
+                return value;
+            }
+
+            float alpha = 1f - Mathf.Exp(-Mathf.Max(0.001f, dt) / Mathf.Max(0.001f, tauSeconds));
+            value += alpha * (sample - value);
+            return value;
+        }
+    }
+
+    // Filter EMA ringan Zero-GC untuk metrik skalar 3D
+    private ScalarEmaFilter pinchRatioEma;
+    private ScalarEmaFilter thumbBendEma;
+    private ScalarEmaFilter thumbIndexRatioEma;
+    private ScalarEmaFilter thumbPinkyRatioEma;
+    private readonly ScalarEmaFilter[] fingerPipDipBendEma = new ScalarEmaFilter[4];
+    private readonly ScalarEmaFilter[] fingerWeightedBendEma = new ScalarEmaFilter[4];
+    private readonly ScalarEmaFilter[] fingerPalmRatioEma = new ScalarEmaFilter[4];
+
+    // State Quality Gate
+    private bool isUsingWorld3DMetrics = false;
+    private bool isInEdgeDeadzone = false;
+    private bool isPalmScaleValid = false;
+    private float entryWarmupTimer = HandEntryWarmupSeconds;
+    private bool wasDetectedInTick = false;
 
     // State Fist / Open (Objek)
     private float meanCurlRatio = 1.50f;
+    private float meanWeightedBendDeg = 18.0f;
     private int foldedFingerCount = 0;
     private bool rawEnterCondition = false;
     private bool rawExitCondition = true;
+    private int fistEnterConsecFrames = 0;
 
     private bool isFistActive = false;
     private bool fistJustStarted = false;
@@ -102,6 +190,7 @@ public sealed class AirWeavingHandGestureDetector
     private bool rawPinchEnterCondition = false;
     private bool rawPinchExitCondition = true;
     private bool isPrePinchGuardActive = false;
+    private int pinchEnterConsecFrames = 0;
     private bool isPinchActive = false;
     private bool pinchJustStarted = false;
     private bool pinchJustEnded = false;
@@ -113,7 +202,7 @@ public sealed class AirWeavingHandGestureDetector
     private Vector2 latchedPinchLocalXY = Vector2.zero;
     private bool hasLatchedPinch = false;
 
-    // State sampel inferensi kursor pass-through (One-Euro tunggal di AirWeavingController, tanpa EMA sekunder)
+    // State sampel inferensi kursor pada bidang sinar konsisten (WorkbenchDepth)
     private bool hasPrevSampleCursors = false;
     private Vector2 prevRawPalmLocalXY = Vector2.zero;
     private Vector2 prevRawPinchLocalXY = Vector2.zero;
@@ -127,18 +216,25 @@ public sealed class AirWeavingHandGestureDetector
     private float rawRigidPalmSpan = DefaultComfortPalmSpan;
     private float filteredPalmSpan = DefaultComfortPalmSpan;
 
-    // State Summon 5 Gerbang
+    // State Summon 5 Gerbang & Identitas Jari Spesifik
     private readonly bool[] mainFingerExtended = new bool[4];
     private bool isThumbExtended = false;
     private bool isThumbStrongOut = false;
     private bool isRelaxedOpenFiveBloom = false;
     private SummonHandPose currentSummonPose = SummonHandPose.None;
 
+    public bool IsUsingWorld3DMetrics => isUsingWorld3DMetrics;
+    public bool IsInEdgeDeadzone => isInEdgeDeadzone;
+    public bool IsPalmScaleValid => isPalmScaleValid;
+    public bool IsEntryWarmupComplete => entryWarmupTimer <= 0f;
+    public bool IsQualityGatePassing => !isInEdgeDeadzone && isPalmScaleValid && entryWarmupTimer <= 0f;
+
     public bool IsFistActive => isFistActive;
     public bool FistJustStarted => fistJustStarted;
     public bool FistJustEnded => fistJustEnded;
     public bool IsPreFistCurling => isPreFistCurling;
     public float MeanCurlRatio => meanCurlRatio;
+    public float MeanWeightedBendDeg => meanWeightedBendDeg;
     public int FoldedFingerCount => foldedFingerCount;
     public float RawRigidPalmSpan => rawRigidPalmSpan;
     public float FilteredPalmSpan => filteredPalmSpan;
@@ -159,6 +255,20 @@ public sealed class AirWeavingHandGestureDetector
     public bool IsOpenFiveBloom => currentSummonPose == SummonHandPose.OpenFiveBloom;
     public bool IsRelaxedOpenFiveBloom => isRelaxedOpenFiveBloom;
     public bool IsIndexFingerExtended => mainFingerExtended[0];
+
+    /// <summary>
+    /// Pose telunjuk teracung tegas untuk sakelar Input A/B: hanya telunjuk lurus, tiga jari lain tidak terbuka lebar
+    /// menutupi sakelar, serta bukan kepalan, cubitan, atau pra-cubitan.
+    /// </summary>
+    public bool IsIndexSwitchPoseValid => mainFingerExtended[0]
+                                          && !mainFingerExtended[1]
+                                          && !mainFingerExtended[2]
+                                          && !mainFingerExtended[3]
+                                          && !isFistActive
+                                          && !isPinchActive
+                                          && !isPrePinchGuardActive
+                                          && !isRelaxedOpenFiveBloom;
+
     public float CursorSpeedUnitsPerSec { get; private set; }
     public Vector3 PalmCursorWorldPosition { get; private set; }
     public Vector2 PalmCursorLocalXY { get; private set; }
@@ -169,10 +279,20 @@ public sealed class AirWeavingHandGestureDetector
 
     public void Reset()
     {
+        ResetScalarEmaFilters();
+
+        isUsingWorld3DMetrics = false;
+        isInEdgeDeadzone = false;
+        isPalmScaleValid = false;
+        entryWarmupTimer = HandEntryWarmupSeconds;
+        wasDetectedInTick = false;
+
         meanCurlRatio = 1.50f;
+        meanWeightedBendDeg = 18.0f;
         foldedFingerCount = 0;
         rawEnterCondition = false;
         rawExitCondition = true;
+        fistEnterConsecFrames = 0;
         isFistActive = false;
         fistJustStarted = false;
         fistJustEnded = false;
@@ -188,6 +308,7 @@ public sealed class AirWeavingHandGestureDetector
         rawPinchEnterCondition = false;
         rawPinchExitCondition = true;
         isPrePinchGuardActive = false;
+        pinchEnterConsecFrames = 0;
         isPinchActive = false;
         pinchJustStarted = false;
         pinchJustEnded = false;
@@ -232,9 +353,40 @@ public sealed class AirWeavingHandGestureDetector
     }
 
     /// <summary>
+    /// Memicu ulang warm-up masuk tangan 120 ms &amp; reset filter EMA skalar saat tangan baru muncul kembali atau
+    /// melompat di luar radius asosiasi, tanpa memutus paksa sticky hold yang sedang dievaluasi occlusion grace. Zero-GC.
+    /// </summary>
+    public void RestartEntryWarmup()
+    {
+        entryWarmupTimer = HandEntryWarmupSeconds;
+        fistEnterConsecFrames = 0;
+        pinchEnterConsecFrames = 0;
+        enterHoldTimer = 0f;
+        pinchEnterHoldTimer = 0f;
+        hasPrevSampleCursors = false;
+        lastLandmarkUpdateUnscaledTime = -1f;
+        ResetScalarEmaFilters();
+    }
+
+    private void ResetScalarEmaFilters()
+    {
+        pinchRatioEma.Reset(1.00f);
+        thumbBendEma.Reset(30.0f);
+        thumbIndexRatioEma.Reset(0.55f);
+        thumbPinkyRatioEma.Reset(1.05f);
+        for (int i = 0; i < 4; i++)
+        {
+            fingerPipDipBendEma[i].Reset(20.0f);
+            fingerWeightedBendEma[i].Reset(25.0f);
+            fingerPalmRatioEma[i].Reset(1.40f);
+        }
+    }
+
+    /// <summary>
     /// Menghitung metrik ukuran telapak kaku (Rigid Metacarpal Span) yang tidak berubah bentuk saat tangan mengepal/mencubit
-    /// dari kombinasi 3D-compensated #0->#9, #0->#5, #0->#17, dan #5->#17, lalu menyaringnya dengan 1D One-Euro Filter
-    /// + micro-deadzone 2% agar bebas getar saat diam dan responsif saat tangan maju/mundur. Zero-GC.
+    /// dari kombinasi 3D-compensated #0-&gt;#9, #0-&gt;#5, #0-&gt;#17, dan #5-&gt;#17, lalu menyaringnya dengan 1D One-Euro Filter
+    /// + micro-deadzone 2% agar bebas getar saat diam dan responsif saat tangan maju/mundur.
+    /// Dipanggil tepat 1x per frame inferensi per tangan dari AirWeavingController. Zero-GC.
     /// </summary>
     public float UpdateRigidPalmSpanOnly(List<NormalizedLandmark> landmarks, float sampleDt, float cameraAspect = 1.3333f)
     {
@@ -290,7 +442,6 @@ public sealed class AirWeavingHandGestureDetector
         }
         else
         {
-            // Drift mikro sangat lambat di dalam deadzone agar tidak pernah terkunci bias
             filteredPalmSpan = Mathf.Lerp(filteredPalmSpan, oneEuroSpan, dt * 1.25f);
         }
 
@@ -299,9 +450,17 @@ public sealed class AirWeavingHandGestureDetector
     }
 
     /// <summary>
-    /// Memperbarui fitur geometris landmark 21 titik MediaPipe setiap frame inferensi baru masuk. Zero-GC.
+    /// Memperbarui fitur geometris 3D metrik (<c>worldLandmarks</c>) bersama proyeksi layar (<c>landmarks</c>) setiap frame
+    /// inferensi baru masuk. Memproyeksikan seluruh koordinat interaksi pada sinar kamera <c>referenceDepth</c> konsisten.
+    /// Tidak memanggil ulang <c>UpdateRigidPalmSpanOnly</c> agar One-Euro depth tetap tepat 1x per inferensi. Zero-GC.
     /// </summary>
-    public void UpdateFromLandmarks(List<NormalizedLandmark> landmarks, Vector3[] smoothedLandmarksWorld, Transform camTransform, float cameraAspect = 1.3333f)
+    public void UpdateFromLandmarks(
+        List<NormalizedLandmark> landmarks,
+        List<Landmark> worldLandmarks,
+        Vector3[] smoothedLandmarksWorld,
+        Transform camTransform,
+        float referenceDepth = DefaultReferenceDepth,
+        float cameraAspect = 1.3333f)
     {
         if (landmarks == null || landmarks.Count < 21 || smoothedLandmarksWorld == null || smoothedLandmarksWorld.Length < 21 || camTransform == null)
         {
@@ -314,7 +473,8 @@ public sealed class AirWeavingHandGestureDetector
             : 0.033f;
         lastLandmarkUpdateUnscaledTime = nowTime;
 
-        UpdateRigidPalmSpanOnly(landmarks, sampleDt, cameraAspect);
+        float safeAspect = Mathf.Clamp(cameraAspect, 0.65f, 2.40f);
+        float safeRefDepth = Mathf.Max(0.50f, referenceDepth);
 
         NormalizedLandmark l0 = landmarks[0];
         NormalizedLandmark l4 = landmarks[4];
@@ -324,120 +484,280 @@ public sealed class AirWeavingHandGestureDetector
         NormalizedLandmark l13 = landmarks[13];
         NormalizedLandmark l17 = landmarks[17];
 
-        // 1. Skala telapak ganda (tahan rotasi miring maupun jarak kamera)
-        float dWristMid = Dist2D(l0, l9);
-        float dPalmWidth = Dist2D(l5, l17);
-        float palmScale = Mathf.Max(MinPalmScaleClamp, 0.5f * (dWristMid + dPalmWidth));
+        // 1. Quality Gate: validasi palmScale 2D mentah SEBELUM clamp & cek edge-of-frame deadzone [0.04, 0.96]
+        float rawPalmScale2D = 0.5f * (Dist2DCompensated(l0, l9, safeAspect) + Dist2DCompensated(l5, l17, safeAspect));
+        isPalmScaleValid = rawPalmScale2D >= MinValidRawPalmScale2D;
 
-        // 2. Pusat telapak (centroid 5 titik kaku)
-        float cx = (l0.x + l5.x + l9.x + l13.x + l17.x) * 0.20f;
-        float cy = (l0.y + l5.y + l9.y + l13.y + l17.y) * 0.20f;
+        float cx2D = (l0.x + l5.x + l9.x + l13.x + l17.x) * 0.20f;
+        float cy2D = (l0.y + l5.y + l9.y + l13.y + l17.y) * 0.20f;
+        isInEdgeDeadzone = !IsInsideSafeFrame(cx2D, cy2D)
+                           || !IsInsideSafeFrame(l0.x, l0.y)
+                           || !IsInsideSafeFrame(l4.x, l4.y)
+                           || !IsInsideSafeFrame(l5.x, l5.y)
+                           || !IsInsideSafeFrame(l8.x, l8.y)
+                           || !IsInsideSafeFrame(l9.x, l9.y)
+                           || !IsInsideSafeFrame(l17.x, l17.y);
 
-        // 3. Evaluasi kelengkungan 4 jari utama (Telunjuk, Tengah, Manis, Kelingking)
-        float sumRatio = 0f;
-        int folded = 0;
-        int otherThreeFolded = 0;
+        // 2. Pilih sumber vektor 3D: handWorldLandmarks (3D meter) dengan fallback 2D aspect-compensated bila kosong
+        bool hasWorld3D = worldLandmarks != null && worldLandmarks.Count >= 21;
+        Vector3 p0, p1, p2, p3, p4, p5, p9, p13, p17;
+        float palmSpanMetric;
+
+        if (hasWorld3D)
+        {
+            p0 = ToVec3(worldLandmarks[0]);
+            p1 = ToVec3(worldLandmarks[1]);
+            p2 = ToVec3(worldLandmarks[2]);
+            p3 = ToVec3(worldLandmarks[3]);
+            p4 = ToVec3(worldLandmarks[4]);
+            p5 = ToVec3(worldLandmarks[5]);
+            p9 = ToVec3(worldLandmarks[9]);
+            p13 = ToVec3(worldLandmarks[13]);
+            p17 = ToVec3(worldLandmarks[17]);
+
+            float d09W = Vector3.Distance(p0, p9);
+            float d517W = Vector3.Distance(p5, p17);
+            float rawSpan3D = 0.5f * (d09W + d517W);
+            if (rawSpan3D >= MinValidPalmSpan3DMeters && !float.IsNaN(rawSpan3D) && !float.IsInfinity(rawSpan3D))
+            {
+                isUsingWorld3DMetrics = true;
+                palmSpanMetric = rawSpan3D;
+            }
+            else
+            {
+                hasWorld3D = false;
+                isUsingWorld3DMetrics = false;
+                p0 = ToAspectCompensatedVec3(l0, safeAspect);
+                p1 = ToAspectCompensatedVec3(landmarks[1], safeAspect);
+                p2 = ToAspectCompensatedVec3(landmarks[2], safeAspect);
+                p3 = ToAspectCompensatedVec3(landmarks[3], safeAspect);
+                p4 = ToAspectCompensatedVec3(l4, safeAspect);
+                p5 = ToAspectCompensatedVec3(l5, safeAspect);
+                p9 = ToAspectCompensatedVec3(l9, safeAspect);
+                p13 = ToAspectCompensatedVec3(l13, safeAspect);
+                p17 = ToAspectCompensatedVec3(l17, safeAspect);
+                palmSpanMetric = Mathf.Max(MinPalmScaleClamp, rawPalmScale2D);
+            }
+        }
+        else
+        {
+            isUsingWorld3DMetrics = false;
+            p0 = ToAspectCompensatedVec3(l0, safeAspect);
+            p1 = ToAspectCompensatedVec3(landmarks[1], safeAspect);
+            p2 = ToAspectCompensatedVec3(landmarks[2], safeAspect);
+            p3 = ToAspectCompensatedVec3(landmarks[3], safeAspect);
+            p4 = ToAspectCompensatedVec3(l4, safeAspect);
+            p5 = ToAspectCompensatedVec3(l5, safeAspect);
+            p9 = ToAspectCompensatedVec3(l9, safeAspect);
+            p13 = ToAspectCompensatedVec3(l13, safeAspect);
+            p17 = ToAspectCompensatedVec3(l17, safeAspect);
+            palmSpanMetric = Mathf.Max(MinPalmScaleClamp, rawPalmScale2D);
+        }
+
+        Vector3 palmCenter3D = (p0 + p5 + p9 + p13 + p17) * 0.20f;
+
+        // 3. Evaluasi sudut sendi 3D (dot product MCP->PIP, PIP->DIP, DIP->TIP + Wrist->MCP) untuk 4 jari utama
+        float sumPalmRatio = 0f;
+        float sumWeightedBend = 0f;
+        float sumOtherThreeBend = 0f;
+        int firmlyFolded = 0;
+        int otherNotFullyFolded = 0;
         bool indexBuriedInPalm = false;
 
         for (int i = 0; i < 4; i++)
         {
-            NormalizedLandmark tip = landmarks[FingerTipIndices[i]];
-            NormalizedLandmark pip = landmarks[FingerPipIndices[i]];
+            int mcpIdx = FingerMcpIndices[i];
+            int pipIdx = FingerPipIndices[i];
+            int dipIdx = FingerDipIndices[i];
+            int tipIdx = FingerTipIndices[i];
 
-            float dxC = tip.x - cx;
-            float dyC = tip.y - cy;
-            float tipToCenter = Mathf.Sqrt((dxC * dxC) + (dyC * dyC));
-            float rPalm = tipToCenter / palmScale;
-            sumRatio += rPalm;
+            Vector3 pMcp = hasWorld3D ? ToVec3(worldLandmarks[mcpIdx]) : ToAspectCompensatedVec3(landmarks[mcpIdx], safeAspect);
+            Vector3 pPip = hasWorld3D ? ToVec3(worldLandmarks[pipIdx]) : ToAspectCompensatedVec3(landmarks[pipIdx], safeAspect);
+            Vector3 pDip = hasWorld3D ? ToVec3(worldLandmarks[dipIdx]) : ToAspectCompensatedVec3(landmarks[dipIdx], safeAspect);
+            Vector3 pTip = hasWorld3D ? ToVec3(worldLandmarks[tipIdx]) : ToAspectCompensatedVec3(landmarks[tipIdx], safeAspect);
 
-            float tipToWrist = Dist2D(tip, l0);
-            float pipToWrist = Mathf.Max(0.02f, Dist2D(pip, l0));
-            float rPip = tipToWrist / pipToWrist;
+            float bendMcp = ComputeSegmentBendDegrees(p0, pMcp, pPip);
+            float bendPip = ComputeSegmentBendDegrees(pMcp, pPip, pDip);
+            float bendDip = ComputeSegmentBendDegrees(pPip, pDip, pTip);
 
-            bool fingerFolded = rPalm < FingerFoldedPalmRatio || rPip < FingerFoldedPipRatio;
-            if (fingerFolded)
+            float rawPipDipBend = bendPip + bendDip;
+            float rawWeightedBend = (0.60f * bendMcp) + bendPip + (0.80f * bendDip);
+            float rawTipPalmRatio = Vector3.Distance(pTip, palmCenter3D) / palmSpanMetric;
+
+            float smoothPipDip = fingerPipDipBendEma[i].Update(rawPipDipBend, sampleDt, MetricEmaTauSeconds);
+            float smoothWeighted = fingerWeightedBendEma[i].Update(rawWeightedBend, sampleDt, MetricEmaTauSeconds);
+            float smoothPalmRatio = fingerPalmRatioEma[i].Update(rawTipPalmRatio, sampleDt, MetricEmaTauSeconds);
+
+            sumPalmRatio += smoothPalmRatio;
+            sumWeightedBend += smoothWeighted;
+
+            bool isFirmlyFolded = (smoothPipDip >= FingerFirmFoldPipDipDeg && smoothWeighted >= FingerFirmFoldWeightedDeg)
+                                  || (smoothWeighted >= FingerFirmFoldDeepWeightedDeg && smoothPalmRatio <= FingerFirmFoldDeepPalmRatio)
+                                  || (smoothPipDip >= FingerFirmFoldTuckPipDipDeg && smoothPalmRatio <= FingerFirmFoldTuckPalmRatio);
+            if (isFirmlyFolded)
             {
-                folded++;
-                if (i >= 1)
-                {
-                    otherThreeFolded++;
-                }
+                firmlyFolded++;
             }
 
             if (i == 0)
             {
-                // Telunjuk dianggap tenggelam di pusat telapak bila kedua rasio tertekuk rapat (ciri kepalan penuh)
-                indexBuriedInPalm = rPalm < FingerFoldedPalmRatio && rPip < FingerFoldedPipRatio;
+                indexBuriedInPalm = (smoothPalmRatio < PinchMinIndexPalmRatio) || (smoothWeighted >= PinchMaxIndexWeightedBendDeg);
+            }
+            else
+            {
+                sumOtherThreeBend += smoothWeighted;
+                if (!isFirmlyFolded
+                    && smoothPipDip < FingerNotFullyFoldedMaxPipDipDeg
+                    && smoothWeighted < FingerNotFullyFoldedMaxWeightedDeg)
+                {
+                    otherNotFullyFolded++;
+                }
             }
 
-            // Schmitt-trigger per-jari rileks untuk klasifikasi 1-4 jari anti-flicker (Fase 4)
+            // Schmitt-trigger per-jari berbasis sudut sendi 3D (anti-flicker untuk Summon & Input Switch)
             if (!mainFingerExtended[i])
             {
-                if (rPalm > SummonFingerExtendPalmRatio && rPip > SummonFingerExtendPipRatio)
+                if (smoothPipDip <= FingerExtendMaxPipDipDeg
+                    && smoothWeighted <= FingerExtendMaxWeightedDeg
+                    && smoothPalmRatio >= FingerExtendMinPalmRatio)
                 {
                     mainFingerExtended[i] = true;
                 }
             }
-            else if (rPalm < SummonFingerFoldPalmRatio || rPip < SummonFingerFoldPipRatio)
+            else if (smoothPipDip >= FingerUnextendMinPipDipDeg
+                     || smoothWeighted >= FingerUnextendMinWeightedDeg
+                     || smoothPalmRatio <= FingerUnextendMaxPalmRatio)
             {
                 mainFingerExtended[i] = false;
             }
         }
 
-        meanCurlRatio = sumRatio * 0.25f;
-        foldedFingerCount = folded;
-        rawEnterCondition = (meanCurlRatio < FistEnterMeanRatio) && (foldedFingerCount >= 3);
-        rawExitCondition = (meanCurlRatio > FistExitMeanRatio) && (foldedFingerCount <= 1);
+        meanCurlRatio = sumPalmRatio * 0.25f;
+        meanWeightedBendDeg = sumWeightedBend * 0.25f;
+        float meanOtherThreeBendDeg = sumOtherThreeBend / 3.0f;
+        foldedFingerCount = firmlyFolded;
 
-        // 3A. Evaluasi Pinch / Cubit skala-invarian (#4-#8) dengan guard anti-kepalan penuh
-        currentPinchRatio = Dist2D(l4, l8) / palmScale;
-        bool isFullFistShape = rawEnterCondition && otherThreeFolded >= 3 && indexBuriedInPalm;
-        bool notFullFistForPinch = !isFullFistShape && (otherThreeFolded < 3 || !indexBuriedInPalm);
-        rawPinchEnterCondition = currentPinchRatio < PinchEnterRatio && notFullFistForPinch;
-        rawPinchExitCondition = currentPinchRatio > PinchExitRatio;
-        isPrePinchGuardActive = currentPinchRatio < PrePinchSuppressSummonRatio && notFullFistForPinch;
+        // 4. Evaluasi ibu jari 3D (orientation-invariant) untuk Open-5 Bloom, NAND (jempol lipat), & NOT (jempol kuat)
+        float rawThumbBend = (0.60f * ComputeSegmentBendDegrees(p1, p2, p3)) + ComputeSegmentBendDegrees(p2, p3, p4);
+        float rawThumbIndexRatio = Vector3.Distance(p4, p5) / palmSpanMetric;
+        float rawThumbPinkyRatio = Vector3.Distance(p4, p17) / palmSpanMetric;
 
-        // 3B. Evaluasi ibu jari orientation-invariant + pemetaan 5 gerbang & Open-5 Bloom
-        float dThumbIndex = Dist2D(l4, l5) / palmScale;
-        float dThumbPinky = Dist2D(l4, l17) / palmScale;
-        isThumbExtended = dThumbIndex > ThumbBloomIndexRatio && dThumbPinky > ThumbBloomPinkyRatio;
-        isThumbStrongOut = dThumbIndex > ThumbStrongNotIndexRatio && dThumbPinky > ThumbStrongNotPinkyRatio;
+        float smoothThumbBend = thumbBendEma.Update(rawThumbBend, sampleDt, MetricEmaTauSeconds);
+        float smoothThumbIndexRatio = thumbIndexRatioEma.Update(rawThumbIndexRatio, sampleDt, MetricEmaTauSeconds);
+        float smoothThumbPinkyRatio = thumbPinkyRatioEma.Update(rawThumbPinkyRatio, sampleDt, MetricEmaTauSeconds);
 
-        int extendedMainCount = (mainFingerExtended[0] ? 1 : 0)
-                                + (mainFingerExtended[1] ? 1 : 0)
-                                + (mainFingerExtended[2] ? 1 : 0)
-                                + (mainFingerExtended[3] ? 1 : 0);
+        if (!isThumbExtended)
+        {
+            if (smoothThumbIndexRatio > ThumbExtendEnterIndexRatio
+                && smoothThumbPinkyRatio > ThumbExtendEnterPinkyRatio
+                && smoothThumbBend < ThumbExtendEnterMaxBendDeg)
+            {
+                isThumbExtended = true;
+            }
+        }
+        else if (smoothThumbIndexRatio < ThumbExtendExitIndexRatio
+                 || smoothThumbPinkyRatio < ThumbExtendExitPinkyRatio
+                 || smoothThumbBend > ThumbExtendExitMinBendDeg)
+        {
+            isThumbExtended = false;
+        }
 
-        isRelaxedOpenFiveBloom = extendedMainCount >= 3 && meanCurlRatio > OpenFiveBloomMeanRatio && isThumbExtended && !isPrePinchGuardActive;
+        isThumbStrongOut = smoothThumbIndexRatio > ThumbStrongNotIndexRatio
+                           && smoothThumbPinkyRatio > ThumbStrongNotPinkyRatio
+                           && smoothThumbBend < ThumbStrongNotMaxBendDeg;
 
-        // Anti-Konflik XOR: saat mencubit atau pre-pinch (< 0.42f), 3 jari terbuka lain tidak boleh memicu 3 jari (XOR)
+        // 5. Evaluasi Kanal Fist vs Kanal Pinch (pemisahan anatomi ketat 3D — 0% race condition Open -> Fist)
+        // Fist: WAJIB keempat jari utama menekuk tegas berdasarkan sudut sendi 3D
+        rawEnterCondition = (firmlyFolded == 4)
+                            && (meanWeightedBendDeg >= FistEnterMeanWeightedBendDeg)
+                            && (meanCurlRatio < FistEnterMaxMeanCurlRatio)
+                            && !isThumbStrongOut;
+        rawExitCondition = (meanWeightedBendDeg < FistExitMeanWeightedBendDeg) && (firmlyFolded <= 1);
+
+        // Pinch 3D: jarak #4-#8 / palmSpan3D rapat DAN minimal 2 dari 3 jari lain tidak terlipat penuh (disjoint dari Fist)
+        Vector3 pIndexTip = hasWorld3D ? ToVec3(worldLandmarks[8]) : ToAspectCompensatedVec3(l8, safeAspect);
+        float rawPinchRatio = Vector3.Distance(p4, pIndexTip) / palmSpanMetric;
+        currentPinchRatio = pinchRatioEma.Update(rawPinchRatio, sampleDt, MetricEmaTauSeconds);
+
+        bool pinchAnatomyValid = !rawEnterCondition
+                                 && (otherNotFullyFolded >= PinchMinOtherNotFullyFolded)
+                                 && (meanOtherThreeBendDeg < PinchMaxOtherThreeMeanBendDeg)
+                                 && !indexBuriedInPalm;
+
+        rawPinchEnterCondition = (currentPinchRatio < PinchEnterRatio3D) && pinchAnatomyValid;
+        rawPinchExitCondition = currentPinchRatio > PinchExitRatio3D;
+        isPrePinchGuardActive = (currentPinchRatio < PrePinchSuppressSummonRatio3D) && pinchAnatomyValid;
+
+        // Hitung frame inferensi valid berturut-turut (mencegah glitch 1 frame pada 15-30 FPS lolos debounce)
+        bool qualityAllowsCount = IsQualityGatePassing;
+        if (rawEnterCondition && qualityAllowsCount)
+        {
+            if (fistEnterConsecFrames < 10)
+            {
+                fistEnterConsecFrames++;
+            }
+        }
+        else
+        {
+            fistEnterConsecFrames = 0;
+        }
+
+        if (rawPinchEnterCondition && qualityAllowsCount)
+        {
+            if (pinchEnterConsecFrames < 10)
+            {
+                pinchEnterConsecFrames++;
+            }
+        }
+        else
+        {
+            pinchEnterConsecFrames = 0;
+        }
+
+        // 6. Klasifikasi Circle Summon berbasis IDENTITAS JARI SPESIFIK (bukan sekadar jumlah acak)
+        bool idxExt = mainFingerExtended[0];
+        bool midExt = mainFingerExtended[1];
+        bool rngExt = mainFingerExtended[2];
+        bool pnkExt = mainFingerExtended[3];
+        int extendedMainCount = (idxExt ? 1 : 0) + (midExt ? 1 : 0) + (rngExt ? 1 : 0) + (pnkExt ? 1 : 0);
+
+        isRelaxedOpenFiveBloom = (extendedMainCount >= 3)
+                                 && (meanWeightedBendDeg < RelaxedOpenFiveMaxMeanBendDeg)
+                                 && isThumbExtended
+                                 && !isPinchActive
+                                 && !isPrePinchGuardActive;
+
         if (isPinchActive || isPrePinchGuardActive)
         {
             currentSummonPose = SummonHandPose.None;
         }
-        else if (extendedMainCount == 4 && isThumbExtended && meanCurlRatio > OpenFiveBloomMeanRatio)
+        else if (idxExt && midExt && rngExt && pnkExt && isThumbExtended && meanWeightedBendDeg < OpenFiveBloomMaxMeanBendDeg)
         {
             currentSummonPose = SummonHandPose.OpenFiveBloom;
         }
-        else if (extendedMainCount == 4 && !isThumbExtended)
+        else if (idxExt && midExt && rngExt && pnkExt && !isThumbExtended)
         {
-            // Khusus 4 jari (NAND): wajib ibu jari terlipat (<= 0.46 || <= 0.90) agar tidak bentrok dengan OpenFiveBloom
+            // NAND: 4 jari utama teracung + jempol terlipat
             currentSummonPose = SummonHandPose.FourFingersNand;
         }
-        else if (extendedMainCount == 3)
+        else if (idxExt && midExt && rngExt && !pnkExt)
         {
+            // XOR: hanya telunjuk + tengah + manis
             currentSummonPose = SummonHandPose.ThreeFingersXor;
         }
-        else if (extendedMainCount == 2)
+        else if (idxExt && midExt && !rngExt && !pnkExt)
         {
+            // OR: hanya telunjuk + tengah
             currentSummonPose = SummonHandPose.TwoFingersOr;
         }
-        else if (extendedMainCount == 1)
+        else if (idxExt && !midExt && !rngExt && !pnkExt)
         {
+            // AND: hanya telunjuk
             currentSummonPose = SummonHandPose.OneFingerAnd;
         }
-        else if (extendedMainCount == 0 && foldedFingerCount >= 3 && isThumbStrongOut)
+        else if (!idxExt && !midExt && !rngExt && !pnkExt && firmlyFolded >= 3 && isThumbStrongOut)
         {
+            // NOT: hanya jempol teracung kuat (4 jari utama tertekuk)
             currentSummonPose = SummonHandPose.ThumbOnlyNot;
         }
         else
@@ -445,27 +765,24 @@ public sealed class AirWeavingHandGestureDetector
             currentSummonPose = SummonHandPose.None;
         }
 
-        // 4. Kursor telapak anti-lompat (0.50*L9 + 0.30*L5 + 0.20*L0) & titik cubit presisi (0.5*(L4 + L8))
-        // Pass-through langsung dari One-Euro Filter tunggal per-landmark (0 lag EMA bertumpuk) + kecepatan per sampel inferensi
+        // 7. Proyeksi koordinat interaksi TERPADU pada sinar kamera bidang referensi konsisten (WorkbenchDepth)
+        //    Menjamin 100% sinkronisasi visual rig tangan <-> objek tertangkap & kecepatan konstan pada jarak tangan berapa pun
         Vector3 rawPalmWorld = (smoothedLandmarksWorld[9] * 0.50f)
                                + (smoothedLandmarksWorld[5] * 0.30f)
                                + (smoothedLandmarksWorld[0] * 0.20f);
-        Vector3 rawPalmLocal = camTransform.InverseTransformPoint(rawPalmWorld);
-        Vector2 rawPalmXY = new Vector2(rawPalmLocal.x, rawPalmLocal.y);
+        Vector2 rayPalmXY = ProjectWorldToRefRayPlane(camTransform, rawPalmWorld, safeRefDepth);
 
         Vector3 rawPinchWorld = (smoothedLandmarksWorld[4] + smoothedLandmarksWorld[8]) * 0.5f;
-        Vector3 rawPinchLocal = camTransform.InverseTransformPoint(rawPinchWorld);
-        Vector2 rawPinchXY = new Vector2(rawPinchLocal.x, rawPinchLocal.y);
+        Vector2 rayPinchXY = ProjectWorldToRefRayPlane(camTransform, rawPinchWorld, safeRefDepth);
 
-        Vector3 indexLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[8]);
-        Vector2 rawIndexTipXY = new Vector2(indexLocal.x, indexLocal.y);
-        Vector3 thumbLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[4]);
+        Vector2 rayIndexTipXY = ProjectWorldToRefRayPlane(camTransform, smoothedLandmarksWorld[8], safeRefDepth);
+        Vector2 rayThumbTipXY = ProjectWorldToRefRayPlane(camTransform, smoothedLandmarksWorld[4], safeRefDepth);
 
         if (!hasPrevSampleCursors)
         {
-            prevRawPalmLocalXY = rawPalmXY;
-            prevRawPinchLocalXY = rawPinchXY;
-            prevRawIndexTipLocalXY = rawIndexTipXY;
+            prevRawPalmLocalXY = rayPalmXY;
+            prevRawPinchLocalXY = rayPinchXY;
+            prevRawIndexTipLocalXY = rayIndexTipXY;
             CursorSpeedUnitsPerSec = 0f;
             PinchSpeedUnitsPerSec = 0f;
             IndexTipSpeedUnitsPerSec = 0f;
@@ -473,28 +790,28 @@ public sealed class AirWeavingHandGestureDetector
         }
         else
         {
-            CursorSpeedUnitsPerSec = Vector2.Distance(rawPalmXY, prevRawPalmLocalXY) / sampleDt;
-            PinchSpeedUnitsPerSec = Vector2.Distance(rawPinchXY, prevRawPinchLocalXY) / sampleDt;
-            IndexTipSpeedUnitsPerSec = Vector2.Distance(rawIndexTipXY, prevRawIndexTipLocalXY) / sampleDt;
-            prevRawPalmLocalXY = rawPalmXY;
-            prevRawPinchLocalXY = rawPinchXY;
-            prevRawIndexTipLocalXY = rawIndexTipXY;
+            CursorSpeedUnitsPerSec = Vector2.Distance(rayPalmXY, prevRawPalmLocalXY) / sampleDt;
+            PinchSpeedUnitsPerSec = Vector2.Distance(rayPinchXY, prevRawPinchLocalXY) / sampleDt;
+            IndexTipSpeedUnitsPerSec = Vector2.Distance(rayIndexTipXY, prevRawIndexTipLocalXY) / sampleDt;
+            prevRawPalmLocalXY = rayPalmXY;
+            prevRawPinchLocalXY = rayPinchXY;
+            prevRawIndexTipLocalXY = rayIndexTipXY;
         }
 
-        PalmCursorLocalXY = rawPalmXY;
+        PalmCursorLocalXY = rayPalmXY;
         PalmCursorWorldPosition = rawPalmWorld;
 
-        PinchPointLocalXY = rawPinchXY;
+        PinchPointLocalXY = rayPinchXY;
         PinchPointWorldPosition = rawPinchWorld;
 
-        IndexTipLocalXY = rawIndexTipXY;
-        ThumbTipLocalXY = new Vector2(thumbLocal.x, thumbLocal.y);
+        IndexTipLocalXY = rayIndexTipXY;
+        ThumbTipLocalXY = rayThumbTipXY;
 
         if (currentSummonPose == SummonHandPose.ThumbOnlyNot)
         {
             ActiveSummonTipLocalXY = ThumbTipLocalXY;
         }
-        else if (mainFingerExtended[0])
+        else if (idxExt)
         {
             ActiveSummonTipLocalXY = IndexTipLocalXY;
         }
@@ -509,14 +826,13 @@ public sealed class AirWeavingHandGestureDetector
                     break;
                 }
             }
-            Vector3 activeTipLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[activeTipLandmarkIdx]);
-            ActiveSummonTipLocalXY = new Vector2(activeTipLocal.x, activeTipLocal.y);
+            ActiveSummonTipLocalXY = ProjectWorldToRefRayPlane(camTransform, smoothedLandmarksWorld[activeTipLandmarkIdx], safeRefDepth);
         }
     }
 
     /// <summary>
-    /// Memproses hysteresis, asymmetric debounce, velocity guard, sticky-hold, & occlusion grace
-    /// untuk kanal Fist (objek) dan kanal Pinch (kabel) secara saling terpisah. Zero-GC.
+    /// Memproses warm-up 120 ms, hysteresis 3D, enter debounce ganda (frame berturut-turut + durasi 70-75 ms),
+    /// asymmetric exit debounce, sticky-hold, &amp; occlusion grace untuk kanal Pinch &amp; Fist secara terpisah. Zero-GC.
     /// </summary>
     public void TickTemporalState(float dt, bool isHandDetected, bool isFistStickyHoldActive = false, bool isPinchStickyHoldActive = false)
     {
@@ -532,16 +848,34 @@ public sealed class AirWeavingHandGestureDetector
 
         if (isHandDetected)
         {
+            if (!wasDetectedInTick)
+            {
+                wasDetectedInTick = true;
+                entryWarmupTimer = HandEntryWarmupSeconds;
+                fistEnterConsecFrames = 0;
+                pinchEnterConsecFrames = 0;
+                enterHoldTimer = 0f;
+                pinchEnterHoldTimer = 0f;
+            }
+            else if (entryWarmupTimer > 0f)
+            {
+                entryWarmupTimer = Mathf.Max(0f, entryWarmupTimer - dt);
+            }
+
             occlusionGraceTimer = isFistStickyHoldActive ? StickyOcclusionGraceSeconds : OcclusionGraceSeconds;
             pinchOcclusionGraceTimer = PinchOcclusionGraceSeconds;
         }
         else
         {
+            wasDetectedInTick = false;
+            entryWarmupTimer = HandEntryWarmupSeconds;
             CursorSpeedUnitsPerSec = 0f;
             PinchSpeedUnitsPerSec = 0f;
             IndexTipSpeedUnitsPerSec = 0f;
             hasPrevSampleCursors = false;
             lastLandmarkUpdateUnscaledTime = -1f;
+            fistEnterConsecFrames = 0;
+            pinchEnterConsecFrames = 0;
             enterHoldTimer = 0f;
             pinchEnterHoldTimer = 0f;
             isPreFistCurling = false;
@@ -575,14 +909,16 @@ public sealed class AirWeavingHandGestureDetector
             return;
         }
 
+        bool qualityGateOk = IsQualityGatePassing;
+
         // ---------------------------------------------------------------------
-        // KANAL 1: PINCH / CUBIT (KHUSUS KABEL — TIDAK PERNAH AKTIF SAAT FIST)
+        // KANAL 1: PINCH / CUBIT 3D (KHUSUS KABEL — DISJOINT DARI FIST)
         // ---------------------------------------------------------------------
         if (!isPinchActive)
         {
             pinchExitHoldTimer = 0f;
 
-            bool prePinchingNow = isPrePinchGuardActive && !isFistActive;
+            bool prePinchingNow = qualityGateOk && isPrePinchGuardActive && !isFistActive && !isFistStickyHoldActive;
             if (prePinchingNow)
             {
                 if (!isPrePinchClosing)
@@ -608,11 +944,12 @@ public sealed class AirWeavingHandGestureDetector
                 prePinchLatchTimer = 0f;
             }
 
-            bool allowPinchEnter = rawPinchEnterCondition && !isFistActive && !isFistStickyHoldActive;
+            bool allowPinchEnter = qualityGateOk && rawPinchEnterCondition && !isFistActive && !isFistStickyHoldActive;
             if (allowPinchEnter)
             {
                 pinchEnterHoldTimer += dt;
-                if (pinchEnterHoldTimer >= PinchEnterDebounceSeconds)
+                if (pinchEnterConsecFrames >= PinchEnterMinConsecutiveFrames
+                    && pinchEnterHoldTimer >= PinchEnterDebounceSeconds)
                 {
                     isPinchActive = true;
                     pinchJustStarted = true;
@@ -622,7 +959,7 @@ public sealed class AirWeavingHandGestureDetector
             }
             else
             {
-                pinchEnterHoldTimer = Mathf.Max(0f, pinchEnterHoldTimer - (dt * 2f));
+                pinchEnterHoldTimer = Mathf.Max(0f, pinchEnterHoldTimer - (dt * 2.5f));
             }
         }
         else
@@ -652,13 +989,16 @@ public sealed class AirWeavingHandGestureDetector
         }
 
         // ---------------------------------------------------------------------
-        // KANAL 2: FIST / KEPAL (KHUSUS OBJEK — PARAMETER STICKY FASE 3 UTUH)
+        // KANAL 2: FIST / KEPAL 3D (KHUSUS OBJEK — 4 JARI MENEKUK TEGAS)
         // ---------------------------------------------------------------------
         if (!isFistActive)
         {
             exitHoldTimer = 0f;
 
-            bool curlingNow = meanCurlRatio < PreFistLatchMeanRatio && !isPinchActive && !isPrePinchGuardActive;
+            bool curlingNow = qualityGateOk
+                              && (meanWeightedBendDeg >= PreFistLatchMinWeightedBendDeg)
+                              && !isPinchActive
+                              && !isPinchStickyHoldActive;
             if (curlingNow)
             {
                 if (!isPreFistCurling)
@@ -684,21 +1024,22 @@ public sealed class AirWeavingHandGestureDetector
                 preFistLatchTimer = 0f;
             }
 
-            // Guard Anti-Fist: tolak masuk Fist saat sedang Pinch/pre-pinch, 1 jari telunjuk (#8) teracung,
-            // atau pose summon sah aktif. Kepalan penuh (4 jari tertekuk) tetap masuk Fist dalam 45 ms.
+            // Tanpa pemblokiran oleh pre-pinch: karena Pinch & Fist sudah terpisah anatomi 3D, transisi Open->Fist mulus tanpa race
             bool isSummonGatePose = currentSummonPose == SummonHandPose.OneFingerAnd
                                     || currentSummonPose == SummonHandPose.TwoFingersOr
                                     || currentSummonPose == SummonHandPose.ThreeFingersXor
                                     || currentSummonPose == SummonHandPose.FourFingersNand
                                     || currentSummonPose == SummonHandPose.ThumbOnlyNot;
-            bool blockedByOtherChannel = isPinchActive || isPinchStickyHoldActive || isPrePinchGuardActive;
-            bool allowFistEnter = rawEnterCondition
-                                  && !blockedByOtherChannel
+            bool blockedByPinch = isPinchActive || isPinchStickyHoldActive;
+            bool allowFistEnter = qualityGateOk
+                                  && rawEnterCondition
+                                  && !blockedByPinch
                                   && (isFistStickyHoldActive || (!mainFingerExtended[0] && !isSummonGatePose));
             if (allowFistEnter)
             {
                 enterHoldTimer += dt;
-                if (enterHoldTimer >= DebounceEnterSeconds)
+                if (fistEnterConsecFrames >= FistEnterMinConsecutiveFrames
+                    && enterHoldTimer >= FistEnterDebounceSeconds)
                 {
                     isFistActive = true;
                     fistJustStarted = true;
@@ -708,7 +1049,7 @@ public sealed class AirWeavingHandGestureDetector
             }
             else
             {
-                enterHoldTimer = Mathf.Max(0f, enterHoldTimer - (dt * 2f));
+                enterHoldTimer = Mathf.Max(0f, enterHoldTimer - (dt * 2.5f));
             }
         }
         else
@@ -717,15 +1058,15 @@ public sealed class AirWeavingHandGestureDetector
             isPreFistCurling = false;
             enterHoldTimer = 0f;
 
-            // Fase 3 Sticky-Drag (TERKUNCI): rasio > 1.15f & foldedFingerCount <= 1, adaptif 55-115 ms
+            // Sticky-Drag 3D: sudut rata-rata membuka di bawah 80° (atau 86° normal) & <= 1 jari tertekuk, adaptif 55-115 ms
             bool exitMet = isFistStickyHoldActive
-                ? (meanCurlRatio > FistStickyExitMeanRatio && foldedFingerCount <= 1)
+                ? (meanWeightedBendDeg < FistStickyExitMeanWeightedBendDeg && foldedFingerCount <= 1)
                 : rawExitCondition;
 
             if (exitMet)
             {
                 float speedT = Mathf.Clamp01((CursorSpeedUnitsPerSec - SlowReleaseSpeedThreshold) / (FastReleaseSpeedThreshold - SlowReleaseSpeedThreshold));
-                float requiredExit = Mathf.Lerp(DebounceExitSlowSeconds, DebounceExitFastSeconds, speedT);
+                float requiredExit = Mathf.Lerp(FistExitSlowSeconds, FistExitFastSeconds, speedT);
                 exitHoldTimer += dt;
                 if (exitHoldTimer >= requiredExit)
                 {
@@ -741,9 +1082,50 @@ public sealed class AirWeavingHandGestureDetector
         }
     }
 
-    private static float Dist2D(NormalizedLandmark a, NormalizedLandmark b)
+    private static bool IsInsideSafeFrame(float normX, float normY)
     {
-        float dx = a.x - b.x;
+        return normX >= EdgeDeadzoneMin
+               && normX <= EdgeDeadzoneMax
+               && normY >= EdgeDeadzoneMin
+               && normY <= EdgeDeadzoneMax;
+    }
+
+    private static Vector3 ToVec3(Landmark lm)
+    {
+        return new Vector3(lm.x, lm.y, lm.z);
+    }
+
+    private static Vector3 ToAspectCompensatedVec3(NormalizedLandmark lm, float aspectX)
+    {
+        return new Vector3((lm.x - 0.5f) * aspectX, 0.5f - lm.y, lm.z * 0.60f);
+    }
+
+    private static float ComputeSegmentBendDegrees(Vector3 a, Vector3 b, Vector3 c)
+    {
+        Vector3 v1 = b - a;
+        Vector3 v2 = c - b;
+        float len1Sq = v1.sqrMagnitude;
+        float len2Sq = v2.sqrMagnitude;
+        if (len1Sq < 1e-8f || len2Sq < 1e-8f)
+        {
+            return 0f;
+        }
+
+        float cosTheta = Vector3.Dot(v1, v2) / Mathf.Sqrt(len1Sq * len2Sq);
+        return Mathf.Acos(Mathf.Clamp(cosTheta, -1f, 1f)) * Mathf.Rad2Deg;
+    }
+
+    private static Vector2 ProjectWorldToRefRayPlane(Transform camTransform, Vector3 worldPos, float referenceDepth)
+    {
+        Vector3 camLocal = camTransform.InverseTransformPoint(worldPos);
+        float safeZ = Mathf.Max(0.35f, camLocal.z);
+        float scale = referenceDepth / safeZ;
+        return new Vector2(camLocal.x * scale, camLocal.y * scale);
+    }
+
+    private static float Dist2DCompensated(NormalizedLandmark a, NormalizedLandmark b, float aspectX)
+    {
+        float dx = (a.x - b.x) * Mathf.Clamp(aspectX * 0.75f, 0.70f, 1.35f);
         float dy = a.y - b.y;
         return Mathf.Sqrt((dx * dx) + (dy * dy));
     }

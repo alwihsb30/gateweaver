@@ -25,7 +25,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private const float GateAutoSnapRadius = 0.340f;
     private const float SnapHysteresisUnlockRadius = 0.380f;
     private const float SnapTargetSwitchRatio = 0.720f;
-    private const float SnapReleaseIntentFreezeRatio = 0.470f;
+    private const float SnapReleaseIntentFreezeRatio = AirWeavingHandGestureDetector.PinchReleaseIntentRatio;
     private const float SnapReleaseLatchSeconds = 0.300f;
     private const float SnapReleaseMaxEscapeDist = 0.460f;
     private const float HoverMagnetRadius = 0.300f;
@@ -518,7 +518,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         float pinchRatio = 1f,
         bool isPinchReleaseIntent = false,
         Transform stageRoot = null,
-        float stageZoomScale = 1f)
+        float stageZoomScale = 1f,
+        bool allowBeginDrag = true)
     {
         if (!isInitialized)
         {
@@ -556,12 +557,13 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
         }
 
-        // Proyeksikan posisi cubit tangan ke bidang sinar referensi kamera (workbenchDepth) agar 100% sinkron dengan proyeksi port 3D
+        // Koordinat livePinchLocalXY & stabilizedPinchLocalXY sudah disatukan pada bidang sinar referensi (workbenchDepth)
+        // oleh AirWeavingHandGestureDetector — hindari proyeksi ganda agar bidikan 100% sinkron pada jarak tangan berapa pun.
         Vector3 pinchCamLocal = camT.InverseTransformPoint(pinchWorldPos);
         float pinchDepth = Mathf.Max(0.35f, pinchCamLocal.z);
         float pinchProjFactor = workbenchDepth / pinchDepth;
-        Vector2 projectedLivePinchXY = new Vector2(pinchCamLocal.x * pinchProjFactor, pinchCamLocal.y * pinchProjFactor);
-        Vector2 projectedStabilizedPinchXY = stabilizedPinchLocalXY * pinchProjFactor;
+        Vector2 projectedLivePinchXY = livePinchLocalXY;
+        Vector2 projectedStabilizedPinchXY = stabilizedPinchLocalXY;
 
         // 2B. Soft Magnetic Aim-Assist (R=0.30 hover port, R=0.36 drag target kompatibel, maxPull=0.50, blend 18/s, 0 saat >1.1 u/s)
         bool hardBlocked = isUiOverlayOpen || isVerifying || blockedByOtherMode;
@@ -702,10 +704,10 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         else
         {
             isHoveringInvalidTargetDuringDrag = false;
-            Vector2 queryXY = pinchJustStarted ? assistedStabilizedPinchXY : assistedLivePinchXY;
+            Vector2 queryXY = (pinchJustStarted && allowBeginDrag) ? assistedStabilizedPinchXY : assistedLivePinchXY;
             hoveredPortIndex = FindNearestPortIndex(queryXY, hitRadiusScale);
 
-            if (pinchJustStarted && hoveredPortIndex >= 0 && hoveredPortIndex < activePorts.Count)
+            if (pinchJustStarted && allowBeginDrag && hoveredPortIndex >= 0 && hoveredPortIndex < activePorts.Count)
             {
                 BeginCableDragFromPort(activePorts[hoveredPortIndex], circuitManager);
             }

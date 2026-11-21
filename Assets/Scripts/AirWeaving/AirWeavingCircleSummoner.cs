@@ -26,15 +26,15 @@ public sealed class AirWeavingCircleSummoner
     private const float MinPointSpacing = 0.015f;
     private const float MinCircleRadius = 0.045f;
     private const float MaxCircleRadius = 0.650f;
-    private const float StartVisualAngleDegrees = 25f;
-    private const float PoseLockAngleDegrees = 35f;
+    private const float StartVisualAngleDegrees = 55f;
+    private const float PoseLockAngleDegrees = 65f;
     private const float ShapeCheckAngleDegrees = 110f;
     private const float MinCircularityRatio = 0.32f;
     private const float MinDirectionalCoherence = 0.58f;
     private const float TargetSweepDegrees = 185f;
     private const float MaxSingleTurnRadians = 2.356f; // 135 deg: lonjakan balik tajam dianggap zig-zag
 
-    private const float PoseConfirmHoldSeconds = 0.030f;
+    private const float PoseConfirmHoldSeconds = 0.110f;
     private const float PoseDropoutGraceSeconds = 0.160f;
     private const float ChargeStallTimeoutSeconds = 0.65f;
     private const float ChargeHandLostGraceSeconds = 0.25f;
@@ -250,27 +250,14 @@ public sealed class AirWeavingCircleSummoner
             }
 
             bool hasVotedGate = TryMapPoseToGate(votedPose, out NodeType mappedGate);
-            bool hasInstantGate = TryMapPoseToGate(currentPose, out NodeType instantGate);
             if (!hasVotedGate)
             {
-                if (hasInstantGate)
-                {
-                    // Tampilkan indikator ujung jari instan sejak frame pertama pose sah terdeteksi (sebelum 2/3 vote penuh)
-                    Vector2 instantTip = instantGate == NodeType.NOT ? thumbTipLocalXY : activeTipLocalXY;
-                    if (IsInsideSummonStartZone(instantTip, assemblyMinXY, assemblyMaxXY))
-                    {
-                        HasLivePoseIndicator = true;
-                        LiveIndicatorGateType = instantGate;
-                        LiveIndicatorTipLocalXY = instantTip;
-                    }
-                }
-
-                if (trailCount > 0 && candidatePose != SummonHandPose.None)
+                if (trailCount > 0 && candidatePose != SummonHandPose.None && candidatePoseHoldTimer >= PoseConfirmHoldSeconds)
                 {
                     poseDropoutTimer += dt;
                     if (poseDropoutTimer < PoseDropoutGraceSeconds)
                     {
-                        if (!HasLivePoseIndicator && TryMapPoseToGate(candidatePose, out NodeType heldGate))
+                        if (TryMapPoseToGate(candidatePose, out NodeType heldGate))
                         {
                             HasLivePoseIndicator = true;
                             LiveIndicatorGateType = heldGate;
@@ -300,11 +287,6 @@ public sealed class AirWeavingCircleSummoner
                 return;
             }
 
-            // Indikator live instan aktif selama pose sah berada di area rakit (bahkan saat jari masih diam)
-            HasLivePoseIndicator = true;
-            LiveIndicatorGateType = mappedGate;
-            LiveIndicatorTipLocalXY = activeTip;
-
             if (votedPose == candidatePose)
             {
                 candidatePoseHoldTimer += dt;
@@ -317,13 +299,17 @@ public sealed class AirWeavingCircleSummoner
                 hasPrevPoint = false;
             }
 
-            // Rekam jejak segera sejak titik pertama agar garis lintasan langsung terlihat sejak titik ke-2 bergerak
-            AppendTrailSample(activeTip, dt);
-
+            // Tahan indikator & perekaman jejak sampai pose jari spesifik stabil >= 110 ms agar gerakan santai tidak memicu summon
             if (candidatePoseHoldTimer < PoseConfirmHoldSeconds)
             {
                 return;
             }
+
+            HasLivePoseIndicator = true;
+            LiveIndicatorGateType = mappedGate;
+            LiveIndicatorTipLocalXY = activeTip;
+
+            AppendTrailSample(activeTip, dt);
 
             if (EvaluateCircleGeometry(out Vector2 center, out float estRad, out float absSweepDeg, out float coherence, out float circularity))
             {
