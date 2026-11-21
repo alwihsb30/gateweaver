@@ -35,6 +35,16 @@ public sealed class AirWeavingHandGestureDetector
     private const float FingerFoldedPipRatio = 1.04f;
     private const float PreFistLatchMeanRatio = 1.05f;
 
+    // Parameter True 3D Hand Depth Tracking berbasis Rigid Metacarpal Palm Span (Tahap 4.7 v8.0)
+    public const float DefaultComfortPalmSpan = 0.172f;
+    private const float MinRigidPalmSpanClamp = 0.048f;
+    private const float MaxRigidPalmSpanClamp = 0.620f;
+    private const float PalmSpanOneEuroMinCutoff = 1.10f;
+    private const float PalmSpanOneEuroBeta = 0.18f;
+    private const float PalmSpanOneEuroDCutoff = 2.00f;
+    private const float PalmSpanMicroDeadzoneRatio = 0.020f; // 2% micro-deadzone anti-getar saat tangan diam
+    private const float TwoPi = 6.283185307f;
+
     private const float DebounceEnterSeconds = 0.030f;
     private const float DebounceExitSlowSeconds = 0.055f;
     private const float DebounceExitFastSeconds = 0.115f;
@@ -110,6 +120,13 @@ public sealed class AirWeavingHandGestureDetector
     private Vector2 prevRawIndexTipLocalXY = Vector2.zero;
     private float lastLandmarkUpdateUnscaledTime = -1f;
 
+    // State 1D One-Euro Filter + Micro-Deadzone untuk Rigid Metacarpal Palm Span (True 3D Depth Tracking Tahap 4.7)
+    private bool palmSpanFilterInitialized = false;
+    private float palmSpanPrevFiltered = DefaultComfortPalmSpan;
+    private float palmSpanPrevDx = 0f;
+    private float rawRigidPalmSpan = DefaultComfortPalmSpan;
+    private float filteredPalmSpan = DefaultComfortPalmSpan;
+
     // State Summon 5 Gerbang
     private readonly bool[] mainFingerExtended = new bool[4];
     private bool isThumbExtended = false;
@@ -123,6 +140,8 @@ public sealed class AirWeavingHandGestureDetector
     public bool IsPreFistCurling => isPreFistCurling;
     public float MeanCurlRatio => meanCurlRatio;
     public int FoldedFingerCount => foldedFingerCount;
+    public float RawRigidPalmSpan => rawRigidPalmSpan;
+    public float FilteredPalmSpan => filteredPalmSpan;
 
     public bool IsPinchActive => isPinchActive;
     public bool PinchJustStarted => pinchJustStarted;
@@ -185,6 +204,11 @@ public sealed class AirWeavingHandGestureDetector
         prevRawPinchLocalXY = Vector2.zero;
         prevRawIndexTipLocalXY = Vector2.zero;
         lastLandmarkUpdateUnscaledTime = -1f;
+        palmSpanFilterInitialized = false;
+        palmSpanPrevFiltered = DefaultComfortPalmSpan;
+        palmSpanPrevDx = 0f;
+        rawRigidPalmSpan = DefaultComfortPalmSpan;
+        filteredPalmSpan = DefaultComfortPalmSpan;
 
         for (int i = 0; i < 4; i++)
         {
@@ -208,14 +232,89 @@ public sealed class AirWeavingHandGestureDetector
     }
 
     /// <summary>
+    /// Menghitung metrik ukuran telapak kaku (Rigid Metacarpal Span) yang tidak berubah bentuk saat tangan mengepal/mencubit
+    /// dari kombinasi 3D-compensated #0->#9, #0->#5, #0->#17, dan #5->#17, lalu menyaringnya dengan 1D One-Euro Filter
+    /// + micro-deadzone 2% agar bebas getar saat diam dan responsif saat tangan maju/mundur. Zero-GC.
+    /// </summary>
+    public float UpdateRigidPalmSpanOnly(List<NormalizedLandmark> landmarks, float sampleDt, float cameraAspect = 1.3333f)
+    {
+        if (landmarks == null || landmarks.Count < 21)
+        {
+            return filteredPalmSpan;
+        }
+
+        NormalizedLandmark l0 = landmarks[0];
+        NormalizedLandmark l5 = landmarks[5];
+        NormalizedLandmark l9 = landmarks[9];
+        NormalizedLandmark l17 = landmarks[17];
+
+        float safeAspect = Mathf.Clamp(cameraAspect, 0.65f, 2.40f);
+        float d09 = Dist3DCompensated(l0, l9, safeAspect);
+        float d05 = Dist3DCompensated(l0, l5, safeAspect);
+        float d017 = Dist3DCompensated(l0, l17, safeAspect);
+        float d517 = Dist3DCompensated(l5, l17, safeAspect);
+
+        float computedSpan = (0.34f * d09) + (0.24f * d05) + (0.22f * d017) + (0.20f * d517);
+        rawRigidPalmSpan = Mathf.Clamp(computedSpan, MinRigidPalmSpanClamp, MaxRigidPalmSpanClamp);
+
+        float dt = Mathf.Clamp(sampleDt, 0.005f, 0.200f);
+        if (!palmSpanFilterInitialized)
+        {
+            palmSpanFilterInitialized = true;
+            palmSpanPrevFiltered = rawRigidPalmSpan;
+            palmSpanPrevDx = 0f;
+            filteredPalmSpan = rawRigidPalmSpan;
+            return filteredPalmSpan;
+        }
+
+        // 1D One-Euro Filter pada metrik Rigid Palm Span (skala x100 agar beta setara dengan filter landmark)
+        float scaledDiff = (rawRigidPalmSpan - palmSpanPrevFiltered) * 100.0f;
+        float rawDx = scaledDiff / dt;
+        float alphaD = ComputeOneEuroAlpha(dt, PalmSpanOneEuroDCutoff);
+        float smoothedDx = palmSpanPrevDx + (alphaD * (rawDx - palmSpanPrevDx));
+        float adaptiveCutoff = PalmSpanOneEuroMinCutoff + (PalmSpanOneEuroBeta * Mathf.Abs(smoothedDx));
+        float alphaX = ComputeOneEuroAlpha(dt, adaptiveCutoff);
+        float oneEuroSpan = palmSpanPrevFiltered + (alphaX * (rawRigidPalmSpan - palmSpanPrevFiltered));
+
+        palmSpanPrevFiltered = oneEuroSpan;
+        palmSpanPrevDx = smoothedDx;
+
+        // Micro-deadzone halus (~2%) agar kedalaman 3D terkunci tenang saat tangan diam namun mulus tanpa lompatan saat bergerak
+        float deadzoneRadius = Mathf.Max(0.0012f, filteredPalmSpan * PalmSpanMicroDeadzoneRatio);
+        float deltaFromStable = oneEuroSpan - filteredPalmSpan;
+        float absDelta = Mathf.Abs(deltaFromStable);
+        if (absDelta > deadzoneRadius)
+        {
+            float excess = absDelta - deadzoneRadius;
+            filteredPalmSpan += Mathf.Sign(deltaFromStable) * excess;
+        }
+        else
+        {
+            // Drift mikro sangat lambat di dalam deadzone agar tidak pernah terkunci bias
+            filteredPalmSpan = Mathf.Lerp(filteredPalmSpan, oneEuroSpan, dt * 1.25f);
+        }
+
+        filteredPalmSpan = Mathf.Clamp(filteredPalmSpan, MinRigidPalmSpanClamp, MaxRigidPalmSpanClamp);
+        return filteredPalmSpan;
+    }
+
+    /// <summary>
     /// Memperbarui fitur geometris landmark 21 titik MediaPipe setiap frame inferensi baru masuk. Zero-GC.
     /// </summary>
-    public void UpdateFromLandmarks(List<NormalizedLandmark> landmarks, Vector3[] smoothedLandmarksWorld, Transform camTransform)
+    public void UpdateFromLandmarks(List<NormalizedLandmark> landmarks, Vector3[] smoothedLandmarksWorld, Transform camTransform, float cameraAspect = 1.3333f)
     {
         if (landmarks == null || landmarks.Count < 21 || smoothedLandmarksWorld == null || smoothedLandmarksWorld.Length < 21 || camTransform == null)
         {
             return;
         }
+
+        float nowTime = Time.unscaledTime;
+        float sampleDt = (lastLandmarkUpdateUnscaledTime >= 0f)
+            ? Mathf.Clamp(nowTime - lastLandmarkUpdateUnscaledTime, 0.008f, 0.150f)
+            : 0.033f;
+        lastLandmarkUpdateUnscaledTime = nowTime;
+
+        UpdateRigidPalmSpanOnly(landmarks, sampleDt, cameraAspect);
 
         NormalizedLandmark l0 = landmarks[0];
         NormalizedLandmark l4 = landmarks[4];
@@ -361,12 +460,6 @@ public sealed class AirWeavingHandGestureDetector
         Vector3 indexLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[8]);
         Vector2 rawIndexTipXY = new Vector2(indexLocal.x, indexLocal.y);
         Vector3 thumbLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[4]);
-
-        float nowTime = Time.unscaledTime;
-        float sampleDt = (lastLandmarkUpdateUnscaledTime >= 0f)
-            ? Mathf.Clamp(nowTime - lastLandmarkUpdateUnscaledTime, 0.008f, 0.150f)
-            : 0.033f;
-        lastLandmarkUpdateUnscaledTime = nowTime;
 
         if (!hasPrevSampleCursors)
         {
@@ -653,5 +746,20 @@ public sealed class AirWeavingHandGestureDetector
         float dx = a.x - b.x;
         float dy = a.y - b.y;
         return Mathf.Sqrt((dx * dx) + (dy * dy));
+    }
+
+    private static float Dist3DCompensated(NormalizedLandmark a, NormalizedLandmark b, float aspectX)
+    {
+        // Normalisasi skala horizontal-vertikal ke tinggi layar + kompensasi kemiringan Z tulang telapak
+        float dx = (a.x - b.x) * Mathf.Clamp(aspectX * 0.75f, 0.70f, 1.35f);
+        float dy = a.y - b.y;
+        float dz = Mathf.Clamp(a.z - b.z, -0.18f, 0.18f) * 0.52f;
+        return Mathf.Sqrt((dx * dx) + (dy * dy) + (dz * dz));
+    }
+
+    private static float ComputeOneEuroAlpha(float dt, float cutoffHz)
+    {
+        float omegaDt = TwoPi * cutoffHz * dt;
+        return omegaDt / (1f + omegaDt);
     }
 }

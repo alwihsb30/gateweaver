@@ -40,6 +40,9 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private static readonly Color PinchHoverColor = new Color(0.32f, 0.98f, 1.00f, 1.00f);
     private static readonly Color PinchActiveDragColor = new Color(0.48f, 1.00f, 0.62f, 1.00f);
     private static readonly Color PinchSnappedColor = new Color(0.84f, 1.00f, 0.30f, 1.00f);
+    private static readonly Color TwoHandOrbitCyanColor = new Color(0.30f, 0.96f, 1.00f, 0.96f);
+    private static readonly Color TwoHandFreePanGoldColor = new Color(0.96f, 0.82f, 0.26f, 0.96f);
+    private static readonly Color TwoHandResetAmberColor = new Color(1.00f, 0.56f, 0.22f, 0.96f);
 
     private GameObject rootObj;
     private LineRenderer[] nodeOuterRings;
@@ -65,6 +68,15 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private Material pinchRingMat;
     private Material pinchCoreMat;
     private readonly Vector3[] pinchRingBuffer = new Vector3[PinchRingSegments];
+
+    // Visual Lock 2 Tangan (Air-Orbit 360°, Air-Zoom, & Dual-Fist Reset)
+    private LineRenderer twoHandBeamRenderer;
+    private LineRenderer twoHandAnchorARenderer;
+    private LineRenderer twoHandAnchorBRenderer;
+    private LineRenderer twoHandCenterRingRenderer;
+    private Material twoHandBeamMat;
+    private Material twoHandAnchorMat;
+    private Material twoHandCenterMat;
 
     private readonly List<Material> ownedMaterials = new List<Material>(30);
     private bool isInitialized = false;
@@ -112,6 +124,14 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         pinchRingRenderer = CreateLoopLine("Holo_PinchCursorRing", PinchRingSegments, 0.0085f, pinchRingMat);
         pinchCoreRenderer = CreateLoopLine("Holo_PinchCursorCore", PinchRingSegments, 0.0065f, pinchCoreMat);
 
+        twoHandBeamMat = CreateSafeSpritesMat(TwoHandOrbitCyanColor, 3045);
+        twoHandAnchorMat = CreateSafeSpritesMat(TwoHandOrbitCyanColor, 3046);
+        twoHandCenterMat = CreateSafeSpritesMat(ReticleCoreWhiteColor, 3047);
+        twoHandBeamRenderer = CreateSegmentLine("Holo_TwoHandLinkBeam", 0.0075f, twoHandBeamMat);
+        twoHandAnchorARenderer = CreateLoopLine("Holo_TwoHandAnchorA", PinchRingSegments, 0.0095f, twoHandAnchorMat);
+        twoHandAnchorBRenderer = CreateLoopLine("Holo_TwoHandAnchorB", PinchRingSegments, 0.0095f, twoHandAnchorMat);
+        twoHandCenterRingRenderer = CreateLoopLine("Holo_TwoHandCenterCompass", ReticleSegments, 0.0085f, twoHandCenterMat);
+
         isInitialized = true;
         HideImmediate();
     }
@@ -128,6 +148,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             rootObj.SetActive(false);
         }
         HideCursors();
+        SetTwoHandLinkVisible(false);
         if (inputRippleRenderers != null)
         {
             for (int i = 0; i < inputRippleRenderers.Length; i++)
@@ -146,6 +167,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         SetReticleVisible(false);
         SetPinchIndicatorVisible(false);
+        SetTwoHandLinkVisible(false);
     }
 
     public void SetRootVisible(bool visible)
@@ -162,8 +184,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     }
 
     /// <summary>
-    /// Memperbarui aura cahaya 3D menghadap kamera pada slot 0..7. Saat Idle/Parked/PortFocused tidak ada
-    /// cincin lantai pipih sama sekali sehingga seluruh model 3D tampak melayang bebas. Zero-GC.
+    /// Memperbarui cincin aura 3D spasial yang sejajar bidang meja XZ (<c>HologramStageRoot</c>) dan mengitari bodi 3D
+    /// ditambah cincin ekuator 3D tipis yang mengikuti kemiringan bodi gerbang (bukan lagi stiker 2D camera-billboard). Zero-GC.
     /// </summary>
     public void UpdateNodeFrame(
         int slotIndex,
@@ -172,7 +194,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         bool isInputA,
         bool isInputB,
         bool isOutput,
-        NodeHoloState state)
+        NodeHoloState state,
+        Transform stageRoot = null)
     {
         if (!isInitialized || slotIndex < 0 || slotIndex >= MaxNodeSlots)
         {
@@ -197,62 +220,62 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         Transform nodeT = node.transform;
         float nodeScale = nodeT.localScale.x;
-        // Pusat aura 3D tepat di tengah bodi 3D menghadap kamera (bukan oval lantai pipih di dasar)
-        Vector3 center = nodeT.position + (nodeT.up * (0.14f * nodeScale)) - (camT.forward * 0.08f);
-        Vector3 axisA = camT.right;
-        Vector3 axisB = camT.up;
+        Vector3 tableRight = stageRoot != null ? stageRoot.right : nodeT.right;
+        Vector3 tableForward = stageRoot != null ? stageRoot.forward : nodeT.forward;
+        Vector3 tableUp = stageRoot != null ? stageRoot.up : nodeT.up;
+
+        // Cincin utama 3D sejajar bidang meja XZ mengitari pinggang bawah bodi gerbang secara spasial
+        Vector3 waistCenter = nodeT.position + (tableUp * (0.075f * nodeScale));
+        // Cincin ekuator 3D kedua mengikuti orientasi 3D bodi gerbang (ikut miring saat velocity banking tilt)
+        Vector3 equatorCenter = nodeT.position + (nodeT.up * (0.165f * nodeScale));
         float pulse = 0.5f + (0.5f * Mathf.Sin((Time.unscaledTime * 5.2f) + slotIndex));
 
         Color auraColor;
         float outerRadius;
         float outerWidth;
-        bool showInnerAura = false;
+        bool showInnerEquatorialRing = true;
 
         if (isInputA)
         {
             auraColor = InputACyanHoverColor;
-            outerRadius = (0.285f * nodeScale) + (0.012f * pulse);
+            outerRadius = (0.310f * nodeScale) + (0.012f * pulse);
             outerWidth = 0.0085f;
-            showInnerAura = true;
         }
         else if (isInputB)
         {
             auraColor = InputBGoldHoverColor;
-            outerRadius = (0.285f * nodeScale) + (0.012f * pulse);
+            outerRadius = (0.310f * nodeScale) + (0.012f * pulse);
             outerWidth = 0.0085f;
-            showInnerAura = true;
         }
         else if (state == NodeHoloState.ReturningToRack)
         {
-            // Tint aura merah terang saat gerbang dipegang keluar dari kotak AssemblyZone
+            // Tint cincin 3D merah terang saat gerbang dipegang keluar dari kotak AssemblyZone
             auraColor = GateOutsideDeleteRedColor;
-            outerRadius = (0.315f * nodeScale) + (0.018f * pulse);
-            outerWidth = 0.0115f;
-            showInnerAura = true;
+            outerRadius = (0.340f * nodeScale) + (0.018f * pulse);
+            outerWidth = 0.0110f;
         }
         else if (state == NodeHoloState.Grabbed)
         {
             auraColor = GateGrabbedColor;
-            outerRadius = (0.295f * nodeScale) + (0.014f * pulse);
-            outerWidth = 0.0090f;
-            showInnerAura = true;
+            outerRadius = (0.320f * nodeScale) + (0.014f * pulse);
+            outerWidth = 0.0092f;
         }
         else
         {
             // BodyHovered pada gerbang
             auraColor = GateBodyHoverColor;
-            outerRadius = (0.275f * nodeScale) + (0.010f * pulse);
+            outerRadius = (0.295f * nodeScale) + (0.010f * pulse);
             outerWidth = 0.0075f;
-            showInnerAura = false;
         }
 
-        DrawAuraCircle(outer, nodeOuterMats[slotIndex], center, axisA, axisB, outerRadius, auraColor, outerWidth);
+        DrawAuraCircle(outer, nodeOuterMats[slotIndex], waistCenter, tableRight, tableForward, outerRadius, auraColor, outerWidth);
 
-        if (showInnerAura && inner != null)
+        if (showInnerEquatorialRing && inner != null)
         {
-            float innerAlpha = state == NodeHoloState.ReturningToRack ? 0.62f : 0.42f;
+            float innerAlpha = state == NodeHoloState.ReturningToRack ? 0.68f : 0.48f;
             Color innerColor = new Color(auraColor.r, auraColor.g, auraColor.b, auraColor.a * innerAlpha);
-            DrawAuraCircle(inner, nodeInnerMats[slotIndex], center - (camT.forward * 0.008f), axisA, axisB, outerRadius * 0.84f, innerColor, state == NodeHoloState.ReturningToRack ? 0.006f : 0.0042f);
+            float innerWidth = state == NodeHoloState.ReturningToRack ? 0.0062f : 0.0044f;
+            DrawAuraCircle(inner, nodeInnerMats[slotIndex], equatorCenter, nodeT.right, nodeT.forward, outerRadius * 0.84f, innerColor, innerWidth);
         }
         else if (inner != null && inner.enabled)
         {
@@ -261,9 +284,15 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     }
 
     /// <summary>
-    /// Merender efek ripple 3D meluas singkat saat sakelar Input A/B disentuh ujung telunjuk (#8). Zero-GC.
+    /// Merender efek gelombang ripple 3D sejajar bidang meja XZ saat sakelar Input A/B disentuh ujung telunjuk (#8). Zero-GC.
     /// </summary>
-    public void UpdateInputTouchRipple(int inputIndex, Transform camT, GateNode node, bool isInputB, float normalizedProgress)
+    public void UpdateInputTouchRipple(
+        int inputIndex,
+        Transform camT,
+        GateNode node,
+        bool isInputB,
+        float normalizedProgress,
+        Transform stageRoot = null)
     {
         if (!isInitialized || inputRippleRenderers == null || inputIndex < 0 || inputIndex >= inputRippleRenderers.Length)
         {
@@ -283,14 +312,19 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         }
 
         float eased = 1f - ((1f - normalizedProgress) * (1f - normalizedProgress));
-        float scale = node.transform.localScale.x;
-        Vector3 center = node.transform.position + (node.transform.up * (0.14f * scale)) - (camT.forward * 0.11f);
-        float radius = Mathf.Lerp(0.14f, 0.34f, eased);
+        Transform nodeT = node.transform;
+        float scale = nodeT.localScale.x;
+        float zoomRatio = Mathf.Clamp(scale / 0.68f, 0.72f, 1.38f);
+        Vector3 axisA = stageRoot != null ? stageRoot.right : nodeT.right;
+        Vector3 axisB = stageRoot != null ? stageRoot.forward : nodeT.forward;
+        Vector3 tableUp = stageRoot != null ? stageRoot.up : nodeT.up;
+        Vector3 center = nodeT.position + (tableUp * (0.095f * scale));
+        float radius = Mathf.Lerp(0.16f, 0.38f, eased) * zoomRatio;
         Color baseCol = isInputB ? InputBGoldHoverColor : InputACyanHoverColor;
         Color faded = new Color(baseCol.r, baseCol.g, baseCol.b, (1f - normalizedProgress) * 0.95f);
-        float width = Mathf.Lerp(0.015f, 0.003f, normalizedProgress);
+        float width = Mathf.Lerp(0.014f, 0.003f, normalizedProgress);
 
-        DrawAuraCircle(lr, inputRippleMats[inputIndex], center, camT.right, camT.up, radius, faded, width);
+        DrawAuraCircle(lr, inputRippleMats[inputIndex], center, axisA, axisB, radius, faded, width);
     }
 
     /// <summary>
@@ -377,6 +411,88 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         DrawPinchCircle(pinchRingRenderer, pinchRingMat, center, right, up, outerR, ringCol, isPinchActive ? 0.011f : 0.0085f);
         DrawPinchCircle(pinchCoreRenderer, pinchCoreMat, center - (camT.forward * 0.004f), right, up, coreR, ReticleCoreWhiteColor, 0.007f);
+    }
+
+    /// <summary>
+    /// Menampilkan garis sinar penghubung hologram + 2 cincin jangkar di titik tangan kiri-kanan + cincin kompas tengah
+    /// selama mode Air-Orbit/Air-Zoom 2 tangan (<c>Both Hands Pinch</c>, sian), Free Air-Pan 3D (<c>1 Pinch + 1 Fist</c>, emas lembut),
+    /// atau tahan Reset (<c>Both Hands Fist</c>, amber). Zero-GC.
+    /// </summary>
+    public void UpdateTwoHandManipulatorLink(
+        Transform camT,
+        bool isVisible,
+        Vector3 primaryHandWorldPos,
+        Vector3 secondaryHandWorldPos,
+        bool isFistResetMode,
+        float fistResetProgress,
+        bool isFreePanMode = false)
+    {
+        if (!isInitialized)
+        {
+            return;
+        }
+
+        if (!isVisible || camT == null)
+        {
+            SetTwoHandLinkVisible(false);
+            return;
+        }
+
+        Vector3 right = camT.right;
+        Vector3 up = camT.up;
+        Vector3 forward = camT.forward;
+        Vector3 posA = primaryHandWorldPos - (forward * 0.14f);
+        Vector3 posB = secondaryHandWorldPos - (forward * 0.14f);
+        Vector3 midPos = (posA + posB) * 0.5f;
+
+        float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 8.5f));
+        Color mainCol = isFistResetMode
+            ? TwoHandResetAmberColor
+            : (isFreePanMode ? TwoHandFreePanGoldColor : TwoHandOrbitCyanColor);
+        float anchorR = isFistResetMode
+            ? Mathf.Lerp(0.052f, 0.028f, Mathf.Clamp01(fistResetProgress))
+            : (0.040f + (0.005f * pulse));
+        float centerR = isFistResetMode
+            ? Mathf.Lerp(0.024f, 0.078f, Mathf.Clamp01(fistResetProgress))
+            : (isFreePanMode ? (0.054f + (0.005f * pulse)) : (0.048f + (0.006f * pulse)));
+
+        if (twoHandBeamRenderer != null)
+        {
+            if (twoHandBeamMat != null)
+            {
+                twoHandBeamMat.color = mainCol;
+            }
+            twoHandBeamRenderer.enabled = true;
+            twoHandBeamRenderer.widthMultiplier = (isFistResetMode || isFreePanMode) ? 0.0095f : 0.0075f;
+            twoHandBeamRenderer.startColor = mainCol;
+            twoHandBeamRenderer.endColor = mainCol;
+            twoHandBeamRenderer.SetPosition(0, posA);
+            twoHandBeamRenderer.SetPosition(1, posB);
+        }
+
+        DrawPinchCircle(twoHandAnchorARenderer, twoHandAnchorMat, posA, right, up, anchorR, mainCol, 0.010f);
+        DrawPinchCircle(twoHandAnchorBRenderer, twoHandAnchorMat, posB, right, up, anchorR, mainCol, 0.010f);
+        DrawReticleCircle(twoHandCenterRingRenderer, twoHandCenterMat, midPos - (forward * 0.005f), right, up, centerR, (isFistResetMode || isFreePanMode) ? mainCol : ReticleCoreWhiteColor, 0.0085f);
+    }
+
+    private void SetTwoHandLinkVisible(bool visible)
+    {
+        if (twoHandBeamRenderer != null && twoHandBeamRenderer.enabled != visible)
+        {
+            twoHandBeamRenderer.enabled = visible;
+        }
+        if (twoHandAnchorARenderer != null && twoHandAnchorARenderer.enabled != visible)
+        {
+            twoHandAnchorARenderer.enabled = visible;
+        }
+        if (twoHandAnchorBRenderer != null && twoHandAnchorBRenderer.enabled != visible)
+        {
+            twoHandAnchorBRenderer.enabled = visible;
+        }
+        if (twoHandCenterRingRenderer != null && twoHandCenterRingRenderer.enabled != visible)
+        {
+            twoHandCenterRingRenderer.enabled = visible;
+        }
     }
 
     private void SetReticleVisible(bool visible)

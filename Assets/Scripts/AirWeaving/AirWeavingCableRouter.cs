@@ -406,7 +406,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         float dt = 0.016f,
         float pinchSpeedUnitsPerSec = 0f,
         float pinchRatio = 1f,
-        bool isPinchReleaseIntent = false)
+        bool isPinchReleaseIntent = false,
+        Transform stageRoot = null,
+        float stageZoomScale = 1f)
     {
         if (!isInitialized)
         {
@@ -425,37 +427,48 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
 
         Transform camT = mainCam.transform;
+        float zoomClamp = Mathf.Clamp(stageZoomScale, 0.45f, 2.50f);
+        float hitRadiusScale = Mathf.Clamp(zoomClamp, 0.55f, 2.05f);
 
         // 1. Bersihkan edge yang node-nya sudah tidak aktif (defensif)
         PruneUntrackedWires(circuitManager);
 
-        // 2. Bangun daftar gagang port proyektif untuk semua node aktif di meja kerja
+        // 2. Bangun daftar gagang port proyektif 3D mengikuti transform HologramStageRoot
         activePorts.Clear();
-        RegisterNodePorts(camT, inputANode, workbenchDepth);
-        RegisterNodePorts(camT, inputBNode, workbenchDepth);
-        RegisterNodePorts(camT, outputNode, workbenchDepth);
+        RegisterNodePorts(camT, stageRoot, inputANode, workbenchDepth);
+        RegisterNodePorts(camT, stageRoot, inputBNode, workbenchDepth);
+        RegisterNodePorts(camT, stageRoot, outputNode, workbenchDepth);
         if (activePlacedGates != null)
         {
             for (int i = 0; i < activePlacedGates.Count; i++)
             {
-                RegisterNodePorts(camT, activePlacedGates[i], workbenchDepth);
+                RegisterNodePorts(camT, stageRoot, activePlacedGates[i], workbenchDepth);
             }
         }
+
+        // Proyeksikan posisi cubit tangan ke bidang sinar referensi kamera (workbenchDepth) agar 100% sinkron dengan proyeksi port 3D
+        Vector3 pinchCamLocal = camT.InverseTransformPoint(pinchWorldPos);
+        float pinchDepth = Mathf.Max(0.35f, pinchCamLocal.z);
+        float pinchProjFactor = workbenchDepth / pinchDepth;
+        Vector2 projectedLivePinchXY = new Vector2(pinchCamLocal.x * pinchProjFactor, pinchCamLocal.y * pinchProjFactor);
+        Vector2 projectedStabilizedPinchXY = stabilizedPinchLocalXY * pinchProjFactor;
 
         // 2B. Soft Magnetic Aim-Assist (R=0.30 hover port, R=0.36 drag target kompatibel, maxPull=0.50, blend 18/s, 0 saat >1.1 u/s)
         bool hardBlocked = isUiOverlayOpen || isVerifying || blockedByOtherMode;
         UpdateSoftMagneticAimOffset(
-            livePinchLocalXY,
+            projectedLivePinchXY,
             pinchSpeedUnitsPerSec,
             isHandDetected && !hardBlocked,
             circuitManager,
+            hitRadiusScale,
             dt);
 
-        Vector2 assistedLivePinchXY = livePinchLocalXY + currentMagnetOffsetLocalXY;
-        Vector2 assistedStabilizedPinchXY = stabilizedPinchLocalXY + currentMagnetOffsetLocalXY;
+        Vector2 assistedLivePinchXY = projectedLivePinchXY + currentMagnetOffsetLocalXY;
+        Vector2 assistedStabilizedPinchXY = projectedStabilizedPinchXY + currentMagnetOffsetLocalXY;
+        float invPinchProj = 1f / Mathf.Max(0.25f, pinchProjFactor);
         Vector3 assistedPinchWorldPos = pinchWorldPos
-                                        + (camT.right * currentMagnetOffsetLocalXY.x)
-                                        + (camT.up * currentMagnetOffsetLocalXY.y);
+                                        + (camT.right * (currentMagnetOffsetLocalXY.x * invPinchProj))
+                                        + (camT.up * (currentMagnetOffsetLocalXY.y * invPinchProj));
         AssistedPinchWorldPosition = assistedPinchWorldPos;
 
         if (isHandDetected)
@@ -499,7 +512,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
             else if (isHandDetected)
             {
-                snappedTargetPortIndex = FindNearestCompatibleTargetPort(assistedLivePinchXY, prevLockedIdx, circuitManager);
+                snappedTargetPortIndex = FindNearestCompatibleTargetPort(assistedLivePinchXY, prevLockedIdx, circuitManager, hitRadiusScale);
                 if (snappedTargetPortIndex >= 0 && snappedTargetPortIndex < activePorts.Count)
                 {
                     ActivePortEntry snapped = activePorts[snappedTargetPortIndex];
@@ -559,7 +572,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
             else
             {
-                CompleteOrCancelCableDrag(circuitManager, isHandDetected, assistedLivePinchXY);
+                CompleteOrCancelCableDrag(circuitManager, isHandDetected, assistedLivePinchXY, hitRadiusScale);
             }
         }
         else if (!isHandDetected)
@@ -570,7 +583,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         else
         {
             Vector2 queryXY = pinchJustStarted ? assistedStabilizedPinchXY : assistedLivePinchXY;
-            hoveredPortIndex = FindNearestPortIndex(queryXY);
+            hoveredPortIndex = FindNearestPortIndex(queryXY, hitRadiusScale);
 
             if (pinchJustStarted && hoveredPortIndex >= 0 && hoveredPortIndex < activePorts.Count)
             {
@@ -579,9 +592,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
 
         // 4. Perbarui seluruh visual port hologram, busur tarik live, & 100% kabel seragam orb-ke-orb
-        RenderPortHandles(camT, circuitManager, isHandDetected && !hardBlocked);
-        RenderLiveDragBeam(camT, hasLastValidPinchWorld ? lastValidPinchWorldPos : assistedPinchWorldPos);
-        RenderAllUniformCables(camT);
+        RenderPortHandles(camT, circuitManager, isHandDetected && !hardBlocked, zoomClamp);
+        RenderLiveDragBeam(camT, stageRoot, zoomClamp, hasLastValidPinchWorld ? lastValidPinchWorldPos : assistedPinchWorldPos);
+        RenderAllUniformCables(camT, stageRoot, zoomClamp);
     }
 
     /// <summary>
@@ -598,7 +611,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         float workbenchDepth,
         bool isAirWeavingActive,
         bool allowHoverHighlight,
-        Vector3 pinchWorldPos)
+        Vector3 pinchWorldPos,
+        Transform stageRoot = null,
+        float stageZoomScale = 1f)
     {
         if (!isInitialized || !isAirWeavingActive || mainCam == null)
         {
@@ -606,21 +621,22 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
 
         Transform camT = mainCam.transform;
+        float zoomClamp = Mathf.Clamp(stageZoomScale, 0.45f, 2.50f);
         activePorts.Clear();
-        RegisterNodePorts(camT, inputANode, workbenchDepth);
-        RegisterNodePorts(camT, inputBNode, workbenchDepth);
-        RegisterNodePorts(camT, outputNode, workbenchDepth);
+        RegisterNodePorts(camT, stageRoot, inputANode, workbenchDepth);
+        RegisterNodePorts(camT, stageRoot, inputBNode, workbenchDepth);
+        RegisterNodePorts(camT, stageRoot, outputNode, workbenchDepth);
         if (activePlacedGates != null)
         {
             for (int i = 0; i < activePlacedGates.Count; i++)
             {
-                RegisterNodePorts(camT, activePlacedGates[i], workbenchDepth);
+                RegisterNodePorts(camT, stageRoot, activePlacedGates[i], workbenchDepth);
             }
         }
 
-        RenderPortHandles(camT, circuitManager, allowHoverHighlight);
-        RenderLiveDragBeam(camT, hasLastValidPinchWorld ? lastValidPinchWorldPos : pinchWorldPos);
-        RenderAllUniformCables(camT);
+        RenderPortHandles(camT, circuitManager, allowHoverHighlight, zoomClamp);
+        RenderLiveDragBeam(camT, stageRoot, zoomClamp, hasLastValidPinchWorld ? lastValidPinchWorldPos : pinchWorldPos);
+        RenderAllUniformCables(camT, stageRoot, zoomClamp);
     }
 
     private void BeginCableDragFromPort(ActivePortEntry port, CircuitManager circuitManager)
@@ -686,7 +702,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         OnWireGrabbedSfx?.Invoke();
     }
 
-    private void CompleteOrCancelCableDrag(CircuitManager circuitManager, bool isHandDetected, Vector2 releaseCursorLocalXY)
+    private void CompleteOrCancelCableDrag(CircuitManager circuitManager, bool isHandDetected, Vector2 releaseCursorLocalXY, float hitRadiusScale)
     {
         GateNode resolvedTargetNode = null;
         int resolvedTargetSlot = 0;
@@ -699,7 +715,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
         else if (latchedTargetNode != null
                  && (Time.unscaledTime - lastSnapUnscaledTime) <= SnapReleaseLatchSeconds
-                 && (!isHandDetected || Vector2.Distance(releaseCursorLocalXY, latchedTargetLocalXY) <= SnapReleaseMaxEscapeDist))
+                 && (!isHandDetected || Vector2.Distance(releaseCursorLocalXY, latchedTargetLocalXY) <= (SnapReleaseMaxEscapeDist * hitRadiusScale)))
         {
             resolvedTargetNode = latchedTargetNode;
             resolvedTargetSlot = latchedTargetSlot;
@@ -755,7 +771,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         else
         {
             // Cek apakah pemain melepas kabel pada port lain yang tidak kompatibel (arah salah / siklus / duplikat)
-            int droppedPortIdx = isHandDetected ? FindNearestPortIndex(releaseCursorLocalXY) : -1;
+            int droppedPortIdx = isHandDetected ? FindNearestPortIndex(releaseCursorLocalXY, hitRadiusScale) : -1;
             bool droppedOnIncompatiblePort = false;
             if (droppedPortIdx >= 0 && droppedPortIdx < activePorts.Count)
             {
@@ -837,29 +853,48 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
     }
 
-    private void RegisterNodePorts(Transform camT, GateNode node, float workbenchDepth)
+    private static Vector2 ProjectWorldToCameraRayPlane(Transform camT, Vector3 worldPos, float workbenchDepth)
+    {
+        Vector3 camLocal = camT.InverseTransformPoint(worldPos);
+        float safeZ = Mathf.Max(0.35f, camLocal.z);
+        float scale = workbenchDepth / safeZ;
+        return new Vector2(camLocal.x * scale, camLocal.y * scale);
+    }
+
+    private void RegisterNodePorts(Transform camT, Transform stageRoot, GateNode node, float workbenchDepth)
     {
         if (node == null || !node.isTracked || activePorts.Count >= MaxPortVisuals)
         {
             return;
         }
 
-        Vector3 nodeLocal = camT.InverseTransformPoint(node.transform.position);
-        Vector2 nodeLocalXY = new Vector2(nodeLocal.x, nodeLocal.y);
-        float zHandle = workbenchDepth - 0.04f;
+        Vector3 nodeWorldPos = node.transform.position;
+        Vector2 nodeRayXY = ProjectWorldToCameraRayPlane(camT, nodeWorldPos, workbenchDepth);
+
+        bool useStageSpace = stageRoot != null;
+        Vector3 nodeStageLocal = useStageSpace
+            ? stageRoot.InverseTransformPoint(nodeWorldPos)
+            : camT.InverseTransformPoint(nodeWorldPos);
 
         if (node.nodeType != NodeType.OutputActuator && activePorts.Count < MaxPortVisuals)
         {
             float outOffX = node.nodeType == NodeType.InputSource ? InputPortOutOffsetX : GatePortOutOffsetX;
-            Vector2 handleXY = new Vector2(nodeLocal.x + outOffX, nodeLocal.y + PortOutOffsetY);
+            Vector3 handleLocal3D = useStageSpace
+                ? new Vector3(nodeStageLocal.x + outOffX, nodeStageLocal.y + 0.045f, nodeStageLocal.z + PortOutOffsetY)
+                : new Vector3(nodeStageLocal.x + outOffX, nodeStageLocal.y + PortOutOffsetY, workbenchDepth - 0.04f);
+            Vector3 handleWorld = useStageSpace
+                ? stageRoot.TransformPoint(handleLocal3D)
+                : camT.TransformPoint(handleLocal3D);
+            Vector2 handleRayXY = ProjectWorldToCameraRayPlane(camT, handleWorld, workbenchDepth);
+
             activePorts.Add(new ActivePortEntry
             {
                 node = node,
                 isOutput = true,
                 slotIndex = 0,
-                nodeLocalXY = nodeLocalXY,
-                handleLocalXY = handleXY,
-                handleWorldPos = camT.TransformPoint(new Vector3(handleXY.x, handleXY.y, zHandle)),
+                nodeLocalXY = nodeRayXY,
+                handleLocalXY = handleRayXY,
+                handleWorldPos = handleWorld,
                 physicalWorldPos = node.GetOutputPortWorldPosition(),
                 isConnected = HasOutgoingWire(node)
             });
@@ -869,15 +904,25 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         if (maxInputs >= 1 && activePorts.Count < MaxPortVisuals)
         {
             float offY = maxInputs == 2 ? PortInAOffsetY : PortInSingleOffsetY;
-            Vector2 handleXY = new Vector2(nodeLocal.x + PortInOffsetX, nodeLocal.y + offY);
+            Vector3 handleLocal3D = useStageSpace
+                ? new Vector3(
+                    nodeStageLocal.x + PortInOffsetX,
+                    nodeStageLocal.y + (maxInputs == 2 ? 0.095f : 0.045f),
+                    nodeStageLocal.z + (maxInputs == 2 ? 0.115f : PortInSingleOffsetY))
+                : new Vector3(nodeStageLocal.x + PortInOffsetX, nodeStageLocal.y + offY, workbenchDepth - 0.04f);
+            Vector3 handleWorld = useStageSpace
+                ? stageRoot.TransformPoint(handleLocal3D)
+                : camT.TransformPoint(handleLocal3D);
+            Vector2 handleRayXY = ProjectWorldToCameraRayPlane(camT, handleWorld, workbenchDepth);
+
             activePorts.Add(new ActivePortEntry
             {
                 node = node,
                 isOutput = false,
                 slotIndex = 0,
-                nodeLocalXY = nodeLocalXY,
-                handleLocalXY = handleXY,
-                handleWorldPos = camT.TransformPoint(new Vector3(handleXY.x, handleXY.y, zHandle)),
+                nodeLocalXY = nodeRayXY,
+                handleLocalXY = handleRayXY,
+                handleWorldPos = handleWorld,
                 physicalWorldPos = node.GetInputPortWorldPosition(0),
                 isConnected = FindWireByTargetSlot(node, 0) >= 0
             });
@@ -885,15 +930,25 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
 
         if (maxInputs >= 2 && activePorts.Count < MaxPortVisuals)
         {
-            Vector2 handleXY = new Vector2(nodeLocal.x + PortInOffsetX, nodeLocal.y + PortInBOffsetY);
+            Vector3 handleLocal3D = useStageSpace
+                ? new Vector3(
+                    nodeStageLocal.x + PortInOffsetX,
+                    nodeStageLocal.y - 0.040f,
+                    nodeStageLocal.z - 0.105f)
+                : new Vector3(nodeStageLocal.x + PortInOffsetX, nodeStageLocal.y + PortInBOffsetY, workbenchDepth - 0.04f);
+            Vector3 handleWorld = useStageSpace
+                ? stageRoot.TransformPoint(handleLocal3D)
+                : camT.TransformPoint(handleLocal3D);
+            Vector2 handleRayXY = ProjectWorldToCameraRayPlane(camT, handleWorld, workbenchDepth);
+
             activePorts.Add(new ActivePortEntry
             {
                 node = node,
                 isOutput = false,
                 slotIndex = 1,
-                nodeLocalXY = nodeLocalXY,
-                handleLocalXY = handleXY,
-                handleWorldPos = camT.TransformPoint(new Vector3(handleXY.x, handleXY.y, zHandle)),
+                nodeLocalXY = nodeRayXY,
+                handleLocalXY = handleRayXY,
+                handleWorldPos = handleWorld,
                 physicalWorldPos = node.GetInputPortWorldPosition(1),
                 isConnected = FindWireByTargetSlot(node, 1) >= 0
             });
@@ -927,6 +982,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         float cursorSpeedUnitsPerSec,
         bool canPull,
         CircuitManager circuitManager,
+        float hitRadiusScale,
         float dt)
     {
         Vector2 desiredOffset = Vector2.zero;
@@ -934,7 +990,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         if (canPull && cursorSpeedUnitsPerSec < MagnetMaxHandSpeed && activePorts.Count > 0)
         {
             float slowFactor = Mathf.Clamp01(1f - (cursorSpeedUnitsPerSec / MagnetMaxHandSpeed));
-            float radius = isDraggingCable ? DragTargetMagnetRadius : HoverMagnetRadius;
+            float radius = (isDraggingCable ? DragTargetMagnetRadius : HoverMagnetRadius) * hitRadiusScale;
             float bestDist = radius;
             Vector2 bestTargetXY = Vector2.zero;
             bool foundTarget = false;
@@ -1001,14 +1057,14 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         return -1;
     }
 
-    private int FindNearestPortIndex(Vector2 cursorXY)
+    private int FindNearestPortIndex(Vector2 cursorXY, float hitRadiusScale)
     {
         int bestIdx = -1;
         float bestNormDist = 1.0001f;
 
         for (int i = 0; i < activePorts.Count; i++)
         {
-            float radius = activePorts[i].isOutput ? PortOutHitRadius : PortInHitRadius;
+            float radius = (activePorts[i].isOutput ? PortOutHitRadius : PortInHitRadius) * hitRadiusScale;
             float dist = Vector2.Distance(cursorXY, activePorts[i].handleLocalXY);
             if (dist <= radius)
             {
@@ -1024,12 +1080,15 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         return bestIdx;
     }
 
-    private int FindNearestCompatibleTargetPort(Vector2 cursorXY, int currentLockedPortIdx, CircuitManager circuitManager)
+    private int FindNearestCompatibleTargetPort(Vector2 cursorXY, int currentLockedPortIdx, CircuitManager circuitManager, float hitRadiusScale)
     {
         bool hasValidLocked = false;
         float lockedEffDist = float.MaxValue;
         float lockedHandleDist = float.MaxValue;
         GateNode lockedNode = null;
+        float snapRadius = SnapMagnetRadius * hitRadiusScale;
+        float gateAutoRadius = GateAutoSnapRadius * hitRadiusScale;
+        float unlockRadius = SnapHysteresisUnlockRadius * hitRadiusScale;
 
         if (currentLockedPortIdx >= 0 && currentLockedPortIdx < activePorts.Count)
         {
@@ -1040,7 +1099,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 lockedHandleDist = Vector2.Distance(cursorXY, lockedEntry.handleLocalXY);
                 if (dragFromOutput)
                 {
-                    Vector2 lockedSmartCenter = new Vector2(lockedEntry.nodeLocalXY.x - 0.08f, lockedEntry.nodeLocalXY.y + 0.02f);
+                    Vector2 lockedSmartCenter = new Vector2(lockedEntry.nodeLocalXY.x - (0.08f * hitRadiusScale), lockedEntry.nodeLocalXY.y + (0.02f * hitRadiusScale));
                     float lockedGateDist = Vector2.Distance(cursorXY, lockedSmartCenter);
                     lockedEffDist = Mathf.Min(lockedHandleDist, lockedGateDist);
                 }
@@ -1049,7 +1108,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     lockedEffDist = lockedHandleDist;
                 }
 
-                if (lockedEffDist <= SnapHysteresisUnlockRadius)
+                if (lockedEffDist <= unlockRadius)
                 {
                     hasValidLocked = true;
                     lockedNode = lockedEntry.node;
@@ -1078,11 +1137,11 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             if (dragFromOutput)
             {
                 float distToHandle = Vector2.Distance(cursorXY, candidate.handleLocalXY);
-                Vector2 gateSmartCenter = new Vector2(candidate.nodeLocalXY.x - 0.08f, candidate.nodeLocalXY.y + 0.02f);
+                Vector2 gateSmartCenter = new Vector2(candidate.nodeLocalXY.x - (0.08f * hitRadiusScale), candidate.nodeLocalXY.y + (0.02f * hitRadiusScale));
                 float distToGateZone = Vector2.Distance(cursorXY, gateSmartCenter);
 
-                bool withinHandle = distToHandle <= SnapMagnetRadius;
-                bool withinGateZone = distToGateZone <= GateAutoSnapRadius;
+                bool withinHandle = distToHandle <= snapRadius;
+                bool withinGateZone = distToGateZone <= gateAutoRadius;
                 if (!withinHandle && !withinGateZone)
                 {
                     continue;
@@ -1099,7 +1158,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             else
             {
                 float dist = Vector2.Distance(cursorXY, candidate.handleLocalXY);
-                if (dist <= SnapMagnetRadius && dist < bestDist)
+                if (dist <= snapRadius && dist < bestDist)
                 {
                     bestDist = dist;
                     bestHandleDist = dist;
@@ -1276,11 +1335,12 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     // VISUAL RENDERING (PORT ORBS, MAGNET RING, DRAG BEZIER, & 100% UNIFORM POOL)
     // =========================================================================
 
-    private void RenderPortHandles(Transform camT, CircuitManager circuitManager, bool allowHoverHighlight)
+    private void RenderPortHandles(Transform camT, CircuitManager circuitManager, bool allowHoverHighlight, float stageZoomScale)
     {
         Vector3 right = camT.right;
         Vector3 up = camT.up;
         float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 7f));
+        float orbVisualScale = Mathf.Lerp(1f, stageZoomScale, 0.72f);
         bool drewHoverRing = false;
 
         for (int i = 0; i < MaxPortVisuals; i++)
@@ -1349,7 +1409,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 orbColor = p.isConnected ? PortInConnectedColor : PortInEmptyColor;
             }
 
-            DrawCircle(portOrbRings[i], portOrbMats[i], p.handleWorldPos, right, up, orbRadius, orbColor, orbWidth);
+            float scaledOrbRadius = orbRadius * orbVisualScale;
+            DrawCircle(portOrbRings[i], portOrbMats[i], p.handleWorldPos, right, up, scaledOrbRadius, orbColor, orbWidth);
 
             LineRenderer stub = portStubLines[i];
             if (stub != null)
@@ -1362,7 +1423,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             if (isHovered || isSnapped)
             {
                 Color ringCol = isSnapped ? PortSnapLockColor : PortHoverColor;
-                DrawCircle(hoverTargetRing, hoverTargetMat, p.handleWorldPos - (camT.forward * 0.01f), right, up, orbRadius + 0.034f, ringCol, 0.0075f);
+                DrawCircle(hoverTargetRing, hoverTargetMat, p.handleWorldPos - (camT.forward * 0.01f), right, up, scaledOrbRadius + (0.034f * orbVisualScale), ringCol, 0.0075f);
                 drewHoverRing = true;
             }
         }
@@ -1373,7 +1434,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
     }
 
-    private void RenderLiveDragBeam(Transform camT, Vector3 pinchWorldPos)
+    private void RenderLiveDragBeam(Transform camT, Transform stageRoot, float stageZoomScale, Vector3 pinchWorldPos)
     {
         if (!isDraggingCable || dragOriginNode == null || dragBeamRenderer == null)
         {
@@ -1395,7 +1456,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             ? activePorts[snappedTargetPortIndex].handleWorldPos
             : pinchWorldPos;
 
-        Vector3 apexDir = (-camT.forward * 0.14f) + (camT.up * 0.08f);
+        Vector3 tableUp = stageRoot != null ? stageRoot.up : camT.up;
+        Vector3 tableDepth = stageRoot != null ? stageRoot.forward : camT.forward;
+        Vector3 apexDir = (tableUp * (0.16f * stageZoomScale)) - (tableDepth * (0.04f * stageZoomScale));
         Vector3 midCtrl = ((startWorld + endWorld) * 0.5f) + apexDir;
 
         for (int i = 0; i < BezierSegments; i++)
@@ -1419,13 +1482,14 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
 
     /// <summary>
     /// Merender 100% seluruh kabel Mode Udara (primer maupun cabang fan-out) seragam dari orb Port_Out ke orb Port_In
-    /// dengan inti + pendar luar dan warna reaktif sinyal sumber (1 = sian terang, 0 = merah/oranye menyala). Zero-GC.
+    /// mengikuti transform 3D <c>HologramStageRoot</c> dengan lengkungan sumbu Z keluar-masuk ruang 3D di atas lantai meja. Zero-GC.
     /// </summary>
-    private void RenderAllUniformCables(Transform camT)
+    private void RenderAllUniformCables(Transform camT, Transform stageRoot, float stageZoomScale)
     {
         int beamCursor = 0;
         Vector3 camForward = camT.forward;
-        Vector3 camUp = camT.up;
+        Vector3 tableUp = stageRoot != null ? stageRoot.up : camT.up;
+        Vector3 tableDepth = stageRoot != null ? stageRoot.forward : camForward;
         float timeNow = Time.unscaledTime;
         float highPulse = 1f + (0.08f * Mathf.Sin(timeNow * 8.0f));
 
@@ -1453,9 +1517,11 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
 
             float dist = Vector3.Distance(p0, p2);
-            // Pelengkungan lembut & sedikit mundur ke sumbu +camForward agar kabel tidak menampar wajah teks label gerbang
-            float archUp = Mathf.Lerp(0.025f, 0.095f, Mathf.Clamp01((dist - 0.25f) / 1.65f));
-            Vector3 p1 = ((p0 + p2) * 0.5f) + (camForward * 0.025f) + (camUp * archUp);
+            float spanT = Mathf.Clamp01((dist - 0.25f) / 1.65f);
+            // Melengkung naik di atas bidang meja horizontal (+tableUp) dengan variasi jalur kedalaman Z (laneWaveZ)
+            float archHeightY = Mathf.Lerp(0.085f, 0.215f, spanT) * stageZoomScale;
+            float laneWaveZ = ((i % 3) - 1) * 0.042f * stageZoomScale;
+            Vector3 p1 = ((p0 + p2) * 0.5f) + (tableUp * archHeightY) + (tableDepth * laneWaveZ);
 
             for (int s = 0; s < BezierSegments; s++)
             {

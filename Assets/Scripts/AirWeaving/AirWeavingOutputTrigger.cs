@@ -31,10 +31,10 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     private const float OutputRearmRadius = 0.38f;
     private const float FistHoldDurationSeconds = 0.45f;
     private const float RearmCooldownSeconds = 0.85f;
-    private const float HaloCenterUpOffset = 0.155f;
-    private const float HaloRadius = 0.258f;
-    private const float HaloDepthBehindOutput = 0.18f;
-    private const float BadgeBelowOffset = -0.405f;
+    private const float HaloCenterUpOffset = 0.065f;
+    private const float HaloRadius = 0.235f;
+    private const float ReferenceCameraDepth = 3.82f;
+    private const float BadgeBelowPodOffset = -0.115f;
 
     // Jalan pintas tahan-kepal untuk verifikasi dinonaktifkan 100% di Mode Udara demi debugging mandiri
     private static readonly bool EnableHoldToVerifyShortcut = false;
@@ -202,7 +202,10 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         bool isRecordingAirDraw,
         float postDropLockoutTimer,
         OutputDebugGuidanceState guidanceState,
-        int passedRowCount)
+        int passedRowCount,
+        float stageZoomScale = 1f,
+        Transform stageRoot = null,
+        Vector3 truthPodWorldAnchor = default)
     {
         if (!isVisualInitialized)
         {
@@ -229,6 +232,9 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             visualRootObj.SetActive(true);
         }
 
+        float zoomClamp = Mathf.Clamp(stageZoomScale, 0.45f, 2.50f);
+        float hitRadiusScale = Mathf.Clamp(zoomClamp, 0.55f, 2.05f);
+
         // Edge detection pasca-Auto-Win: hanya aktif jika rangkaian live benar-benar lulus 4/4 (0 sel merah & kuota valid)
         bool effectiveReadyForNext = isReadyForNextLevel
                                      && isCircuitComplete
@@ -246,10 +252,10 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             rearmCooldownTimer = Mathf.Max(0f, rearmCooldownTimer - dt);
         }
 
-        Vector2 targetCenterLocalXY = new Vector2(outputLocalXY.x + 0.03f, outputLocalXY.y + 0.10f);
+        Vector2 targetCenterLocalXY = new Vector2(outputLocalXY.x + (0.03f * hitRadiusScale), outputLocalXY.y + (0.10f * hitRadiusScale));
         float distToOutput = isHandDetected ? Vector2.Distance(cursorLocalXY, targetCenterLocalXY) : float.MaxValue;
 
-        if (requiresRearm && rearmCooldownTimer <= 0f && (!isHandDetected || !isFistActive || distToOutput > OutputRearmRadius))
+        if (requiresRearm && rearmCooldownTimer <= 0f && (!isHandDetected || !isFistActive || distToOutput > (OutputRearmRadius * hitRadiusScale)))
         {
             requiresRearm = false;
         }
@@ -264,7 +270,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
 
         // 2. Nonaktifkan jalan pintas hold-to-verify: tahan-kepal hanya aktif bila level sudah LULUS (untuk lanjut level Zero-Touch)
         bool allowHoldAction = effectiveReadyForNext || (EnableHoldToVerifyShortcut && isCircuitComplete);
-        bool insideZone = allowHoldAction && isHandDetected && !blockedByMutualExclusion && distToOutput <= OutputInteractRadius;
+        bool insideZone = allowHoldAction && isHandDetected && !blockedByMutualExclusion && distToOutput <= (OutputInteractRadius * hitRadiusScale);
 
         if (insideZone && isFistActive && !requiresRearm)
         {
@@ -291,13 +297,16 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             chargeProgress = Mathf.Max(0f, chargeProgress - (dt * 4.0f));
         }
 
-        // 3. Perbarui visual Halo & Lencana Pemandu Debugging Mandiri
+        // 3. Perbarui visual Halo 3D & Lencana Pemandu Debugging Mandiri dengan Distance-Compensated Scale Clamping
         UpdateVisuals(
             mainCam.transform,
             outputWorldPos,
             guidanceState,
             passedRowCount,
-            isUiOverlayOpen);
+            isUiOverlayOpen,
+            zoomClamp,
+            stageRoot,
+            truthPodWorldAnchor);
     }
 
     private void OnDestroy()
@@ -324,7 +333,10 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         Vector3 outputWorldPos,
         OutputDebugGuidanceState guidanceState,
         int passedRowCount,
-        bool isUiOverlayOpen)
+        bool isUiOverlayOpen,
+        float zoomScale,
+        Transform stageRoot,
+        Vector3 truthPodWorldAnchor)
     {
         if (isUiOverlayOpen)
         {
@@ -341,34 +353,44 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         Vector3 camRight = camT.right;
         Vector3 camUp = camT.up;
         Vector3 camForward = camT.forward;
-        // Geser sedikit ke belakang (+camForward) dengan radius luas mengelilingi luar bodi 3D Output agar bebas clipping
-        Vector3 haloCenter = outputWorldPos + (camUp * HaloCenterUpOffset) + (camForward * HaloDepthBehindOutput);
 
-        // A. Halo Diegetik sesuai status debugging live (hijau HANYA jika rangkaian live benar-benar PassedAllFour)
+        // Distance-compensated scale clamping agar cincin & lencana Output tidak membengkak saat Output di-orbit ke sisi depan
+        float camDepth = Mathf.Max(1.40f, Vector3.Dot(outputWorldPos - camT.position, camForward));
+        float distFactor = Mathf.Clamp(camDepth / ReferenceCameraDepth, 0.54f, 1.12f);
+        float effectiveHaloScale = Mathf.Clamp(zoomScale * Mathf.Lerp(1f, distFactor, 0.72f), 0.56f, 1.08f);
+        float scaledHaloRadius = HaloRadius * effectiveHaloScale;
+
+        // Halo 3D sejajar bidang meja XZ mengitari dudukan Output secara spasial (bukan stiker 2D di layar)
+        Vector3 ringAxisA = stageRoot != null ? stageRoot.right : camRight;
+        Vector3 ringAxisB = stageRoot != null ? stageRoot.forward : camUp;
+        Vector3 tableUp = stageRoot != null ? stageRoot.up : camUp;
+        Vector3 haloCenter = outputWorldPos + (tableUp * (HaloCenterUpOffset * effectiveHaloScale));
+
+        // A. Halo Diegetik 3D sesuai status debugging live (hijau HANYA jika rangkaian live benar-benar PassedAllFour)
         if (guidanceState == OutputDebugGuidanceState.PassedAllFour)
         {
             float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 5.0f));
-            float innerR = HaloRadius + (0.010f * pulse);
-            float outerR = HaloRadius + 0.026f + (0.012f * pulse);
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, camRight, camUp, innerR, WinHaloGreenColor, 0.0085f);
-            DrawFullCircle(winOuterRingRenderer, winOuterRingPoints, haloCenter, camRight, camUp, outerR, WinHaloOuterColor, 0.0055f);
+            float innerR = scaledHaloRadius + (0.010f * pulse * effectiveHaloScale);
+            float outerR = scaledHaloRadius + ((0.024f + (0.010f * pulse)) * effectiveHaloScale);
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, innerR, WinHaloGreenColor, 0.0080f);
+            DrawFullCircle(winOuterRingRenderer, winOuterRingPoints, haloCenter, ringAxisA, ringAxisB, outerR, WinHaloOuterColor, 0.0052f);
         }
         else if (guidanceState == OutputDebugGuidanceState.ReduceGates)
         {
             float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 6.5f));
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, camRight, camUp, HaloRadius + (0.009f * pulse), OverQuotaHaloRedColor, 0.0085f);
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.008f * pulse * effectiveHaloScale), OverQuotaHaloRedColor, 0.0080f);
             SetRingEnabled(winOuterRingRenderer, false);
         }
         else if (guidanceState == OutputDebugGuidanceState.CheckRedCells)
         {
             float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 5.5f));
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, camRight, camUp, HaloRadius + (0.008f * pulse), CheckRedHaloOrangeColor, 0.0075f);
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.007f * pulse * effectiveHaloScale), CheckRedHaloOrangeColor, 0.0072f);
             SetRingEnabled(winOuterRingRenderer, false);
         }
         else if (guidanceState == OutputDebugGuidanceState.TestSwitches)
         {
             float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 2.6f));
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, camRight, camUp, HaloRadius + (0.006f * pulse), TestHaloCyanColor, 0.0065f);
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.005f * pulse * effectiveHaloScale), TestHaloCyanColor, 0.0062f);
             SetRingEnabled(winOuterRingRenderer, false);
         }
         else
@@ -381,15 +403,15 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         if (chargeProgress > 0.01f && progressArcRenderer != null)
         {
             int segCount = Mathf.Clamp(Mathf.CeilToInt(chargeProgress * RingSegments), 2, RingSegments);
-            float arcRadius = HaloRadius + 0.014f;
+            float arcRadius = scaledHaloRadius + (0.014f * effectiveHaloScale);
             float maxAngle = chargeProgress * Mathf.PI * 2f;
-            Vector3 arcCenter = haloCenter - (camForward * 0.015f);
+            Vector3 arcCenter = haloCenter + (tableUp * 0.008f);
 
             for (int i = 0; i <= segCount; i++)
             {
                 float frac = i / (float)segCount;
                 float angle = (Mathf.PI * 0.5f) - (frac * maxAngle);
-                progressArcPoints[i] = arcCenter + (camRight * (Mathf.Cos(angle) * arcRadius)) + (camUp * (Mathf.Sin(angle) * arcRadius));
+                progressArcPoints[i] = arcCenter + (ringAxisA * (Mathf.Cos(angle) * arcRadius)) + (ringAxisB * (Mathf.Sin(angle) * arcRadius));
             }
 
             if (progressMat != null)
@@ -407,7 +429,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             SetRingEnabled(progressArcRenderer, false);
         }
 
-        // C. Lencana Pemandu Debugging Mandiri tepat di bawah Pod LED 2x2 (selalu tampil di Mode Udara kurikulum)
+        // C. Lencana Pemandu Debugging Mandiri tepat di bawah Pod LED 2x2 dengan Distance-Compensated Scale Clamping
         if (badgeRootObj != null)
         {
             if (!badgeRootObj.activeSelf)
@@ -415,9 +437,16 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
                 badgeRootObj.SetActive(true);
             }
 
-            Vector3 badgePos = outputWorldPos + (camUp * BadgeBelowOffset) - (camForward * 0.22f);
+            Vector3 podAnchor = truthPodWorldAnchor.sqrMagnitude > 0.001f
+                ? truthPodWorldAnchor
+                : (outputWorldPos - (camUp * (0.20f * distFactor)) - (camForward * 0.24f));
+            float podDepth = Mathf.Max(1.30f, Vector3.Dot(podAnchor - camT.position, camForward));
+            float badgeDistScale = Mathf.Clamp(podDepth / ReferenceCameraDepth, 0.52f, 1.08f) * Mathf.Lerp(1f, zoomScale, 0.25f);
+            badgeDistScale = Mathf.Clamp(badgeDistScale, 0.52f, 0.94f);
+
+            Vector3 badgePos = podAnchor + (camUp * (BadgeBelowPodOffset * badgeDistScale)) - (camForward * 0.015f);
             badgeRootObj.transform.position = badgePos;
-            // Sejajar penuh dengan bidang kamera (flat camera-facing, bebas efek miring/terpelintir di sisi layar)
+            badgeRootObj.transform.localScale = Vector3.one * badgeDistScale;
             badgeRootObj.transform.rotation = camT.rotation;
 
             // Lencana selalu mengikuti status debugging live agar tidak pernah menimpa CEK SEL MERAH / KURANGI GERBANG
