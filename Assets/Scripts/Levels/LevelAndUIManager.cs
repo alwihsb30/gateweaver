@@ -760,8 +760,8 @@ public class LevelAndUIManager : MonoBehaviour
         if (txtFeedback != null && !txtFeedback.enableAutoSizing)
         {
             txtFeedback.enableAutoSizing = true;
-            txtFeedback.fontSizeMin = 17f;
-            txtFeedback.fontSizeMax = 28f;
+            txtFeedback.fontSizeMin = 20f;
+            txtFeedback.fontSizeMax = 30f;
         }
     }
 
@@ -924,7 +924,8 @@ public class LevelAndUIManager : MonoBehaviour
                 bgRect.localScale = fbRect.localScale;
 
                 Image bgImage = feedbackBackdropObj.GetComponent<Image>();
-                bgImage.color = new Color(0.03f, 0.06f, 0.12f, 0.84f);
+                CompactHudMenuController.ApplyRoundedPill(bgImage);
+                bgImage.color = new Color(0.031f, 0.067f, 0.118f, 0.92f);
                 bgImage.raycastTarget = false;
 
                 Outline bgOutline = feedbackBackdropObj.GetComponent<Outline>();
@@ -1974,7 +1975,7 @@ public class LevelAndUIManager : MonoBehaviour
 
         CreateLevelSelectorOpenButton(canvasTransform, fontAsset);
 
-        levelSelectorModalPanel = new GameObject("Panel_LevelSelector", typeof(RectTransform), typeof(Image));
+        levelSelectorModalPanel = new GameObject("Panel_LevelSelector", typeof(RectTransform), typeof(Image), typeof(Outline));
         levelSelectorModalPanel.transform.SetParent(canvasTransform, false);
         levelSelectorModalPanel.transform.SetAsLastSibling();
 
@@ -1982,26 +1983,32 @@ public class LevelAndUIManager : MonoBehaviour
         modalRect.anchorMin = new Vector2(0.5f, 0.5f);
         modalRect.anchorMax = new Vector2(0.5f, 0.5f);
         modalRect.pivot = new Vector2(0.5f, 0.5f);
-        modalRect.anchoredPosition = Vector2.zero;
-        modalRect.sizeDelta = new Vector2(720f, 470f);
+        modalRect.anchoredPosition = new Vector2(0f, -14f);
+        modalRect.sizeDelta = new Vector2(920f, 596f);
 
         Image modalBg = levelSelectorModalPanel.GetComponent<Image>();
-        modalBg.color = new Color(0.04f, 0.08f, 0.14f, 0.96f);
+        CompactHudMenuController.ApplyRoundedCard(modalBg);
+        modalBg.color = new Color(0.031f, 0.067f, 0.118f, 0.96f);
         modalBg.raycastTarget = true;
 
-        // Bingkai sian 4 sisi seragam dengan Panel_CompetencyReport
-        CreateReportBorderStrip("Border_Top", modalRect, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), Vector2.zero, new Vector2(0f, 3f));
-        CreateReportBorderStrip("Border_Bottom", modalRect, new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f), Vector2.zero, new Vector2(0f, 3f));
-        CreateReportBorderStrip("Border_Left", modalRect, new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(0f, 0.5f), Vector2.zero, new Vector2(3f, 0f));
-        CreateReportBorderStrip("Border_Right", modalRect, new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(1f, 0.5f), Vector2.zero, new Vector2(3f, 0f));
+        Outline modalOutline = levelSelectorModalPanel.GetComponent<Outline>();
+        modalOutline.effectColor = new Color(0.18f, 0.88f, 1.00f, 0.42f);
+        modalOutline.effectDistance = new Vector2(2.2f, -2.2f);
+        modalOutline.useGraphicAlpha = true;
 
-        TMP_Text headerTitle = CreateMatrixText("Txt_LevelSelectorHeader", modalRect, new Vector2(20f, -14f), new Vector2(680f, 30f),
-            "PILIH MISI & MODE SIMULASI (LEVEL 1 - 7 & SANDBOX)", 17.5f, TextAlignmentOptions.Center, MatrixAccentCyanColor, fontAsset);
+        CompactHudMenuController.AttachRoundedBorderOverlay(
+            modalRect,
+            "Panel_LevelSelector_Border",
+            CompactHudMenuController.GetRoundedCardBorderSprite(),
+            MatrixAccentCyanColor);
+
+        TMP_Text headerTitle = CreateMatrixText("Txt_LevelSelectorHeader", modalRect, new Vector2(28f, -16f), new Vector2(864f, 40f),
+            "PILIH MISI & MODE SIMULASI (LEVEL 1 - 7 & SANDBOX)", 23.5f, TextAlignmentOptions.Center, MatrixAccentCyanColor, fontAsset);
         headerTitle.enableAutoSizing = true;
-        headerTitle.fontSizeMin = 12.5f;
-        headerTitle.fontSizeMax = 18f;
+        headerTitle.fontSizeMin = 17f;
+        headerTitle.fontSizeMax = 24f;
 
-        RectTransform topDivRect = CreateModalContainer("Divider_LevelSelectorTop", modalRect, 20f, -48f, 680f, 2f, new Color(0.22f, 0.65f, 0.85f, 0.55f));
+        RectTransform topDivRect = CreateModalContainer("Divider_LevelSelectorTop", modalRect, 28f, -62f, 864f, 2f, new Color(0.22f, 0.65f, 0.85f, 0.48f));
         topDivRect.GetComponent<Image>().raycastTarget = false;
 
         int levelCount = Mathf.Min(7, (levels != null && levels.Count > 0) ? levels.Count : 7);
@@ -2011,12 +2018,12 @@ public class LevelAndUIManager : MonoBehaviour
         levelSelectorItemOutlines = new Outline[levelCount];
         levelSelectorItemStatusTexts = new TMP_Text[levelCount];
 
-        const float cardWidth = 332f;
-        const float cardHeight = 72f;
-        const float colLeftX = 20f;
-        const float colRightX = 368f;
-        const float gridTopY = -62f;
-        const float rowStepY = 82f;
+        const float cardWidth = 420f;
+        const float cardHeight = 92f;
+        const float colLeftX = 28f;
+        const float colRightX = 472f;
+        const float gridTopY = -78f;
+        const float rowStepY = 104f;
 
         for (int i = 0; i < levelCount; i++)
         {
@@ -2027,6 +2034,7 @@ public class LevelAndUIManager : MonoBehaviour
 
             RectTransform cardRect = CreateModalContainer($"Btn_SelectLevel_{i + 1}", modalRect, xPos, yPos, cardWidth, cardHeight, LevelSelectorCardIdleBgColor);
             Image cardBg = cardRect.GetComponent<Image>();
+            CompactHudMenuController.ApplyRoundedSquircle(cardBg);
             cardBg.raycastTarget = true;
 
             Button cardBtn = cardRect.gameObject.AddComponent<Button>();
@@ -2043,17 +2051,17 @@ public class LevelAndUIManager : MonoBehaviour
             UnityEngine.Events.UnityAction handler = () => OnLevelSelectorItemClicked(capturedIndex);
             cardBtn.onClick.AddListener(handler);
 
-            TMP_Text cardTitle = CreateMatrixText($"Txt_SelectLevelTitle_{i + 1}", cardRect, new Vector2(12f, -8f), new Vector2(cardWidth - 24f, 28f),
-                GetLevelSelectorCardTitle(i), 14.5f, TextAlignmentOptions.Left, Color.white, fontAsset);
+            TMP_Text cardTitle = CreateMatrixText($"Txt_SelectLevelTitle_{i + 1}", cardRect, new Vector2(18f, -10f), new Vector2(cardWidth - 36f, 36f),
+                GetLevelSelectorCardTitle(i), 20f, TextAlignmentOptions.Left, Color.white, fontAsset);
             cardTitle.enableAutoSizing = true;
-            cardTitle.fontSizeMin = 11.5f;
-            cardTitle.fontSizeMax = 15f;
+            cardTitle.fontSizeMin = 15.5f;
+            cardTitle.fontSizeMax = 20.5f;
 
-            TMP_Text cardStatus = CreateMatrixText($"Txt_SelectLevelStatus_{i + 1}", cardRect, new Vector2(12f, -38f), new Vector2(cardWidth - 24f, 24f),
-                "Bintang: [...] | SIAP", 13f, TextAlignmentOptions.Left, MatrixBrightCyanColor, fontAsset);
+            TMP_Text cardStatus = CreateMatrixText($"Txt_SelectLevelStatus_{i + 1}", cardRect, new Vector2(18f, -50f), new Vector2(cardWidth - 36f, 30f),
+                "Bintang: [...] | SIAP", 17f, TextAlignmentOptions.Left, MatrixBrightCyanColor, fontAsset);
             cardStatus.enableAutoSizing = true;
-            cardStatus.fontSizeMin = 10.5f;
-            cardStatus.fontSizeMax = 13.5f;
+            cardStatus.fontSizeMin = 14f;
+            cardStatus.fontSizeMax = 17.5f;
 
             levelSelectorItemButtons[i] = cardBtn;
             levelSelectorItemHandlers[i] = handler;
@@ -2065,6 +2073,7 @@ public class LevelAndUIManager : MonoBehaviour
         // Slot ke-8 (Baris 4 Kolom Kanan): Mode Sandbox Bebas
         RectTransform sandboxRect = CreateModalContainer("Btn_SelectSandbox", modalRect, colRightX, gridTopY - (3 * rowStepY), cardWidth, cardHeight, LevelSelectorSandboxIdleBgColor);
         levelSelectorSandboxBg = sandboxRect.GetComponent<Image>();
+        CompactHudMenuController.ApplyRoundedSquircle(levelSelectorSandboxBg);
         levelSelectorSandboxBg.raycastTarget = true;
 
         levelSelectorSandboxButton = sandboxRect.gameObject.AddComponent<Button>();
@@ -2078,23 +2087,31 @@ public class LevelAndUIManager : MonoBehaviour
         levelSelectorSandboxOutline.effectDistance = new Vector2(1.8f, -1.8f);
         levelSelectorSandboxOutline.useGraphicAlpha = true;
 
-        TMP_Text sandboxTitle = CreateMatrixText("Txt_SelectSandboxTitle", sandboxRect, new Vector2(12f, -8f), new Vector2(cardWidth - 24f, 28f),
-            "MODE SANDBOX BEBAS", 15f, TextAlignmentOptions.Left, new Color(0.84f, 1.00f, 0.94f, 1f), fontAsset);
+        TMP_Text sandboxTitle = CreateMatrixText("Txt_SelectSandboxTitle", sandboxRect, new Vector2(18f, -10f), new Vector2(cardWidth - 36f, 36f),
+            "MODE SANDBOX BEBAS", 20f, TextAlignmentOptions.Left, new Color(0.84f, 1.00f, 0.94f, 1f), fontAsset);
         sandboxTitle.enableAutoSizing = true;
-        sandboxTitle.fontSizeMin = 12f;
-        sandboxTitle.fontSizeMax = 15.5f;
+        sandboxTitle.fontSizeMin = 15.5f;
+        sandboxTitle.fontSizeMax = 20.5f;
 
-        txtLevelSelectorSandboxStatus = CreateMatrixText("Txt_SelectSandboxStatus", sandboxRect, new Vector2(12f, -38f), new Vector2(cardWidth - 24f, 24f),
-            "Eksplorasi Bebas Tanpa Batas Kuota", 12.5f, TextAlignmentOptions.Left, MatrixBrightCyanColor, fontAsset);
+        txtLevelSelectorSandboxStatus = CreateMatrixText("Txt_SelectSandboxStatus", sandboxRect, new Vector2(18f, -50f), new Vector2(cardWidth - 36f, 30f),
+            "Eksplorasi Bebas Tanpa Batas Kuota", 16.5f, TextAlignmentOptions.Left, MatrixBrightCyanColor, fontAsset);
         txtLevelSelectorSandboxStatus.enableAutoSizing = true;
-        txtLevelSelectorSandboxStatus.fontSizeMin = 10.5f;
-        txtLevelSelectorSandboxStatus.fontSizeMax = 13f;
+        txtLevelSelectorSandboxStatus.fontSizeMin = 13.5f;
+        txtLevelSelectorSandboxStatus.fontSizeMax = 17f;
 
-        RectTransform botDivRect = CreateModalContainer("Divider_LevelSelectorBottom", modalRect, 20f, -394f, 680f, 2f, new Color(0.22f, 0.65f, 0.85f, 0.55f));
+        RectTransform botDivRect = CreateModalContainer("Divider_LevelSelectorBottom", modalRect, 28f, -500f, 864f, 2f, new Color(0.22f, 0.65f, 0.85f, 0.48f));
         botDivRect.GetComponent<Image>().raycastTarget = false;
 
-        levelSelectorCloseButton = CreateReportModalButton("Btn_LevelSelectorClose", modalRect, 240f, -408f, 240f, 46f,
-            "Tutup", new Color(0.14f, 0.30f, 0.44f, 1f), Color.white, fontAsset, CloseLevelSelectorWithAudio);
+        levelSelectorCloseButton = CreateReportModalButton("Btn_LevelSelectorClose", modalRect, 310f, -516f, 300f, 58f,
+            "Tutup", new Color(0.11f, 0.28f, 0.42f, 0.98f), Color.white, fontAsset, CloseLevelSelectorWithAudio);
+        Image closeBtnImg = levelSelectorCloseButton.GetComponent<Image>();
+        CompactHudMenuController.ApplyRoundedSquircle(closeBtnImg);
+        TMP_Text closeBtnTmp = levelSelectorCloseButton.GetComponentInChildren<TMP_Text>(true);
+        if (closeBtnTmp != null)
+        {
+            closeBtnTmp.fontSizeMin = 16f;
+            closeBtnTmp.fontSizeMax = 21f;
+        }
         levelSelectorCloseButton.colors = SciFiButtonColorBlock;
         Outline closeOutline = levelSelectorCloseButton.gameObject.AddComponent<Outline>();
         closeOutline.effectColor = MatrixAccentCyanColor;
