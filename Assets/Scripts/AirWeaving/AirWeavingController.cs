@@ -40,15 +40,29 @@ public class AirWeavingController : MonoBehaviour
     // Geometri ruang kerja 3D (selaras skala 1:1 GateNode & ambang CircuitManager: maxSnap=3.0, inputReach=5.4)
     private const float VideoQuadDepth = 8.0f;
     private const float WorkbenchDepth = 3.60f;
-    private const float GrabLiftOffsetZ = -0.28f;
+    private const float GrabLiftOffsetZ = -0.24f;
     private const float DepthParallaxScale = 0.25f;
-    private const float GateDragSmoothingSpeed = 16.0f;
 
-    // One-Euro Filter adaptif untuk 21 landmark tangan (zero-GC, terkalibrasi untuk 20-30 FPS Android/webcam)
-    // Ruang persen [0..100] agar minCutoff=1.6 Hz, beta=0.045, dCutoff=1.0 Hz tenang saat hover & responsif saat drag/Air-Draw
-    private const float OneEuroMinCutoff = 1.6f;
-    private const float OneEuroBeta = 0.045f;
-    private const float OneEuroDCutoff = 1.0f;
+    // Critically Damped Spring-Damper analitik & Elastic Scale Pop (Tahap 3 v8.0, stabil di dt berapa pun)
+    private const float GateDragSpringOmega = 30.0f;
+    private const float GateLiftZSpringOmega = 20.0f;
+    private const float GateScaleSpringOmega = 22.0f;
+    private const float GateSettleSpringOmega = 20.0f;
+    private const float DragVelocityTiltDegPerUnitSec = 6.0f;
+    private const float GateGrabPopAmplitude = 0.10f;
+    private const float GatePlaceBloomPopAmplitude = 0.12f;
+    private const float InputTogglePopAmplitude = 0.12f;
+
+    // Soft Magnetic Aim-Assist untuk sakelar Input A/B (R=0.30, maxPull=0.45, blend 18/s, 0 saat >1.1 u/s)
+    private const float InputSwitchMagnetRadius = 0.30f;
+    private const float InputSwitchMagnetMaxPull = 0.45f;
+    private const float SoftMagnetMaxHandSpeed = 1.10f;
+    private const float SoftMagnetOffsetBlendSpeed = 18.0f;
+
+    // One-Euro Filter tunggal per-landmark (zero-GC, kalibrasi responsif Tahap 3 v8.0: minCutoff=1.3, beta=0.22, dCutoff=2.0)
+    private const float OneEuroMinCutoff = 1.3f;
+    private const float OneEuroBeta = 0.22f;
+    private const float OneEuroDCutoff = 2.0f;
     private const float OneEuroCoordScale = 100.0f;
     private const float OneEuroZMinCutoff = 2.2f;
     private const float OneEuroZBeta = 0.02f;
@@ -226,6 +240,80 @@ public class AirWeavingController : MonoBehaviour
         }
     }
 
+    private struct ElasticScalePop
+    {
+        private const float DecayRate = 9.0f;
+        private const float FrequencyHz = 4.2f;
+        private const float MaxDurationSeconds = 0.75f;
+
+        private float amplitude;
+        private float elapsed;
+        private bool active;
+
+        public void Trigger(float popAmplitude)
+        {
+            amplitude = popAmplitude;
+            elapsed = 0f;
+            active = true;
+        }
+
+        public void Reset()
+        {
+            amplitude = 0f;
+            elapsed = 0f;
+            active = false;
+        }
+
+        public float Evaluate(float dt)
+        {
+            if (!active)
+            {
+                return 1f;
+            }
+
+            if (dt > 0f)
+            {
+                elapsed += dt;
+            }
+
+            if (elapsed >= MaxDurationSeconds)
+            {
+                active = false;
+                return 1f;
+            }
+
+            return 1f + (amplitude * Mathf.Exp(-DecayRate * elapsed) * Mathf.Sin(TwoPi * FrequencyHz * elapsed));
+        }
+    }
+
+    private static float StepCriticallyDampedSpring(float current, float target, ref float velocity, float omega, float dt)
+    {
+        if (dt <= 0.00001f)
+        {
+            return current;
+        }
+
+        float delta = current - target;
+        float temp = (velocity + (omega * delta)) * dt;
+        float exp = Mathf.Exp(-omega * dt);
+        velocity = (velocity - (temp * omega)) * exp;
+        return target + ((delta + temp) * exp);
+    }
+
+    private static Vector2 StepCriticallyDampedSpring2D(Vector2 current, Vector2 target, ref Vector2 velocity, float omega, float dt)
+    {
+        if (dt <= 0.00001f)
+        {
+            return current;
+        }
+
+        Vector2 delta = current - target;
+        Vector2 temp = (velocity + (delta * omega)) * dt;
+        float exp = Mathf.Exp(-omega * dt);
+        velocity = (velocity - (temp * omega)) * exp;
+        return target + ((delta + temp) * exp);
+    }
+
     private sealed class WorkbenchGateSlot
     {
         public GateNode node;
@@ -235,8 +323,24 @@ public class AirWeavingController : MonoBehaviour
         public Vector2 currentLocalXY;
         public float currentLocalZ;
         public float currentScale;
+        public Vector2 velocityXY;
+        public float velocityZ;
+        public float velocityScale;
         public Vector2 smoothedVelocityXY;
         public Vector2 currentInertiaTiltDeg;
+        public Vector2 velocityTiltDeg;
+        public ElasticScalePop scalePop;
+
+        public void ResetSpringState()
+        {
+            velocityXY = Vector2.zero;
+            velocityZ = 0f;
+            velocityScale = 0f;
+            smoothedVelocityXY = Vector2.zero;
+            currentInertiaTiltDeg = Vector2.zero;
+            velocityTiltDeg = Vector2.zero;
+            scalePop.Reset();
+        }
     }
 
     private LevelAndUIManager levelManager;
@@ -270,6 +374,9 @@ public class AirWeavingController : MonoBehaviour
     private bool inputBRequiresExitRearm = false;
     private float inputATouchRippleTimer = 0f;
     private float inputBTouchRippleTimer = 0f;
+    private Vector2 inputSwitchMagnetOffsetXY = Vector2.zero;
+    private ElasticScalePop inputAScalePop;
+    private ElasticScalePop inputBScalePop;
 
     private Vector3 pinchWorldPosition = Vector3.zero;
     private Vector3 indexTipWorldPosition = Vector3.zero;
@@ -527,6 +634,7 @@ public class AirWeavingController : MonoBehaviour
             slot.currentLocalXY = homeXY;
             slot.currentLocalZ = WorkbenchDepth;
             slot.currentScale = ParkedGateScale;
+            slot.ResetSpringState();
         }
 
         if (mainCam != null)
@@ -1178,6 +1286,7 @@ public class AirWeavingController : MonoBehaviour
             hoveredInputNode = null;
             inputADwellTimer = 0f;
             inputBDwellTimer = 0f;
+            inputSwitchMagnetOffsetXY = Vector2.zero;
             isPinching = false;
             wasPinching = false;
             SetHoverRingVisible(false);
@@ -1201,27 +1310,51 @@ public class AirWeavingController : MonoBehaviour
             if (fistActive)
             {
                 isPinching = true;
-                Vector2 prevXY = grabbed.currentLocalXY;
 
                 if (isHandDetected)
                 {
                     Vector2 clampedTarget = ClampDraggedGateLocalXY(palmXY, aspectScale);
-                    float dragAlpha = 1f - Mathf.Exp(-GateDragSmoothingSpeed * dt);
-                    grabbed.currentLocalXY = Vector2.Lerp(grabbed.currentLocalXY, clampedTarget, dragAlpha);
+                    grabbed.currentLocalXY = StepCriticallyDampedSpring2D(
+                        grabbed.currentLocalXY,
+                        clampedTarget,
+                        ref grabbed.velocityXY,
+                        GateDragSpringOmega,
+                        dt);
+                }
+                else
+                {
+                    grabbed.currentLocalXY = StepCriticallyDampedSpring2D(
+                        grabbed.currentLocalXY,
+                        grabbed.currentLocalXY,
+                        ref grabbed.velocityXY,
+                        GateDragSpringOmega,
+                        dt);
                 }
 
-                // Hitung kemiringan inersia 3D dinamis (±12°) berdasarkan kecepatan seret gerbang
-                float safeDt = Mathf.Max(0.005f, dt);
-                Vector2 instantVel = (grabbed.currentLocalXY - prevXY) / safeDt;
-                float velAlpha = 1f - Mathf.Exp(-14f * safeDt);
-                grabbed.smoothedVelocityXY = Vector2.Lerp(grabbed.smoothedVelocityXY, instantVel, velAlpha);
+                // Velocity banking tilt dari kecepatan pegas analitik (6 deg / (u/s), maksimal ±12 deg)
+                grabbed.smoothedVelocityXY = grabbed.velocityXY;
                 Vector2 targetTilt = new Vector2(
-                    Mathf.Clamp(-grabbed.smoothedVelocityXY.y * 5.2f, -MaxDragInertiaTiltDeg, MaxDragInertiaTiltDeg),
-                    Mathf.Clamp(grabbed.smoothedVelocityXY.x * 5.2f, -MaxDragInertiaTiltDeg, MaxDragInertiaTiltDeg));
-                grabbed.currentInertiaTiltDeg = Vector2.Lerp(grabbed.currentInertiaTiltDeg, targetTilt, 1f - Mathf.Exp(-12f * safeDt));
+                    Mathf.Clamp(-grabbed.velocityXY.y * DragVelocityTiltDegPerUnitSec, -MaxDragInertiaTiltDeg, MaxDragInertiaTiltDeg),
+                    Mathf.Clamp(grabbed.velocityXY.x * DragVelocityTiltDegPerUnitSec, -MaxDragInertiaTiltDeg, MaxDragInertiaTiltDeg));
+                grabbed.currentInertiaTiltDeg = StepCriticallyDampedSpring2D(
+                    grabbed.currentInertiaTiltDeg,
+                    targetTilt,
+                    ref grabbed.velocityTiltDeg,
+                    GateSettleSpringOmega,
+                    dt);
 
-                grabbed.currentLocalZ = Mathf.Lerp(grabbed.currentLocalZ, WorkbenchDepth + GrabLiftOffsetZ, 1f - Mathf.Exp(-GateDragSmoothingSpeed * dt));
-                grabbed.currentScale = Mathf.Lerp(grabbed.currentScale, GrabbedGateScale, 1f - Mathf.Exp(-GateDragSmoothingSpeed * dt));
+                grabbed.currentLocalZ = StepCriticallyDampedSpring(
+                    grabbed.currentLocalZ,
+                    WorkbenchDepth + GrabLiftOffsetZ,
+                    ref grabbed.velocityZ,
+                    GateLiftZSpringOmega,
+                    dt);
+                grabbed.currentScale = StepCriticallyDampedSpring(
+                    grabbed.currentScale,
+                    GrabbedGateScale,
+                    ref grabbed.velocityScale,
+                    GateScaleSpringOmega,
+                    dt);
                 grabbed.isPlacedOnWorkbench = true;
 
                 bool curOutsideBox = IsOutsideAssemblyZone(grabbed.currentLocalXY, aspectScale);
@@ -1252,6 +1385,7 @@ public class AirWeavingController : MonoBehaviour
             hoveredInputNode = null;
             inputADwellTimer = 0f;
             inputBDwellTimer = 0f;
+            DecayInputSwitchMagnetOffset(dt);
             wasPinching = isPinching;
             SetHoverRingVisible(false);
             return;
@@ -1270,6 +1404,7 @@ public class AirWeavingController : MonoBehaviour
             hoveredInputNode = null;
             inputADwellTimer = 0f;
             inputBDwellTimer = 0f;
+            inputSwitchMagnetOffsetXY = Vector2.zero;
             inputARequiresExitRearm = false;
             inputBRequiresExitRearm = false;
             wasPinching = false;
@@ -1289,6 +1424,7 @@ public class AirWeavingController : MonoBehaviour
             hoveredInputNode = null;
             inputADwellTimer = 0f;
             inputBDwellTimer = 0f;
+            DecayInputSwitchMagnetOffset(dt);
             wasPinching = isPinching;
             SetHoverRingVisible(false);
             return;
@@ -1319,9 +1455,10 @@ public class AirWeavingController : MonoBehaviour
         {
             inputADwellTimer = 0f;
             inputBDwellTimer = 0f;
+            DecayInputSwitchMagnetOffset(dt);
         }
 
-        // 5. Mulai genggam badan gerbang pada rising-edge Open -> Fist
+        // 5. Mulai genggam badan gerbang pada rising-edge Open -> Fist (disertai Elastic Scale Pop A=0.10 & pegas Z/skala)
         if (fistJustStarted && hoveredGateSlotIndex >= 0 && hoveredGateSlotIndex < gateSlots.Count)
         {
             CancelAirDrawStrokeImmediate();
@@ -1329,13 +1466,16 @@ public class AirWeavingController : MonoBehaviour
 
             WorkbenchGateSlot grabbed = gateSlots[grabbedGateSlotIndex];
             grabbed.isPlacedOnWorkbench = true;
-            grabbed.currentLocalZ = WorkbenchDepth + GrabLiftOffsetZ;
-            grabbed.currentScale = GrabbedGateScale;
+            grabbed.scalePop.Trigger(GateGrabPopAmplitude);
 
             if (grabbed.node != null && mainCam != null)
             {
                 Transform camT = mainCam.transform;
-                Vector3 worldPos = camT.TransformPoint(new Vector3(grabbed.currentLocalXY.x, grabbed.currentLocalXY.y, grabbed.currentLocalZ));
+                float perspectiveRatio = grabbed.currentLocalZ / WorkbenchDepth;
+                Vector3 worldPos = camT.TransformPoint(new Vector3(
+                    grabbed.currentLocalXY.x * perspectiveRatio,
+                    grabbed.currentLocalXY.y * perspectiveRatio,
+                    grabbed.currentLocalZ));
                 Quaternion worldRot = camT.rotation * WorkbenchTiltRotation;
                 grabbed.node.transform.localScale = Vector3.one * grabbed.currentScale;
                 grabbed.node.SetExternalSpatialPose(true, worldPos, worldRot);
@@ -1541,7 +1681,9 @@ public class AirWeavingController : MonoBehaviour
         targetSlot.placedLocalXY = spawnXY;
         targetSlot.currentLocalXY = spawnXY;
         targetSlot.currentLocalZ = WorkbenchDepth;
-        targetSlot.currentScale = ActiveGateScale;
+        targetSlot.currentScale = ParkedGateScale;
+        targetSlot.ResetSpringState();
+        targetSlot.scalePop.Trigger(GatePlaceBloomPopAmplitude);
 
         if (mainCam != null)
         {
@@ -1652,17 +1794,19 @@ public class AirWeavingController : MonoBehaviour
             Vector3 releaseWorldPos = slot.node.transform.position;
             slot.isPlacedOnWorkbench = false;
             slot.placedLocalXY = homeXY;
-            slot.currentLocalXY = homeXY;
-            slot.currentLocalZ = WorkbenchDepth;
-            slot.currentScale = ParkedGateScale;
+            slot.scalePop.Reset();
 
             Camera mainCam = ResolveMainCamera();
             if (mainCam != null)
             {
                 Transform camT = mainCam.transform;
-                Vector3 parkedPos = camT.TransformPoint(new Vector3(homeXY.x, homeXY.y, WorkbenchDepth));
+                float perspectiveRatio = slot.currentLocalZ / WorkbenchDepth;
+                Vector3 currentWorldPos = camT.TransformPoint(new Vector3(
+                    slot.currentLocalXY.x * perspectiveRatio,
+                    slot.currentLocalXY.y * perspectiveRatio,
+                    slot.currentLocalZ));
                 Quaternion worldRot = camT.rotation * WorkbenchTiltRotation;
-                slot.node.SetExternalParkedPreview(true, parkedPos, worldRot, ParkedGateScale);
+                slot.node.SetExternalParkedPreview(true, currentWorldPos, worldRot, slot.currentScale);
             }
 
             // Putus seluruh kabel gerbang & reset status uji manual (perubahan topologi otomatis mereset manualPassedRowMask = 0)
@@ -1686,9 +1830,7 @@ public class AirWeavingController : MonoBehaviour
             Vector2 clampedAssembly = ClampAssemblyZoneLocalXY(slot.currentLocalXY, aspectScale);
             slot.isPlacedOnWorkbench = true;
             slot.placedLocalXY = clampedAssembly;
-            slot.currentLocalXY = clampedAssembly;
-            slot.currentLocalZ = WorkbenchDepth;
-            slot.currentScale = ActiveGateScale;
+            slot.scalePop.Trigger(GatePlaceBloomPopAmplitude);
             slot.node.TriggerTapFeedback();
             if (circuitManager != null)
             {
@@ -1711,6 +1853,15 @@ public class AirWeavingController : MonoBehaviour
         inputBRequiresExitRearm = false;
         inputATouchRippleTimer = 0f;
         inputBTouchRippleTimer = 0f;
+        inputSwitchMagnetOffsetXY = Vector2.zero;
+        inputAScalePop.Reset();
+        inputBScalePop.Reset();
+    }
+
+    private void DecayInputSwitchMagnetOffset(float dt)
+    {
+        float blendAlpha = 1f - Mathf.Exp(-SoftMagnetOffsetBlendSpeed * Mathf.Max(0.0001f, dt));
+        inputSwitchMagnetOffsetXY = Vector2.Lerp(inputSwitchMagnetOffsetXY, Vector2.zero, blendAlpha);
     }
 
     private static bool IsTipInsideInputSwitchZone(Vector2 tipXY, float aspectScale)
@@ -1723,7 +1874,7 @@ public class AirWeavingController : MonoBehaviour
 
     /// <summary>
     /// Sentuh ringan ujung telunjuk (#8) pada sakelar Input A & Input B:
-    /// dwell singkat 75 ms + exit-to-rearm (1.35x radius) + cooldown 0.40 dtk + ripple sorotan. Zero-GC.
+    /// Soft Magnetic Aim-Assist (R=0.30, maxPull=0.45, blend 18/s) + dwell singkat 75 ms + exit-to-rearm berbasis posisi jari mentah (1.35x radius) + cooldown 0.40 dtk. Zero-GC.
     /// </summary>
     private void HandleInputIndexTouch(float aspectScale, float dt)
     {
@@ -1731,24 +1882,51 @@ public class AirWeavingController : MonoBehaviour
         {
             inputADwellTimer = 0f;
             inputBDwellTimer = 0f;
+            DecayInputSwitchMagnetOffset(dt);
             return;
         }
 
-        Vector2 tipXY = handGestureDetector.IndexTipLocalXY;
+        Vector2 rawTipXY = handGestureDetector.IndexTipLocalXY;
         Vector2 inputAXY = new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputATerminalY);
         Vector2 inputBXY = new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputBTerminalY);
 
-        float distA = Vector2.Distance(tipXY, inputAXY);
-        float distB = Vector2.Distance(tipXY, inputBXY);
+        float rawDistA = Vector2.Distance(rawTipXY, inputAXY);
+        float rawDistB = Vector2.Distance(rawTipXY, inputBXY);
 
-        if (inputARequiresExitRearm && distA > InputAirTapRearmRadius)
+        // Logika Exit-to-Rearm WAJIB memakai posisi ujung jari mentah (rawDistA/rawDistB) agar tidak pernah nyangkut oleh magnet
+        if (inputARequiresExitRearm && rawDistA > InputAirTapRearmRadius)
         {
             inputARequiresExitRearm = false;
         }
-        if (inputBRequiresExitRearm && distB > InputAirTapRearmRadius)
+        if (inputBRequiresExitRearm && rawDistB > InputAirTapRearmRadius)
         {
             inputBRequiresExitRearm = false;
         }
+
+        // Soft Magnetic Aim-Assist menuju sakelar Input A/B terdekat (R = 0.30, maxPull = 0.45, blend 18/s, 0 saat > 1.1 u/s)
+        Vector2 desiredMagnetOffset = Vector2.zero;
+        float tipSpeed = handGestureDetector.IndexTipSpeedUnitsPerSec;
+        if (tipSpeed < SoftMagnetMaxHandSpeed)
+        {
+            bool canPullA = inputANode != null && rawDistA < InputSwitchMagnetRadius;
+            bool canPullB = inputBNode != null && rawDistB < InputSwitchMagnetRadius;
+            if (canPullA || canPullB)
+            {
+                bool pickA = canPullA && (!canPullB || rawDistA <= rawDistB);
+                Vector2 targetXY = pickA ? inputAXY : inputBXY;
+                float d = pickA ? rawDistA : rawDistB;
+                float slowFactor = Mathf.Clamp01(1f - (tipSpeed / SoftMagnetMaxHandSpeed));
+                float pull = InputSwitchMagnetMaxPull * slowFactor * (1f - (d / InputSwitchMagnetRadius));
+                desiredMagnetOffset = (targetXY - rawTipXY) * pull;
+            }
+        }
+
+        float blendAlpha = 1f - Mathf.Exp(-SoftMagnetOffsetBlendSpeed * Mathf.Max(0.0001f, dt));
+        inputSwitchMagnetOffsetXY = Vector2.Lerp(inputSwitchMagnetOffsetXY, desiredMagnetOffset, blendAlpha);
+
+        Vector2 assistedTipXY = rawTipXY + inputSwitchMagnetOffsetXY;
+        float distA = Vector2.Distance(assistedTipXY, inputAXY);
+        float distB = Vector2.Distance(assistedTipXY, inputBXY);
 
         bool inA = distA <= InputAirTapRadius && inputANode != null;
         bool inB = distB <= InputAirTapRadius && inputBNode != null;
@@ -1832,6 +2010,15 @@ public class AirWeavingController : MonoBehaviour
             circuitManager.EvaluateCircuit();
         }
 
+        if (isInputB)
+        {
+            inputBScalePop.Trigger(InputTogglePopAmplitude);
+        }
+        else
+        {
+            inputAScalePop.Trigger(InputTogglePopAmplitude);
+        }
+
         targetNode.TriggerTapFeedback();
         if (spatialSfx != null)
         {
@@ -1859,7 +2046,12 @@ public class AirWeavingController : MonoBehaviour
         float yaw = swayYaw + (inertiaTiltDeg.y * 0.65f);
         float roll = swayRoll - inertiaTiltDeg.y;
 
-        worldPos = camT.TransformPoint(new Vector3(baseLocalPos.x, baseLocalPos.y + bobY, baseLocalPos.z));
+        // Kompensasi perspektif pada Z-lift agar posisi proyeksi layar gerbang tetap sejajar tepat di bawah tangan pada video
+        float perspectiveRatio = baseLocalPos.z / WorkbenchDepth;
+        worldPos = camT.TransformPoint(new Vector3(
+            baseLocalPos.x * perspectiveRatio,
+            (baseLocalPos.y * perspectiveRatio) + bobY,
+            baseLocalPos.z));
         worldRot = camT.rotation * WorkbenchTiltRotation * Quaternion.Euler(pitch, yaw, roll);
     }
 
@@ -1873,21 +2065,29 @@ public class AirWeavingController : MonoBehaviour
         Transform camT = mainCam.transform;
         float aspectScale = ComputeHorizontalAspectScale(mainCam);
         float dt = Time.unscaledDeltaTime;
-        float settleAlpha = snapImmediately ? 1f : (1f - Mathf.Exp(-14f * dt));
-        float tiltRelaxAlpha = snapImmediately ? 1f : (1f - Mathf.Exp(-10f * dt));
 
-        // 1. Terminal tetap papan roti: Input A, Input B, Output (melayang halus dengan fase berbeda)
+        // 1. Terminal tetap papan roti: Input A, Input B, Output (melayang halus dengan fase berbeda + Elastic Scale Pop Input A/B)
         if (inputANode != null)
         {
+            if (snapImmediately)
+            {
+                inputAScalePop.Reset();
+            }
+            float popA = snapImmediately ? 1f : inputAScalePop.Evaluate(dt);
             ComputeFloatingNodePose(camT, new Vector3(InputTerminalBaseX * aspectScale, InputATerminalY, WorkbenchDepth), 0.35f, false, Vector2.zero, out Vector3 posA, out Quaternion rotA);
-            inputANode.transform.localScale = Vector3.one * TerminalScale;
+            inputANode.transform.localScale = Vector3.one * (TerminalScale * popA);
             inputANode.SetExternalSpatialPose(true, posA, rotA);
         }
 
         if (inputBNode != null)
         {
+            if (snapImmediately)
+            {
+                inputBScalePop.Reset();
+            }
+            float popB = snapImmediately ? 1f : inputBScalePop.Evaluate(dt);
             ComputeFloatingNodePose(camT, new Vector3(InputTerminalBaseX * aspectScale, InputBTerminalY, WorkbenchDepth), 2.05f, false, Vector2.zero, out Vector3 posB, out Quaternion rotB);
-            inputBNode.transform.localScale = Vector3.one * TerminalScale;
+            inputBNode.transform.localScale = Vector3.one * (TerminalScale * popB);
             inputBNode.SetExternalSpatialPose(true, posB, rotB);
         }
 
@@ -1898,7 +2098,7 @@ public class AirWeavingController : MonoBehaviour
             outputNode.SetExternalSpatialPose(true, posOut, rotOut);
         }
 
-        // 2. 5 Gerbang Logika (melayang 3D lembut saat diam + kemiringan inersia dinamis ±12° saat diseret)
+        // 2. 5 Gerbang Logika (Critically Damped Spring-Damper analitik + Velocity Banking Tilt ±12° + Elastic Scale Pop)
         for (int i = 0; i < gateSlots.Count; i++)
         {
             WorkbenchGateSlot slot = gateSlots[i];
@@ -1908,6 +2108,8 @@ public class AirWeavingController : MonoBehaviour
             }
 
             float gatePhase = 1.15f + (slot.slotIndex * 1.27f);
+            float popFactor = snapImmediately ? 1f : slot.scalePop.Evaluate(dt);
+
             if (i == grabbedGateSlotIndex)
             {
                 ComputeFloatingNodePose(
@@ -1918,16 +2120,49 @@ public class AirWeavingController : MonoBehaviour
                     slot.currentInertiaTiltDeg,
                     out Vector3 grabbedPos,
                     out Quaternion grabbedRot);
-                slot.node.transform.localScale = Vector3.one * slot.currentScale;
+                slot.node.transform.localScale = Vector3.one * (slot.currentScale * popFactor);
                 slot.node.SetExternalSpatialPose(true, grabbedPos, grabbedRot);
             }
             else if (slot.isPlacedOnWorkbench)
             {
-                slot.currentLocalXY = Vector2.Lerp(slot.currentLocalXY, slot.placedLocalXY, settleAlpha);
-                slot.currentLocalZ = Mathf.Lerp(slot.currentLocalZ, WorkbenchDepth, settleAlpha);
-                slot.currentScale = Mathf.Lerp(slot.currentScale, ActiveGateScale, settleAlpha);
-                slot.smoothedVelocityXY = Vector2.Lerp(slot.smoothedVelocityXY, Vector2.zero, tiltRelaxAlpha);
-                slot.currentInertiaTiltDeg = Vector2.Lerp(slot.currentInertiaTiltDeg, Vector2.zero, tiltRelaxAlpha);
+                if (snapImmediately)
+                {
+                    slot.currentLocalXY = slot.placedLocalXY;
+                    slot.currentLocalZ = WorkbenchDepth;
+                    slot.currentScale = ActiveGateScale;
+                    slot.ResetSpringState();
+                }
+                else
+                {
+                    slot.currentLocalXY = StepCriticallyDampedSpring2D(
+                        slot.currentLocalXY,
+                        slot.placedLocalXY,
+                        ref slot.velocityXY,
+                        GateSettleSpringOmega,
+                        dt);
+                    slot.currentLocalZ = StepCriticallyDampedSpring(
+                        slot.currentLocalZ,
+                        WorkbenchDepth,
+                        ref slot.velocityZ,
+                        GateLiftZSpringOmega,
+                        dt);
+                    slot.currentScale = StepCriticallyDampedSpring(
+                        slot.currentScale,
+                        ActiveGateScale,
+                        ref slot.velocityScale,
+                        GateScaleSpringOmega,
+                        dt);
+                    slot.smoothedVelocityXY = slot.velocityXY;
+                    Vector2 targetTilt = new Vector2(
+                        Mathf.Clamp(-slot.velocityXY.y * DragVelocityTiltDegPerUnitSec, -MaxDragInertiaTiltDeg, MaxDragInertiaTiltDeg),
+                        Mathf.Clamp(slot.velocityXY.x * DragVelocityTiltDegPerUnitSec, -MaxDragInertiaTiltDeg, MaxDragInertiaTiltDeg));
+                    slot.currentInertiaTiltDeg = StepCriticallyDampedSpring2D(
+                        slot.currentInertiaTiltDeg,
+                        targetTilt,
+                        ref slot.velocityTiltDeg,
+                        GateSettleSpringOmega,
+                        dt);
+                }
 
                 ComputeFloatingNodePose(
                     camT,
@@ -1937,28 +2172,61 @@ public class AirWeavingController : MonoBehaviour
                     slot.currentInertiaTiltDeg,
                     out Vector3 placedPos,
                     out Quaternion placedRot);
-                slot.node.transform.localScale = Vector3.one * slot.currentScale;
+                slot.node.transform.localScale = Vector3.one * (slot.currentScale * popFactor);
                 slot.node.SetExternalSpatialPose(true, placedPos, placedRot);
             }
             else
             {
                 Vector2 homeXY = GetParkingSlotLocalXY(slot.slotIndex, aspectScale);
                 slot.placedLocalXY = homeXY;
-                slot.currentLocalXY = Vector2.Lerp(slot.currentLocalXY, homeXY, settleAlpha);
-                slot.currentLocalZ = Mathf.Lerp(slot.currentLocalZ, WorkbenchDepth, settleAlpha);
-                slot.currentScale = Mathf.Lerp(slot.currentScale, ParkedGateScale, settleAlpha);
-                slot.smoothedVelocityXY = Vector2.zero;
-                slot.currentInertiaTiltDeg = Vector2.zero;
+                if (snapImmediately)
+                {
+                    slot.currentLocalXY = homeXY;
+                    slot.currentLocalZ = WorkbenchDepth;
+                    slot.currentScale = ParkedGateScale;
+                    slot.ResetSpringState();
+                }
+                else
+                {
+                    slot.currentLocalXY = StepCriticallyDampedSpring2D(
+                        slot.currentLocalXY,
+                        homeXY,
+                        ref slot.velocityXY,
+                        GateSettleSpringOmega,
+                        dt);
+                    slot.currentLocalZ = StepCriticallyDampedSpring(
+                        slot.currentLocalZ,
+                        WorkbenchDepth,
+                        ref slot.velocityZ,
+                        GateLiftZSpringOmega,
+                        dt);
+                    slot.currentScale = StepCriticallyDampedSpring(
+                        slot.currentScale,
+                        ParkedGateScale,
+                        ref slot.velocityScale,
+                        GateScaleSpringOmega,
+                        dt);
+                    slot.smoothedVelocityXY = slot.velocityXY;
+                    Vector2 targetTilt = new Vector2(
+                        Mathf.Clamp(-slot.velocityXY.y * DragVelocityTiltDegPerUnitSec, -MaxDragInertiaTiltDeg, MaxDragInertiaTiltDeg),
+                        Mathf.Clamp(slot.velocityXY.x * DragVelocityTiltDegPerUnitSec, -MaxDragInertiaTiltDeg, MaxDragInertiaTiltDeg));
+                    slot.currentInertiaTiltDeg = StepCriticallyDampedSpring2D(
+                        slot.currentInertiaTiltDeg,
+                        targetTilt,
+                        ref slot.velocityTiltDeg,
+                        GateSettleSpringOmega,
+                        dt);
+                }
 
                 ComputeFloatingNodePose(
                     camT,
                     new Vector3(slot.currentLocalXY.x, slot.currentLocalXY.y, slot.currentLocalZ),
                     gatePhase,
                     isGrabbed: false,
-                    Vector2.zero,
+                    slot.currentInertiaTiltDeg,
                     out Vector3 parkedPos,
                     out Quaternion parkedRot);
-                slot.node.SetExternalParkedPreview(true, parkedPos, parkedRot, slot.currentScale);
+                slot.node.SetExternalParkedPreview(true, parkedPos, parkedRot, slot.currentScale * popFactor);
             }
         }
     }
@@ -2735,7 +3003,11 @@ public class AirWeavingController : MonoBehaviour
             handGestureDetector.PinchJustEnded,
             handGestureDetector.StabilizedPinchLocalXY,
             handGestureDetector.PinchPointLocalXY,
-            handGestureDetector.PinchPointWorldPosition);
+            handGestureDetector.PinchPointWorldPosition,
+            Time.unscaledDeltaTime,
+            handGestureDetector.PinchSpeedUnitsPerSec,
+            handGestureDetector.PinchRatio,
+            handGestureDetector.IsPinchReleaseIntent);
     }
 
     private void SyncCableRouterVisualsAfterPoseUpdate(Camera mainCam)
@@ -2743,6 +3015,9 @@ public class AirWeavingController : MonoBehaviour
         if (cableRouter == null || mainCam == null) return;
         bool overlayOrVerify = IsAnyUiOverlayOpen || (levelManager != null && levelManager.IsVerifying);
         bool blockedCable = overlayOrVerify || grabbedGateSlotIndex >= 0 || circleSummoner.IsActive || handGestureDetector.IsFistActive;
+        Vector3 effectivePinchWorld = cableRouter.AssistedPinchWorldPosition != Vector3.zero
+            ? cableRouter.AssistedPinchWorldPosition
+            : handGestureDetector.PinchPointWorldPosition;
         cableRouter.SyncVisualsAfterPoseUpdate(
             mainCam,
             circuitManager,
@@ -2753,7 +3028,7 @@ public class AirWeavingController : MonoBehaviour
             WorkbenchDepth,
             isAirWeavingActive,
             isHandDetected && !blockedCable,
-            handGestureDetector.PinchPointWorldPosition);
+            effectivePinchWorld);
     }
 
     private void UpdateHologramVisuals(Camera mainCam)
@@ -2839,11 +3114,14 @@ public class AirWeavingController : MonoBehaviour
                              && !handGestureDetector.IsFistActive
                              && !circleSummoner.IsActive
                              && (hoveringPort || draggingCable);
+        Vector3 pinchVisualWorldPos = (cableRouter != null && cableRouter.AssistedPinchWorldPosition != Vector3.zero)
+            ? cableRouter.AssistedPinchWorldPosition
+            : handGestureDetector.PinchPointWorldPosition;
         hologramVisual.UpdatePinchIndicator(
             camT,
             isHandDetected,
             showPinchRing,
-            handGestureDetector.PinchPointWorldPosition,
+            pinchVisualWorldPos,
             handGestureDetector.IsPinchActive,
             cableRouter != null && cableRouter.IsSnappedTargetPort);
     }
@@ -2986,6 +3264,7 @@ public class AirWeavingController : MonoBehaviour
         // Aturan #3 (Notice + Pulse Non-Destruktif): jika gerbang sudah terpasang di papan, jangan pindahkan/ganggu kabelnya
         if (targetSlot.isPlacedOnWorkbench)
         {
+            targetSlot.scalePop.Trigger(GatePlaceBloomPopAmplitude);
             targetSlot.node.TriggerTapFeedback();
             summonVisual?.TriggerBloomBurst(targetSlot.node.transform.position, isAmberNotice: true);
             if (spatialSfx != null)
@@ -3002,6 +3281,8 @@ public class AirWeavingController : MonoBehaviour
         targetSlot.currentLocalXY = spawnXY;
         targetSlot.currentLocalZ = WorkbenchDepth;
         targetSlot.currentScale = ParkedGateScale;
+        targetSlot.ResetSpringState();
+        targetSlot.scalePop.Trigger(GatePlaceBloomPopAmplitude);
 
         Transform camT = mainCam.transform;
         Vector3 worldPos = camT.TransformPoint(new Vector3(spawnXY.x, spawnXY.y, WorkbenchDepth));

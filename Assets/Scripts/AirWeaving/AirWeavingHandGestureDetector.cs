@@ -47,19 +47,13 @@ public sealed class AirWeavingHandGestureDetector
     // Parameter Pinch / Cubit Kabel (rileks anti-kaku + guard anti-kepalan & anti-XOR)
     private const float PinchEnterRatio = 0.42f;
     private const float PinchExitRatio = 0.56f;
+    public const float PinchReleaseIntentRatio = 0.47f;
     private const float PrePinchSuppressSummonRatio = 0.48f;
     private const float PinchEnterDebounceSeconds = 0.025f;
     private const float PinchExitSlowSeconds = 0.045f;
     private const float PinchExitFastSeconds = 0.095f;
     private const float PinchOcclusionGraceSeconds = 0.180f;
     private const float PrePinchLatchMaxSeconds = 0.055f;
-
-    // Smoothing adaptif berbasis kecepatan (One-Euro-style) untuk palm reticle & titik cubit:
-    // halus stabil saat membidik orb kecil (alpha ~0.24), responsif tanpa lag saat berpindah cepat (alpha ~0.78)
-    private const float CursorSmoothAlphaMin = 0.24f;
-    private const float CursorSmoothAlphaMax = 0.78f;
-    private const float CursorSmoothLowSpeed = 0.35f;
-    private const float CursorSmoothHighSpeed = 2.60f;
 
     // Parameter klasifikasi 5 pose Summon + Open-5 Bloom (Fase 4)
     private const float SummonFingerExtendPalmRatio = 1.00f;
@@ -90,8 +84,6 @@ public sealed class AirWeavingHandGestureDetector
     private float exitHoldTimer = 0f;
     private float occlusionGraceTimer = 0f;
     private float preFistLatchTimer = 0f;
-    private bool hasPrevCursor = false;
-    private Vector2 prevCursorLocalXY = Vector2.zero;
     private Vector2 latchedCursorLocalXY = Vector2.zero;
     private bool hasLatchedCursor = false;
 
@@ -108,17 +100,14 @@ public sealed class AirWeavingHandGestureDetector
     private float pinchOcclusionGraceTimer = 0f;
     private float prePinchLatchTimer = 0f;
     private bool isPrePinchClosing = false;
-    private bool hasPrevPinchCursor = false;
-    private Vector2 prevPinchLocalXY = Vector2.zero;
     private Vector2 latchedPinchLocalXY = Vector2.zero;
     private bool hasLatchedPinch = false;
 
-    // State smoothing adaptif One-Euro-style untuk kursor telapak & titik cubit
-    private bool hasSmoothedCursors = false;
-    private Vector3 smoothedPalmLocal = Vector3.zero;
-    private Vector3 smoothedPinchLocal = Vector3.zero;
+    // State sampel inferensi kursor pass-through (One-Euro tunggal di AirWeavingController, tanpa EMA sekunder)
+    private bool hasPrevSampleCursors = false;
     private Vector2 prevRawPalmLocalXY = Vector2.zero;
     private Vector2 prevRawPinchLocalXY = Vector2.zero;
+    private Vector2 prevRawIndexTipLocalXY = Vector2.zero;
     private float lastLandmarkUpdateUnscaledTime = -1f;
 
     // State Summon 5 Gerbang
@@ -138,9 +127,11 @@ public sealed class AirWeavingHandGestureDetector
     public bool IsPinchActive => isPinchActive;
     public bool PinchJustStarted => pinchJustStarted;
     public bool PinchJustEnded => pinchJustEnded;
+    public bool IsPinchReleaseIntent => currentPinchRatio > PinchReleaseIntentRatio;
     public bool IsPrePinchSuppressingSummon => isPinchActive || isPrePinchGuardActive;
     public float PinchRatio => currentPinchRatio;
     public float PinchSpeedUnitsPerSec { get; private set; }
+    public float IndexTipSpeedUnitsPerSec { get; private set; }
     public Vector3 PinchPointWorldPosition { get; private set; }
     public Vector2 PinchPointLocalXY { get; private set; }
     public Vector2 StabilizedPinchLocalXY => hasLatchedPinch ? latchedPinchLocalXY : PinchPointLocalXY;
@@ -171,8 +162,6 @@ public sealed class AirWeavingHandGestureDetector
         exitHoldTimer = 0f;
         occlusionGraceTimer = 0f;
         preFistLatchTimer = 0f;
-        hasPrevCursor = false;
-        prevCursorLocalXY = Vector2.zero;
         latchedCursorLocalXY = Vector2.zero;
         hasLatchedCursor = false;
 
@@ -188,16 +177,13 @@ public sealed class AirWeavingHandGestureDetector
         pinchOcclusionGraceTimer = 0f;
         prePinchLatchTimer = 0f;
         isPrePinchClosing = false;
-        hasPrevPinchCursor = false;
-        prevPinchLocalXY = Vector2.zero;
         latchedPinchLocalXY = Vector2.zero;
         hasLatchedPinch = false;
 
-        hasSmoothedCursors = false;
-        smoothedPalmLocal = Vector3.zero;
-        smoothedPinchLocal = Vector3.zero;
+        hasPrevSampleCursors = false;
         prevRawPalmLocalXY = Vector2.zero;
         prevRawPinchLocalXY = Vector2.zero;
+        prevRawIndexTipLocalXY = Vector2.zero;
         lastLandmarkUpdateUnscaledTime = -1f;
 
         for (int i = 0; i < 4; i++)
@@ -211,6 +197,7 @@ public sealed class AirWeavingHandGestureDetector
 
         CursorSpeedUnitsPerSec = 0f;
         PinchSpeedUnitsPerSec = 0f;
+        IndexTipSpeedUnitsPerSec = 0f;
         PalmCursorWorldPosition = Vector3.zero;
         PalmCursorLocalXY = Vector2.zero;
         PinchPointWorldPosition = Vector3.zero;
@@ -360,7 +347,7 @@ public sealed class AirWeavingHandGestureDetector
         }
 
         // 4. Kursor telapak anti-lompat (0.50*L9 + 0.30*L5 + 0.20*L0) & titik cubit presisi (0.5*(L4 + L8))
-        // dengan smoothing adaptif berbasis kecepatan (alpha 0.24 saat pelan -> 0.78 saat berpindah cepat)
+        // Pass-through langsung dari One-Euro Filter tunggal per-landmark (0 lag EMA bertumpuk) + kecepatan per sampel inferensi
         Vector3 rawPalmWorld = (smoothedLandmarksWorld[9] * 0.50f)
                                + (smoothedLandmarksWorld[5] * 0.30f)
                                + (smoothedLandmarksWorld[0] * 0.20f);
@@ -371,44 +358,43 @@ public sealed class AirWeavingHandGestureDetector
         Vector3 rawPinchLocal = camTransform.InverseTransformPoint(rawPinchWorld);
         Vector2 rawPinchXY = new Vector2(rawPinchLocal.x, rawPinchLocal.y);
 
+        Vector3 indexLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[8]);
+        Vector2 rawIndexTipXY = new Vector2(indexLocal.x, indexLocal.y);
+        Vector3 thumbLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[4]);
+
         float nowTime = Time.unscaledTime;
         float sampleDt = (lastLandmarkUpdateUnscaledTime >= 0f)
             ? Mathf.Clamp(nowTime - lastLandmarkUpdateUnscaledTime, 0.008f, 0.150f)
             : 0.033f;
         lastLandmarkUpdateUnscaledTime = nowTime;
 
-        if (!hasSmoothedCursors)
+        if (!hasPrevSampleCursors)
         {
-            smoothedPalmLocal = rawPalmLocal;
-            smoothedPinchLocal = rawPinchLocal;
             prevRawPalmLocalXY = rawPalmXY;
             prevRawPinchLocalXY = rawPinchXY;
-            hasSmoothedCursors = true;
+            prevRawIndexTipLocalXY = rawIndexTipXY;
+            CursorSpeedUnitsPerSec = 0f;
+            PinchSpeedUnitsPerSec = 0f;
+            IndexTipSpeedUnitsPerSec = 0f;
+            hasPrevSampleCursors = true;
         }
         else
         {
-            float rawPalmSpeed = Vector2.Distance(rawPalmXY, prevRawPalmLocalXY) / sampleDt;
-            float palmSpeedT = Mathf.Clamp01((rawPalmSpeed - CursorSmoothLowSpeed) / (CursorSmoothHighSpeed - CursorSmoothLowSpeed));
-            float palmAlpha = Mathf.Lerp(CursorSmoothAlphaMin, CursorSmoothAlphaMax, palmSpeedT);
-            smoothedPalmLocal = Vector3.Lerp(smoothedPalmLocal, rawPalmLocal, palmAlpha);
+            CursorSpeedUnitsPerSec = Vector2.Distance(rawPalmXY, prevRawPalmLocalXY) / sampleDt;
+            PinchSpeedUnitsPerSec = Vector2.Distance(rawPinchXY, prevRawPinchLocalXY) / sampleDt;
+            IndexTipSpeedUnitsPerSec = Vector2.Distance(rawIndexTipXY, prevRawIndexTipLocalXY) / sampleDt;
             prevRawPalmLocalXY = rawPalmXY;
-
-            float rawPinchSpeed = Vector2.Distance(rawPinchXY, prevRawPinchLocalXY) / sampleDt;
-            float pinchSpeedT = Mathf.Clamp01((rawPinchSpeed - CursorSmoothLowSpeed) / (CursorSmoothHighSpeed - CursorSmoothLowSpeed));
-            float pinchAlpha = Mathf.Lerp(CursorSmoothAlphaMin, CursorSmoothAlphaMax, pinchSpeedT);
-            smoothedPinchLocal = Vector3.Lerp(smoothedPinchLocal, rawPinchLocal, pinchAlpha);
             prevRawPinchLocalXY = rawPinchXY;
+            prevRawIndexTipLocalXY = rawIndexTipXY;
         }
 
-        PalmCursorLocalXY = new Vector2(smoothedPalmLocal.x, smoothedPalmLocal.y);
-        PalmCursorWorldPosition = camTransform.TransformPoint(smoothedPalmLocal);
+        PalmCursorLocalXY = rawPalmXY;
+        PalmCursorWorldPosition = rawPalmWorld;
 
-        PinchPointLocalXY = new Vector2(smoothedPinchLocal.x, smoothedPinchLocal.y);
-        PinchPointWorldPosition = camTransform.TransformPoint(smoothedPinchLocal);
+        PinchPointLocalXY = rawPinchXY;
+        PinchPointWorldPosition = rawPinchWorld;
 
-        Vector3 indexLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[8]);
-        IndexTipLocalXY = new Vector2(indexLocal.x, indexLocal.y);
-        Vector3 thumbLocal = camTransform.InverseTransformPoint(smoothedLandmarksWorld[4]);
+        IndexTipLocalXY = rawIndexTipXY;
         ThumbTipLocalXY = new Vector2(thumbLocal.x, thumbLocal.y);
 
         if (currentSummonPose == SummonHandPose.ThumbOnlyNot)
@@ -455,28 +441,13 @@ public sealed class AirWeavingHandGestureDetector
         {
             occlusionGraceTimer = isFistStickyHoldActive ? StickyOcclusionGraceSeconds : OcclusionGraceSeconds;
             pinchOcclusionGraceTimer = PinchOcclusionGraceSeconds;
-
-            if (hasPrevCursor)
-            {
-                float instantSpeed = Vector2.Distance(PalmCursorLocalXY, prevCursorLocalXY) / dt;
-                CursorSpeedUnitsPerSec = Mathf.Lerp(CursorSpeedUnitsPerSec, instantSpeed, Mathf.Clamp01(dt * 12f));
-            }
-            prevCursorLocalXY = PalmCursorLocalXY;
-            hasPrevCursor = true;
-
-            if (hasPrevPinchCursor)
-            {
-                float instantPinchSpeed = Vector2.Distance(PinchPointLocalXY, prevPinchLocalXY) / dt;
-                PinchSpeedUnitsPerSec = Mathf.Lerp(PinchSpeedUnitsPerSec, instantPinchSpeed, Mathf.Clamp01(dt * 12f));
-            }
-            prevPinchLocalXY = PinchPointLocalXY;
-            hasPrevPinchCursor = true;
         }
         else
         {
             CursorSpeedUnitsPerSec = 0f;
             PinchSpeedUnitsPerSec = 0f;
-            hasSmoothedCursors = false;
+            IndexTipSpeedUnitsPerSec = 0f;
+            hasPrevSampleCursors = false;
             lastLandmarkUpdateUnscaledTime = -1f;
             enterHoldTimer = 0f;
             pinchEnterHoldTimer = 0f;

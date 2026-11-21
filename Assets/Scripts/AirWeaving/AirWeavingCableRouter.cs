@@ -21,8 +21,16 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     public const float PortInHitRadius = 0.185f;
     private const float SnapMagnetRadius = 0.285f;
     private const float GateAutoSnapRadius = 0.340f;
-    private const float SnapReleaseLatchSeconds = 0.200f;
+    private const float SnapHysteresisUnlockRadius = 0.380f;
+    private const float SnapTargetSwitchRatio = 0.720f;
+    private const float SnapReleaseIntentFreezeRatio = 0.470f;
+    private const float SnapReleaseLatchSeconds = 0.300f;
     private const float SnapReleaseMaxEscapeDist = 0.460f;
+    private const float HoverMagnetRadius = 0.300f;
+    private const float DragTargetMagnetRadius = 0.360f;
+    private const float MagnetMaxPull = 0.500f;
+    private const float MagnetMaxHandSpeed = 1.100f;
+    private const float MagnetOffsetBlendSpeed = 18.0f;
     private const float InputPortOutOffsetX = 0.335f;
     private const float GatePortOutOffsetX = 0.325f;
     private const float PortOutOffsetY = 0.025f;
@@ -127,11 +135,15 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private Vector3 lastValidPinchWorldPos = Vector3.zero;
     private bool hasLastValidPinchWorld = false;
 
-    // Snap Release-Latch (200 ms): tahan target snap valid sesaat agar drift ujung jari saat melepas cubit tidak membatalkan kabel
+    // Snap Release-Latch (300 ms) + Sticky Snap Hysteresis + Soft Magnetic Aim-Assist
     private GateNode latchedTargetNode = null;
     private int latchedTargetSlot = 0;
     private Vector2 latchedTargetLocalXY = Vector2.zero;
     private float lastSnapUnscaledTime = -10f;
+    private GateNode lockedSnapNode = null;
+    private bool lockedSnapIsOutput = false;
+    private int lockedSnapSlot = -1;
+    private Vector2 currentMagnetOffsetLocalXY = Vector2.zero;
 
     // Edge-tracking target port yang terkunci selama drag kabel (Zero-GC, untuk ping Lock/Unlock tepat 1x per transisi)
     private GateNode lastLockedTargetNode = null;
@@ -146,6 +158,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     public bool IsHoveringOutputNodePort => IsHoveringPort && activePorts[hoveredPortIndex].node != null && activePorts[hoveredPortIndex].node.nodeType == NodeType.OutputActuator;
     public int ActiveWireCount => wires.Count;
     public int TopologyVersion { get; private set; }
+    public Vector3 AssistedPinchWorldPosition { get; private set; }
 
     /// <summary>
     /// Mengembalikan identitas stabil & posisi dunia orb port yang sedang di-hover (Zero-GC, untuk edge-triggered Hover Tick).
@@ -284,6 +297,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         CancelActiveDrag();
         hoveredPortIndex = -1;
         hasLastValidPinchWorld = false;
+        currentMagnetOffsetLocalXY = Vector2.zero;
+        AssistedPinchWorldPosition = Vector3.zero;
         activePorts.Clear();
 
         if (!isInitialized)
@@ -353,6 +368,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         latchedTargetNode = null;
         latchedTargetSlot = 0;
         lastSnapUnscaledTime = -10f;
+        lockedSnapNode = null;
+        lockedSnapIsOutput = false;
+        lockedSnapSlot = -1;
         lastLockedTargetNode = null;
         lastLockedTargetIsOutput = false;
         lastLockedTargetSlot = -1;
@@ -384,7 +402,11 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         bool pinchJustEnded,
         Vector2 stabilizedPinchLocalXY,
         Vector2 livePinchLocalXY,
-        Vector3 pinchWorldPos)
+        Vector3 pinchWorldPos,
+        float dt = 0.016f,
+        float pinchSpeedUnitsPerSec = 0f,
+        float pinchRatio = 1f,
+        bool isPinchReleaseIntent = false)
     {
         if (!isInitialized)
         {
@@ -404,12 +426,6 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
 
         Transform camT = mainCam.transform;
 
-        if (isHandDetected)
-        {
-            lastValidPinchWorldPos = pinchWorldPos;
-            hasLastValidPinchWorld = true;
-        }
-
         // 1. Bersihkan edge yang node-nya sudah tidak aktif (defensif)
         PruneUntrackedWires(circuitManager);
 
@@ -426,8 +442,29 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
         }
 
-        // 3. Evaluasi interaksi port & drag kabel berbasis Pinch (Cubit #4-#8)
+        // 2B. Soft Magnetic Aim-Assist (R=0.30 hover port, R=0.36 drag target kompatibel, maxPull=0.50, blend 18/s, 0 saat >1.1 u/s)
         bool hardBlocked = isUiOverlayOpen || isVerifying || blockedByOtherMode;
+        UpdateSoftMagneticAimOffset(
+            livePinchLocalXY,
+            pinchSpeedUnitsPerSec,
+            isHandDetected && !hardBlocked,
+            circuitManager,
+            dt);
+
+        Vector2 assistedLivePinchXY = livePinchLocalXY + currentMagnetOffsetLocalXY;
+        Vector2 assistedStabilizedPinchXY = stabilizedPinchLocalXY + currentMagnetOffsetLocalXY;
+        Vector3 assistedPinchWorldPos = pinchWorldPos
+                                        + (camT.right * currentMagnetOffsetLocalXY.x)
+                                        + (camT.up * currentMagnetOffsetLocalXY.y);
+        AssistedPinchWorldPosition = assistedPinchWorldPos;
+
+        if (isHandDetected)
+        {
+            lastValidPinchWorldPos = assistedPinchWorldPos;
+            hasLastValidPinchWorld = true;
+        }
+
+        // 3. Evaluasi interaksi port & drag kabel berbasis Pinch (Cubit #4-#8) + Sticky Snap + Release-Intent Freeze
         if (hardBlocked)
         {
             if (isDraggingCable)
@@ -440,21 +477,53 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         else if (isDraggingCable)
         {
             hoveredPortIndex = -1;
-            if (isHandDetected)
+            int prevLockedIdx = FindActivePortIndex(lockedSnapNode, lockedSnapIsOutput, lockedSnapSlot);
+            if (prevLockedIdx >= 0 && !IsCompatibleDragTarget(activePorts[prevLockedIdx], circuitManager))
             {
-                snappedTargetPortIndex = FindNearestCompatibleTargetPort(livePinchLocalXY, circuitManager);
+                prevLockedIdx = -1;
+            }
+
+            bool freezeTargetOnReleaseOrOcclusion = !isHandDetected
+                                                    || isPinchReleaseIntent
+                                                    || (pinchRatio > SnapReleaseIntentFreezeRatio);
+
+            if (prevLockedIdx >= 0 && freezeTargetOnReleaseOrOcclusion)
+            {
+                // Bekukan target kunci saat jari mulai membuka (ratio > 0.47) atau tangan hilang sesaat
+                snappedTargetPortIndex = prevLockedIdx;
+                ActivePortEntry frozen = activePorts[snappedTargetPortIndex];
+                latchedTargetNode = frozen.node;
+                latchedTargetSlot = frozen.slotIndex;
+                latchedTargetLocalXY = frozen.handleLocalXY;
+                lastSnapUnscaledTime = Time.unscaledTime;
+            }
+            else if (isHandDetected)
+            {
+                snappedTargetPortIndex = FindNearestCompatibleTargetPort(assistedLivePinchXY, prevLockedIdx, circuitManager);
                 if (snappedTargetPortIndex >= 0 && snappedTargetPortIndex < activePorts.Count)
                 {
                     ActivePortEntry snapped = activePorts[snappedTargetPortIndex];
+                    lockedSnapNode = snapped.node;
+                    lockedSnapIsOutput = snapped.isOutput;
+                    lockedSnapSlot = snapped.slotIndex;
                     latchedTargetNode = snapped.node;
                     latchedTargetSlot = snapped.slotIndex;
                     latchedTargetLocalXY = snapped.handleLocalXY;
                     lastSnapUnscaledTime = Time.unscaledTime;
                 }
+                else
+                {
+                    lockedSnapNode = null;
+                    lockedSnapIsOutput = false;
+                    lockedSnapSlot = -1;
+                }
             }
             else
             {
                 snappedTargetPortIndex = -1;
+                lockedSnapNode = null;
+                lockedSnapIsOutput = false;
+                lockedSnapSlot = -1;
             }
 
             bool endingDragThisFrame = pinchJustEnded || !isPinchActive;
@@ -490,7 +559,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
             else
             {
-                CompleteOrCancelCableDrag(circuitManager, isHandDetected, livePinchLocalXY);
+                CompleteOrCancelCableDrag(circuitManager, isHandDetected, assistedLivePinchXY);
             }
         }
         else if (!isHandDetected)
@@ -500,7 +569,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
         else
         {
-            Vector2 queryXY = pinchJustStarted ? stabilizedPinchLocalXY : livePinchLocalXY;
+            Vector2 queryXY = pinchJustStarted ? assistedStabilizedPinchXY : assistedLivePinchXY;
             hoveredPortIndex = FindNearestPortIndex(queryXY);
 
             if (pinchJustStarted && hoveredPortIndex >= 0 && hoveredPortIndex < activePorts.Count)
@@ -511,7 +580,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
 
         // 4. Perbarui seluruh visual port hologram, busur tarik live, & 100% kabel seragam orb-ke-orb
         RenderPortHandles(camT, circuitManager, isHandDetected && !hardBlocked);
-        RenderLiveDragBeam(camT, hasLastValidPinchWorld ? lastValidPinchWorldPos : pinchWorldPos);
+        RenderLiveDragBeam(camT, hasLastValidPinchWorld ? lastValidPinchWorldPos : assistedPinchWorldPos);
         RenderAllUniformCables(camT);
     }
 
@@ -853,6 +922,85 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         return false;
     }
 
+    private void UpdateSoftMagneticAimOffset(
+        Vector2 rawCursorXY,
+        float cursorSpeedUnitsPerSec,
+        bool canPull,
+        CircuitManager circuitManager,
+        float dt)
+    {
+        Vector2 desiredOffset = Vector2.zero;
+
+        if (canPull && cursorSpeedUnitsPerSec < MagnetMaxHandSpeed && activePorts.Count > 0)
+        {
+            float slowFactor = Mathf.Clamp01(1f - (cursorSpeedUnitsPerSec / MagnetMaxHandSpeed));
+            float radius = isDraggingCable ? DragTargetMagnetRadius : HoverMagnetRadius;
+            float bestDist = radius;
+            Vector2 bestTargetXY = Vector2.zero;
+            bool foundTarget = false;
+
+            for (int i = 0; i < activePorts.Count; i++)
+            {
+                ActivePortEntry candidate = activePorts[i];
+                if (isDraggingCable)
+                {
+                    if (!IsCompatibleDragTarget(candidate, circuitManager))
+                    {
+                        continue;
+                    }
+                    if (dragFromOutput && candidate.node != null && candidate.node.GetMaxInputCount() >= 2)
+                    {
+                        bool slot0Full = FindWireByTargetSlot(candidate.node, 0) >= 0;
+                        bool slot1Full = FindWireByTargetSlot(candidate.node, 1) >= 0;
+                        if (!slot0Full && candidate.slotIndex != 0)
+                        {
+                            continue;
+                        }
+                        if (slot0Full && !slot1Full && candidate.slotIndex != 1)
+                        {
+                            continue;
+                        }
+                    }
+                }
+
+                float d = Vector2.Distance(rawCursorXY, candidate.handleLocalXY);
+                if (d < bestDist)
+                {
+                    bestDist = d;
+                    bestTargetXY = candidate.handleLocalXY;
+                    foundTarget = true;
+                }
+            }
+
+            if (foundTarget && radius > 0.0001f)
+            {
+                float pull = MagnetMaxPull * slowFactor * (1f - (bestDist / radius));
+                desiredOffset = (bestTargetXY - rawCursorXY) * pull;
+            }
+        }
+
+        float blendAlpha = 1f - Mathf.Exp(-MagnetOffsetBlendSpeed * Mathf.Max(0.0001f, dt));
+        currentMagnetOffsetLocalXY = Vector2.Lerp(currentMagnetOffsetLocalXY, desiredOffset, blendAlpha);
+    }
+
+    private int FindActivePortIndex(GateNode node, bool isOutput, int slotIndex)
+    {
+        if (node == null)
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < activePorts.Count; i++)
+        {
+            ActivePortEntry p = activePorts[i];
+            if (p.node == node && p.isOutput == isOutput && (isOutput || p.slotIndex == slotIndex))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     private int FindNearestPortIndex(Vector2 cursorXY)
     {
         int bestIdx = -1;
@@ -876,15 +1024,53 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         return bestIdx;
     }
 
-    private int FindNearestCompatibleTargetPort(Vector2 cursorXY, CircuitManager circuitManager)
+    private int FindNearestCompatibleTargetPort(Vector2 cursorXY, int currentLockedPortIdx, CircuitManager circuitManager)
     {
+        bool hasValidLocked = false;
+        float lockedEffDist = float.MaxValue;
+        float lockedHandleDist = float.MaxValue;
+        GateNode lockedNode = null;
+
+        if (currentLockedPortIdx >= 0 && currentLockedPortIdx < activePorts.Count)
+        {
+            ActivePortEntry lockedEntry = activePorts[currentLockedPortIdx];
+            if (IsCompatibleDragTarget(lockedEntry, circuitManager)
+                && IsAllowedTwoInputSlotCandidate(lockedEntry))
+            {
+                lockedHandleDist = Vector2.Distance(cursorXY, lockedEntry.handleLocalXY);
+                if (dragFromOutput)
+                {
+                    Vector2 lockedSmartCenter = new Vector2(lockedEntry.nodeLocalXY.x - 0.08f, lockedEntry.nodeLocalXY.y + 0.02f);
+                    float lockedGateDist = Vector2.Distance(cursorXY, lockedSmartCenter);
+                    lockedEffDist = Mathf.Min(lockedHandleDist, lockedGateDist);
+                }
+                else
+                {
+                    lockedEffDist = lockedHandleDist;
+                }
+
+                if (lockedEffDist <= SnapHysteresisUnlockRadius)
+                {
+                    hasValidLocked = true;
+                    lockedNode = lockedEntry.node;
+                }
+            }
+        }
+
         int bestIdx = -1;
         float bestDist = float.MaxValue;
+        float bestHandleDist = float.MaxValue;
 
         for (int i = 0; i < activePorts.Count; i++)
         {
+            if (i == currentLockedPortIdx)
+            {
+                continue;
+            }
+
             ActivePortEntry candidate = activePorts[i];
-            if (!IsCompatibleDragTarget(candidate, circuitManager))
+            if (!IsCompatibleDragTarget(candidate, circuitManager)
+                || !IsAllowedTwoInputSlotCandidate(candidate))
             {
                 continue;
             }
@@ -902,25 +1088,11 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     continue;
                 }
 
-                // Smart Empty-Slot Auto-Snap pada gerbang 2-input: utamakan slot kosong (?) daripada slot terisi
-                if (candidate.node.GetMaxInputCount() >= 2)
-                {
-                    bool slot0Full = FindWireByTargetSlot(candidate.node, 0) >= 0;
-                    bool slot1Full = FindWireByTargetSlot(candidate.node, 1) >= 0;
-                    if (!slot0Full && candidate.slotIndex != 0)
-                    {
-                        continue;
-                    }
-                    if (slot0Full && !slot1Full && candidate.slotIndex != 1)
-                    {
-                        continue;
-                    }
-                }
-
                 float effDist = Mathf.Min(distToHandle, distToGateZone);
                 if (effDist < bestDist)
                 {
                     bestDist = effDist;
+                    bestHandleDist = distToHandle;
                     bestIdx = i;
                 }
             }
@@ -930,12 +1102,48 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 if (dist <= SnapMagnetRadius && dist < bestDist)
                 {
                     bestDist = dist;
+                    bestHandleDist = dist;
                     bestIdx = i;
                 }
             }
         }
 
+        if (hasValidLocked)
+        {
+            if (bestIdx >= 0)
+            {
+                bool sameNode = activePorts[bestIdx].node == lockedNode;
+                float candMetric = sameNode ? bestHandleDist : bestDist;
+                float lockMetric = sameNode ? lockedHandleDist : lockedEffDist;
+                if (candMetric < lockMetric * SnapTargetSwitchRatio)
+                {
+                    return bestIdx;
+                }
+            }
+            return currentLockedPortIdx;
+        }
+
         return bestIdx;
+    }
+
+    private bool IsAllowedTwoInputSlotCandidate(ActivePortEntry candidate)
+    {
+        if (!dragFromOutput || candidate.node == null || candidate.node.GetMaxInputCount() < 2)
+        {
+            return true;
+        }
+
+        bool slot0Full = FindWireByTargetSlot(candidate.node, 0) >= 0;
+        bool slot1Full = FindWireByTargetSlot(candidate.node, 1) >= 0;
+        if (!slot0Full && candidate.slotIndex != 0)
+        {
+            return false;
+        }
+        if (slot0Full && !slot1Full && candidate.slotIndex != 1)
+        {
+            return false;
+        }
+        return true;
     }
 
     private bool IsCompatibleDragTarget(ActivePortEntry candidate, CircuitManager circuitManager)
