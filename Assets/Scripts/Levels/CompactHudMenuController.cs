@@ -15,8 +15,8 @@ using TMPro;
 public sealed class CompactHudMenuController : MonoBehaviour
 {
     private const float TopBarHeight = 72f;
-    private const float DrawerHeightCardMode = 398f;
-    private const float DrawerHeightAirMode = 452f;
+    private const float DrawerHeightCardMode = 232f;
+    private const float DrawerHeightAirMode = 286f;
     private const float ToastDefaultBottomY = 16f;
     private const float ToastPracticeOffsetBottomY = 76f;
     private const float DefaultToastDurationSeconds = 2.6f;
@@ -46,7 +46,6 @@ public sealed class CompactHudMenuController : MonoBehaviour
     private static readonly Color DrawerItemModeActiveBgColor = new Color(0.08f, 0.34f, 0.28f, 0.96f);
     private static readonly Color DrawerItemResetBgColor = new Color(0.24f, 0.14f, 0.16f, 0.96f);
     private static readonly Color DrawerItemMutedBgColor = new Color(0.26f, 0.16f, 0.12f, 0.96f);
-    private static readonly Color DrawerItemMasteryBgColor = new Color(0.08f, 0.25f, 0.36f, 0.96f);
     private static readonly Color DrawerItemGuideBgColor = new Color(0.08f, 0.28f, 0.40f, 0.96f);
     private static readonly Color InputACyanOutlineColor = new Color(0.18f, 0.85f, 1.00f, 0.96f);
     private static readonly Color InputBGoldOutlineColor = new Color(1.00f, 0.84f, 0.22f, 0.96f);
@@ -104,16 +103,11 @@ public sealed class CompactHudMenuController : MonoBehaviour
     private Button drawerLevelBtn;
     private Button drawerResetBtn;
     private TMP_Text txtDrawerReset;
-    private Button drawerMasteryBtn;
-    private Button drawerReportBtn;
-    private Button drawerHintBtn;
-    private TMP_Text txtDrawerHint;
     private Button drawerAudioBtn;
     private Image drawerAudioBg;
     private TMP_Text txtDrawerAudio;
     private GameObject drawerGuideBtnObj;
     private Button drawerGuideBtn;
-    private PedagogyMasteryHud pedagogyMasteryHud;
 
     private bool isInitialized = false;
     private bool isMenuDrawerOpen = false;
@@ -130,11 +124,9 @@ public sealed class CompactHudMenuController : MonoBehaviour
     public bool HasActiveProtectedToast => toastRemainingSeconds > 0f && (activeToastIsProtected || !activeToastIsNoHand);
     public Canvas TargetCanvas => targetCanvas;
     public TMP_FontAsset SafeFont => safeFont;
-    public PedagogyMasteryHud PedagogyMasteryHud => pedagogyMasteryHud;
 
     public event Action OnGestureGuideRequested;
     public event Action OnMenuDrawerOpened;
-    public event Action OnMasteryReportRequested;
 
     public void Initialize(
         LevelAndUIManager owner,
@@ -190,13 +182,6 @@ public sealed class CompactHudMenuController : MonoBehaviour
         ConfigureMinimalistBottomControls();
         ConfigureFeedbackToastLayout();
 
-        pedagogyMasteryHud = GetComponent<PedagogyMasteryHud>();
-        if (pedagogyMasteryHud == null)
-        {
-            pedagogyMasteryHud = gameObject.AddComponent<PedagogyMasteryHud>();
-        }
-        pedagogyMasteryHud.Initialize(manager, this, targetCanvas, safeFont);
-
         isInitialized = true;
         CloseMenuDrawer();
         ClearToastImmediate();
@@ -210,10 +195,6 @@ public sealed class CompactHudMenuController : MonoBehaviour
         {
             isPracticePillBottomOffsetActive = false;
             SetGuideButtonActiveState(false);
-        }
-        if (pedagogyMasteryHud != null)
-        {
-            pedagogyMasteryHud.SetAirWeavingMode(active);
         }
         if (!isInitialized)
         {
@@ -484,9 +465,6 @@ public sealed class CompactHudMenuController : MonoBehaviour
         RemoveBtnListener(drawerModeBtn, OnDrawerModeClicked);
         RemoveBtnListener(drawerLevelBtn, OnDrawerLevelClicked);
         RemoveBtnListener(drawerResetBtn, OnDrawerResetClicked);
-        RemoveBtnListener(drawerMasteryBtn, OnDrawerMasteryReportClicked);
-        RemoveBtnListener(drawerReportBtn, OnDrawerReportClicked);
-        RemoveBtnListener(drawerHintBtn, OnDrawerHintClicked);
         RemoveBtnListener(drawerAudioBtn, OnDrawerAudioClicked);
         RemoveBtnListener(drawerGuideBtn, OnDrawerGuideClicked);
 
@@ -516,8 +494,6 @@ public sealed class CompactHudMenuController : MonoBehaviour
         menuDrawerRect = null;
         drawerGuideBtnObj = null;
         drawerGuideBtn = null;
-        drawerMasteryBtn = null;
-        pedagogyMasteryHud = null;
         feedbackBackdropImage = null;
         feedbackBackdropOutline = null;
     }
@@ -775,7 +751,7 @@ public sealed class CompactHudMenuController : MonoBehaviour
         menuScrimButton.onClick.AddListener(CloseMenuDrawer);
         menuScrimObj.SetActive(false);
 
-        // 3. Laci popover kompak pojok kanan atas (6 aksi meta + opsi Panduan Gestur khusus Mode Udara)
+        // 3. Laci popover kompak pojok kanan atas (4 aksi inti Mode Kartu + opsi Panduan Gestur khusus Mode Udara)
         menuDrawerObj = new GameObject("Panel_CompactMenuDrawer", typeof(RectTransform), typeof(Image), typeof(Outline));
         menuDrawerObj.transform.SetParent(targetCanvas.transform, false);
         RectTransform drawerRect = menuDrawerObj.GetComponent<RectTransform>();
@@ -802,12 +778,6 @@ public sealed class CompactHudMenuController : MonoBehaviour
         drawerLevelBtn = CreateDrawerItem("Item_SelectLevel", drawerRect, itemY, "Pilih Level / Sandbox", DrawerItemBgColor, OnDrawerLevelClicked, out _, out _);
         itemY -= itemStep;
         drawerResetBtn = CreateDrawerItem("Item_ResetLevel", drawerRect, itemY, "Reset Level", DrawerItemResetBgColor, OnDrawerResetClicked, out _, out txtDrawerReset);
-        itemY -= itemStep;
-        drawerMasteryBtn = CreateDrawerItem("Item_MasteryReport", drawerRect, itemY, "Rapor Penguasaan", DrawerItemMasteryBgColor, OnDrawerMasteryReportClicked, out _, out _);
-        itemY -= itemStep;
-        drawerReportBtn = CreateDrawerItem("Item_CompetencyReport", drawerRect, itemY, "Rapor CP", DrawerItemBgColor, OnDrawerReportClicked, out _, out _);
-        itemY -= itemStep;
-        drawerHintBtn = CreateDrawerItem("Item_Hint", drawerRect, itemY, "Petunjuk (0/3)", DrawerItemBgColor, OnDrawerHintClicked, out _, out txtDrawerHint);
         itemY -= itemStep;
         drawerAudioBtn = CreateDrawerItem("Item_AudioToggle", drawerRect, itemY, "Audio: ON", DrawerItemBgColor, OnDrawerAudioClicked, out drawerAudioBg, out txtDrawerAudio);
         itemY -= itemStep;
@@ -1104,13 +1074,6 @@ public sealed class CompactHudMenuController : MonoBehaviour
                 : "Reset Level";
         }
 
-        if (txtDrawerHint != null)
-        {
-            txtDrawerHint.text = manager.IsSandboxMode
-                ? "Petunjuk (Sandbox)"
-                : $"Petunjuk ({Mathf.Clamp(manager.CurrentHintTier, 0, 3)}/3)";
-        }
-
         if (txtDrawerAudio != null)
         {
             txtDrawerAudio.text = manager.isAudioMuted ? "Audio: OFF" : "Audio: ON";
@@ -1140,10 +1103,6 @@ public sealed class CompactHudMenuController : MonoBehaviour
     private void OnDrawerModeClicked()
     {
         CloseMenuDrawer();
-        if (pedagogyMasteryHud != null)
-        {
-            pedagogyMasteryHud.CloseMasteryReport();
-        }
         if (manager != null)
         {
             manager.TriggerToggleAirWeavingFromMenu();
@@ -1153,10 +1112,6 @@ public sealed class CompactHudMenuController : MonoBehaviour
     private void OnDrawerLevelClicked()
     {
         CloseMenuDrawer();
-        if (pedagogyMasteryHud != null)
-        {
-            pedagogyMasteryHud.CloseMasteryReport();
-        }
         if (manager != null)
         {
             manager.ToggleLevelSelector();
@@ -1166,46 +1121,9 @@ public sealed class CompactHudMenuController : MonoBehaviour
     private void OnDrawerResetClicked()
     {
         CloseMenuDrawer();
-        if (pedagogyMasteryHud != null)
-        {
-            pedagogyMasteryHud.CloseMasteryReport();
-            pedagogyMasteryHud.NotifyAttemptReset();
-        }
         if (manager != null)
         {
             manager.ResetCurrentLevel();
-        }
-    }
-
-    private void OnDrawerMasteryReportClicked()
-    {
-        CloseMenuDrawer();
-        if (manager != null)
-        {
-            manager.CloseAllModalsForMenu();
-        }
-        OnMasteryReportRequested?.Invoke();
-    }
-
-    private void OnDrawerReportClicked()
-    {
-        CloseMenuDrawer();
-        if (pedagogyMasteryHud != null)
-        {
-            pedagogyMasteryHud.CloseMasteryReport();
-        }
-        if (manager != null)
-        {
-            manager.ToggleCompetencyReport();
-        }
-    }
-
-    private void OnDrawerHintClicked()
-    {
-        CloseMenuDrawer();
-        if (manager != null)
-        {
-            manager.OnHintButtonClicked();
         }
     }
 
@@ -1226,10 +1144,6 @@ public sealed class CompactHudMenuController : MonoBehaviour
         }
 
         CloseMenuDrawer();
-        if (pedagogyMasteryHud != null)
-        {
-            pedagogyMasteryHud.CloseMasteryReport();
-        }
         if (manager != null)
         {
             manager.CloseAllModalsForMenu();
@@ -1245,10 +1159,6 @@ public sealed class CompactHudMenuController : MonoBehaviour
             return;
         }
 
-        if (pedagogyMasteryHud != null)
-        {
-            pedagogyMasteryHud.CloseMasteryReport();
-        }
         if (manager != null)
         {
             manager.CloseAllModalsForMenu();

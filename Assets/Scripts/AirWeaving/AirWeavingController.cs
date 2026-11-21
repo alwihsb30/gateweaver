@@ -371,9 +371,6 @@ public class AirWeavingController : MonoBehaviour
     private AirWeavingSpatialSfx spatialSfx;
     private AirWeavingGestureGuide gestureGuide;
     private CompactHudMenuController cachedHudMenu;
-    private PedagogyMasteryHud pedagogyHud;
-    private bool wasAirReadyForNextForMastery = false;
-    private int lastAirMasteryLevelIndex = -1;
     private readonly AirWeavingHandGestureDetector handGestureDetector = new AirWeavingHandGestureDetector();
     private readonly AirWeavingCircleSummoner circleSummoner = new AirWeavingCircleSummoner();
     private readonly List<GateNode> activePlacedGatesBuffer = new List<GateNode>(5);
@@ -432,8 +429,7 @@ public class AirWeavingController : MonoBehaviour
     public Vector3 PinchWorldPosition => pinchWorldPosition;
     public Vector3 IndexTipWorldPosition => indexTipWorldPosition;
     private bool IsAnyUiOverlayOpen => (levelManager != null && levelManager.IsUiOverlayOpen)
-                                       || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen)
-                                       || (pedagogyHud != null && pedagogyHud.IsMasteryReportOpen);
+                                       || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen);
 
     public event Action<bool> OnAirWeavingModeChanged;
     public event Action OnOutputVerifyRequested;
@@ -457,7 +453,6 @@ public class AirWeavingController : MonoBehaviour
         outputNode = output;
         txtFeedback = feedbackText;
         cachedHudMenu = levelManager != null ? levelManager.GetComponent<CompactHudMenuController>() : null;
-        BindPedagogyHudIfNeeded();
         if (gestureGuide != null)
         {
             gestureGuide.Configure(cachedHudMenu, spatialSfx, ResolveMainCamera(), txtFeedback != null ? txtFeedback.font : null);
@@ -514,11 +509,6 @@ public class AirWeavingController : MonoBehaviour
         outputTrigger?.HideImmediate();
         ResetLiveDebugMirror();
         ResetInputTouchState();
-        wasAirReadyForNextForMastery = false;
-        if (pedagogyHud != null)
-        {
-            pedagogyHud.NotifyAttemptReset();
-        }
 
         if (!isAirWeavingActive)
         {
@@ -588,18 +578,12 @@ public class AirWeavingController : MonoBehaviour
         }
         if (postDropLockoutTimer > 0f) postDropLockoutTimer = Mathf.Max(0f, postDropLockoutTimer - dt);
 
-        BindPedagogyHudIfNeeded();
-        bool masteryReportOpen = pedagogyHud != null && pedagogyHud.IsMasteryReportOpen;
-        if ((levelManager != null && levelManager.IsUiOverlayOpen) || masteryReportOpen)
+        if (levelManager != null && levelManager.IsUiOverlayOpen)
         {
             if (gestureGuide != null)
             {
                 gestureGuide.OnExternalModalOrMenuOpened();
             }
-        }
-        if (masteryReportOpen && spatialSfx != null)
-        {
-            spatialSfx.StopHumImmediate();
         }
         if (gestureGuide != null)
         {
@@ -694,11 +678,6 @@ public class AirWeavingController : MonoBehaviour
         {
             gestureGuide.CleanupImmediate();
             gestureGuide = null;
-        }
-        if (pedagogyHud != null)
-        {
-            pedagogyHud.OnMasteryReportOpened -= HandleMasteryReportOpened;
-            pedagogyHud = null;
         }
         cachedHudMenu = null;
         circuitManager?.SetManualRoutingMode(false);
@@ -917,9 +896,6 @@ public class AirWeavingController : MonoBehaviour
         {
             cachedHudMenu = levelManager.GetComponent<CompactHudMenuController>();
         }
-        BindPedagogyHudIfNeeded();
-        wasAirReadyForNextForMastery = false;
-        lastAirMasteryLevelIndex = levelManager != null ? levelManager.currentLevelIndex : -1;
         if (gestureGuide != null)
         {
             gestureGuide.Configure(cachedHudMenu, spatialSfx, mainCam, txtFeedback != null ? txtFeedback.font : null);
@@ -945,8 +921,6 @@ public class AirWeavingController : MonoBehaviour
     {
         isTransitioning = true;
         isAirWeavingActive = false;
-        wasAirReadyForNextForMastery = false;
-        lastAirMasteryLevelIndex = -1;
         gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
@@ -972,8 +946,6 @@ public class AirWeavingController : MonoBehaviour
     private IEnumerator RollbackToVuforiaMode(string warningMessage)
     {
         isAirWeavingActive = false;
-        wasAirReadyForNextForMastery = false;
-        lastAirMasteryLevelIndex = -1;
         gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
@@ -3083,7 +3055,6 @@ public class AirWeavingController : MonoBehaviour
             : mainCam.transform.TransformPoint(new Vector3(outputLocalXY.x, outputLocalXY.y, WorkbenchDepth));
 
         OutputDebugGuidanceState guidanceState = EvaluateOutputDebugGuidance(outputWorldPos, out int passedRowCount);
-        UpdateAirMasteryTelemetry(guidanceState);
 
         bool effectiveReadyForNext = isLiveCircuitPassedAllFour
                                      && levelManager != null
@@ -3400,76 +3371,6 @@ public class AirWeavingController : MonoBehaviour
         lastSfxPassedRowMask = debugPassedRowMask;
         lastSfxFailedRowMask = debugFailedRowMask;
         lastSfxGuidanceState = resultState;
-    }
-
-    private void BindPedagogyHudIfNeeded()
-    {
-        PedagogyMasteryHud resolved = null;
-        if (levelManager != null)
-        {
-            resolved = levelManager.GetComponent<PedagogyMasteryHud>();
-        }
-        if (resolved == null && cachedHudMenu != null)
-        {
-            resolved = cachedHudMenu.PedagogyMasteryHud;
-        }
-        if (pedagogyHud == resolved)
-        {
-            return;
-        }
-
-        if (pedagogyHud != null)
-        {
-            pedagogyHud.OnMasteryReportOpened -= HandleMasteryReportOpened;
-        }
-
-        pedagogyHud = resolved;
-        if (pedagogyHud != null)
-        {
-            pedagogyHud.OnMasteryReportOpened += HandleMasteryReportOpened;
-        }
-    }
-
-    private void HandleMasteryReportOpened()
-    {
-        if (gestureGuide != null)
-        {
-            gestureGuide.OnExternalModalOrMenuOpened();
-        }
-        if (spatialSfx != null)
-        {
-            spatialSfx.StopHumImmediate();
-        }
-    }
-
-    private void UpdateAirMasteryTelemetry(OutputDebugGuidanceState guidanceState)
-    {
-        if (!isAirWeavingActive || levelManager == null || levelManager.IsSandboxMode)
-        {
-            wasAirReadyForNextForMastery = false;
-            return;
-        }
-
-        int curLevelIdx = levelManager.currentLevelIndex;
-        if (curLevelIdx != lastAirMasteryLevelIndex)
-        {
-            lastAirMasteryLevelIndex = curLevelIdx;
-            wasAirReadyForNextForMastery = levelManager.IsReadyForNextLevel;
-        }
-
-        if (pedagogyHud != null
-            && (guidanceState == OutputDebugGuidanceState.CheckRedCells
-                || guidanceState == OutputDebugGuidanceState.ReduceGates))
-        {
-            pedagogyHud.NotifyAirDebugErrorObserved();
-        }
-
-        bool isReadyNow = isLiveCircuitPassedAllFour && levelManager.IsReadyForNextLevel;
-        if (isReadyNow && !wasAirReadyForNextForMastery && pedagogyHud != null)
-        {
-            pedagogyHud.NotifyAirLevelCompleted();
-        }
-        wasAirReadyForNextForMastery = isReadyNow;
     }
 
     private void UpdateAirWeavingStatusFeedback()

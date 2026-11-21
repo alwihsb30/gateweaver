@@ -4893,7 +4893,7 @@ public class LevelAndUIManager : MonoBehaviour
             yield break;
         }
 
-        FinalizeLevelVictoryState(currentLevel, isManualDiscovery: false, out bool isLastLevel, out bool wasAlreadyCleared);
+        FinalizeLevelVictoryState(currentLevel, isManualDiscovery: false, out _, out _);
 
         yield return new WaitForSeconds(0.10f);
         PlaySfx(clipVictoryFanfare);
@@ -4901,12 +4901,6 @@ public class LevelAndUIManager : MonoBehaviour
         if (outputNode != null)
         {
             outputNode.TriggerVictoryCelebration();
-        }
-
-        bool isAirMode = airWeavingController != null && airWeavingController.IsAirWeavingActive;
-        if (isLastLevel && !wasAlreadyCleared && !isAirMode)
-        {
-            OpenCompetencyReport();
         }
 
         isVerifying = false;
