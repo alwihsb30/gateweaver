@@ -369,6 +369,8 @@ public class AirWeavingController : MonoBehaviour
     private AirWeavingCableRouter cableRouter;
     private AirWeavingSummonVisual summonVisual;
     private AirWeavingSpatialSfx spatialSfx;
+    private AirWeavingGestureGuide gestureGuide;
+    private CompactHudMenuController cachedHudMenu;
     private readonly AirWeavingHandGestureDetector handGestureDetector = new AirWeavingHandGestureDetector();
     private readonly AirWeavingCircleSummoner circleSummoner = new AirWeavingCircleSummoner();
     private readonly List<GateNode> activePlacedGatesBuffer = new List<GateNode>(5);
@@ -423,6 +425,8 @@ public class AirWeavingController : MonoBehaviour
     public int DisplayedInferenceFps => displayedInferenceFps;
     public Vector3 PinchWorldPosition => pinchWorldPosition;
     public Vector3 IndexTipWorldPosition => indexTipWorldPosition;
+    private bool IsAnyUiOverlayOpen => (levelManager != null && levelManager.IsUiOverlayOpen)
+                                       || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen);
 
     public event Action<bool> OnAirWeavingModeChanged;
     public event Action OnOutputVerifyRequested;
@@ -445,6 +449,11 @@ public class AirWeavingController : MonoBehaviour
         inputBNode = inputB;
         outputNode = output;
         txtFeedback = feedbackText;
+        cachedHudMenu = levelManager != null ? levelManager.GetComponent<CompactHudMenuController>() : null;
+        if (gestureGuide != null)
+        {
+            gestureGuide.Configure(cachedHudMenu, spatialSfx, ResolveMainCamera(), txtFeedback != null ? txtFeedback.font : null);
+        }
     }
 
     public void ToggleAirWeavingMode()
@@ -566,6 +575,19 @@ public class AirWeavingController : MonoBehaviour
         }
         if (postDropLockoutTimer > 0f) postDropLockoutTimer = Mathf.Max(0f, postDropLockoutTimer - dt);
 
+        if (levelManager != null && levelManager.IsUiOverlayOpen)
+        {
+            gestureGuide?.OnExternalModalOrMenuOpened();
+        }
+        if (gestureGuide != null)
+        {
+            if (gestureGuide.IsGuideOverlayOpen && spatialSfx != null)
+            {
+                spatialSfx.StopHumImmediate();
+            }
+            gestureGuide.Tick(dt, mainCam);
+        }
+
         UpdateVideoQuadTransform(mainCam);
 
         if (webCamTexture.didUpdateThisFrame && handLandmarker != null && webCamTexture.width > 16 && webCamTexture.height > 16)
@@ -638,6 +660,12 @@ public class AirWeavingController : MonoBehaviour
             cableRouter.OnWireDisconnectedSfx -= HandleCableDetachSfx;
             cableRouter.OnWireRejectSfx -= HandleCableRejectSfx;
         }
+        if (gestureGuide != null)
+        {
+            gestureGuide.CleanupImmediate();
+            gestureGuide = null;
+        }
+        cachedHudMenu = null;
         circuitManager?.SetManualRoutingMode(false);
         RestoreAirWeavingLabelReadabilityStyles();
         ShutdownNativeAndCameraImmediate();
@@ -849,6 +877,14 @@ public class AirWeavingController : MonoBehaviour
         {
             spatialSfx.Configure(levelManager, mainCam);
         }
+        if (cachedHudMenu == null && levelManager != null)
+        {
+            cachedHudMenu = levelManager.GetComponent<CompactHudMenuController>();
+        }
+        if (gestureGuide != null)
+        {
+            gestureGuide.Configure(cachedHudMenu, spatialSfx, mainCam, txtFeedback != null ? txtFeedback.font : null);
+        }
         ResetLiveDebugMirror();
         ResetInputTouchState();
         circuitManager?.SetManualRoutingMode(true);
@@ -858,14 +894,19 @@ public class AirWeavingController : MonoBehaviour
 
         SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: true);
 
-        SetFeedbackImmediate("Mode Udara aktif — Sentuh telunjuk: sakelar Input, Kepal: pegang gerbang, Cubit: tarik kabel.", FeedbackActiveColor, 2.8f);
         OnAirWeavingModeChanged?.Invoke(true);
+        gestureGuide?.OnAirWeavingModeEntered();
+        if (gestureGuide == null || !gestureGuide.IsGuideOverlayOpen)
+        {
+            SetFeedbackImmediate("Mode Udara aktif — Sentuh telunjuk: sakelar Input, Kepal: pegang gerbang, Cubit: tarik kabel.", FeedbackActiveColor, 2.8f);
+        }
     }
 
     private IEnumerator ExitAirWeavingRoutine()
     {
         isTransitioning = true;
         isAirWeavingActive = false;
+        gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
         hoveredInputNode = null;
@@ -890,6 +931,7 @@ public class AirWeavingController : MonoBehaviour
     private IEnumerator RollbackToVuforiaMode(string warningMessage)
     {
         isAirWeavingActive = false;
+        gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
         hoveredInputNode = null;
@@ -1112,8 +1154,8 @@ public class AirWeavingController : MonoBehaviour
     {
         float aspectScale = ComputeHorizontalAspectScale(mainCam);
 
-        // 0. Jeda seluruh gestur tangan selama laci menu / modal UI terbuka (Guard #2 v7.0)
-        if (levelManager != null && levelManager.IsUiOverlayOpen)
+        // 0. Jeda seluruh gestur tangan selama laci menu / modal UI / kartu panduan terbuka (Guard #2 v7.0)
+        if (IsAnyUiOverlayOpen)
         {
             if (grabbedGateSlotIndex >= 0 && grabbedGateSlotIndex < gateSlots.Count) { ReleaseGrabbedGate(gateSlots[grabbedGateSlotIndex], aspectScale); grabbedGateSlotIndex = -1; }
             CancelAirDrawStrokeImmediate();
@@ -1320,7 +1362,7 @@ public class AirWeavingController : MonoBehaviour
             return false;
         }
         // Hold-to-verify dinonaktifkan: zona Output hanya memprioritaskan tahan-kepal setelah level LULUS (lanjut level)
-        if (levelManager == null || !levelManager.IsReadyForNextLevel || levelManager.IsSandboxMode || levelManager.IsVerifying || levelManager.IsUiOverlayOpen)
+        if (levelManager == null || !levelManager.IsReadyForNextLevel || levelManager.IsSandboxMode || levelManager.IsVerifying || IsAnyUiOverlayOpen)
         {
             return false;
         }
@@ -1611,9 +1653,13 @@ public class AirWeavingController : MonoBehaviour
             // Putus seluruh kabel gerbang & reset status uji manual (perubahan topologi otomatis mereset manualPassedRowMask = 0)
             cableRouter?.RemoveWiresForNode(slot.node, circuitManager);
             ResetLiveDebugMirror();
-            if (spatialSfx != null && (levelManager == null || !levelManager.IsUiOverlayOpen))
+            if (!IsAnyUiOverlayOpen)
             {
-                spatialSfx.PlayOutsideBoxDelete(releaseWorldPos);
+                if (spatialSfx != null)
+                {
+                    spatialSfx.PlayOutsideBoxDelete(releaseWorldPos);
+                }
+                gestureGuide?.NotifyGateDeletedOutsideZone();
             }
         }
         else
@@ -1625,7 +1671,7 @@ public class AirWeavingController : MonoBehaviour
             slot.currentLocalZ = WorkbenchDepth;
             slot.currentScale = ActiveGateScale;
             slot.node.TriggerTapFeedback();
-            if (spatialSfx != null && (levelManager == null || !levelManager.IsUiOverlayOpen))
+            if (spatialSfx != null && !IsAnyUiOverlayOpen)
             {
                 spatialSfx.PlayGatePlace(slot.node.transform.position);
             }
@@ -1762,6 +1808,7 @@ public class AirWeavingController : MonoBehaviour
         {
             spatialSfx.PlaySwitchToggle(targetNode.currentOutputValue, targetNode.transform.position);
         }
+        gestureGuide?.NotifyInputToggled();
     }
 
     private static void ComputeFloatingNodePose(
@@ -2447,6 +2494,10 @@ public class AirWeavingController : MonoBehaviour
         {
             spatialSfx.PlayCableSnapConnect(cableRouter.LastSfxWorldPosition);
         }
+        if (isAirWeavingActive)
+        {
+            gestureGuide?.NotifyCableConnected();
+        }
     }
 
     private void HandleCableDetachSfx()
@@ -2469,7 +2520,7 @@ public class AirWeavingController : MonoBehaviour
 
     private void UpdateHandWakeAudioFeedback(float dt)
     {
-        bool overlayOrVerify = levelManager != null && (levelManager.IsUiOverlayOpen || levelManager.IsVerifying);
+        bool overlayOrVerify = IsAnyUiOverlayOpen || (levelManager != null && levelManager.IsVerifying);
         if (isHandDetected)
         {
             if (!wasHandDetectedForWakeSfx
@@ -2499,7 +2550,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        bool overlayOrVerify = levelManager != null && (levelManager.IsUiOverlayOpen || levelManager.IsVerifying);
+        bool overlayOrVerify = IsAnyUiOverlayOpen || (levelManager != null && levelManager.IsVerifying);
         if (!isAirWeavingActive || !isHandDetected || overlayOrVerify || mainCam == null)
         {
             spatialSfx.StopHumImmediate();
@@ -2548,7 +2599,7 @@ public class AirWeavingController : MonoBehaviour
             hoverSfxPostActionSuppressTimer = Mathf.Max(0f, hoverSfxPostActionSuppressTimer - dt);
         }
 
-        bool overlayOrVerify = levelManager != null && (levelManager.IsUiOverlayOpen || levelManager.IsVerifying);
+        bool overlayOrVerify = IsAnyUiOverlayOpen || (levelManager != null && levelManager.IsVerifying);
         bool busyGesture = grabbedGateSlotIndex >= 0
                            || (cableRouter != null && cableRouter.IsDraggingCable)
                            || handGestureDetector.IsFistActive
@@ -2646,7 +2697,7 @@ public class AirWeavingController : MonoBehaviour
             activePlacedGatesBuffer,
             WorkbenchDepth,
             isAirWeavingActive,
-            levelManager != null && levelManager.IsUiOverlayOpen,
+            IsAnyUiOverlayOpen,
             levelManager != null && levelManager.IsVerifying,
             blockedCable,
             isHandDetected,
@@ -2661,7 +2712,7 @@ public class AirWeavingController : MonoBehaviour
     private void SyncCableRouterVisualsAfterPoseUpdate(Camera mainCam)
     {
         if (cableRouter == null || mainCam == null) return;
-        bool overlayOrVerify = levelManager != null && (levelManager.IsUiOverlayOpen || levelManager.IsVerifying);
+        bool overlayOrVerify = IsAnyUiOverlayOpen || (levelManager != null && levelManager.IsVerifying);
         bool blockedCable = overlayOrVerify || grabbedGateSlotIndex >= 0 || circleSummoner.IsActive || handGestureDetector.IsFistActive;
         cableRouter.SyncVisualsAfterPoseUpdate(
             mainCam,
@@ -2680,7 +2731,7 @@ public class AirWeavingController : MonoBehaviour
     {
         if (hologramVisual == null || mainCam == null) return;
         Transform camT = mainCam.transform;
-        bool overlayOpen = levelManager != null && levelManager.IsUiOverlayOpen;
+        bool overlayOpen = IsAnyUiOverlayOpen;
         bool isVerifying = levelManager != null && levelManager.IsVerifying;
         bool canShowHover = isHandDetected && !overlayOpen && !isVerifying;
         hologramVisual.SetRootVisible(isAirWeavingActive);
@@ -2772,7 +2823,7 @@ public class AirWeavingController : MonoBehaviour
     {
         if (mainCam == null) return;
         float aspectScale = ComputeHorizontalAspectScale(mainCam);
-        bool overlayOrVerify = levelManager != null && (levelManager.IsUiOverlayOpen || levelManager.IsVerifying);
+        bool overlayOrVerify = IsAnyUiOverlayOpen || (levelManager != null && levelManager.IsVerifying);
         bool draggingCable = cableRouter != null && cableRouter.IsDraggingCable;
         bool pinchBusy = handGestureDetector.IsPinchActive || handGestureDetector.IsPrePinchSuppressingSummon;
         bool blocked;
@@ -2935,6 +2986,7 @@ public class AirWeavingController : MonoBehaviour
             spatialSfx.PlayBloomSpawn(worldPos);
         }
         postDropLockoutTimer = PostDropOutputLockoutSeconds;
+        gestureGuide?.NotifyGateSummoned();
         SetFeedbackImmediate($"Gerbang {gateType} dipanggil ke zona rakit!", FeedbackPinchColor, 1.8f);
     }
 
@@ -2976,7 +3028,7 @@ public class AirWeavingController : MonoBehaviour
             levelManager != null && levelManager.IsVerifying,
             levelManager != null && levelManager.IsCircuitCompleteLive,
             levelManager != null && levelManager.IsReadyForNextLevel,
-            levelManager != null && levelManager.IsUiOverlayOpen,
+            IsAnyUiOverlayOpen,
             isHandDetected, handGestureDetector.IsFistActive, handGestureDetector.PalmCursorLocalXY,
             outputLocalXY, outputWorldPos,
             grabbedGateSlotIndex >= 0, hoveredGateSlotIndex >= 0,
@@ -3180,7 +3232,7 @@ public class AirWeavingController : MonoBehaviour
             if (noHandToastShown) { noHandToastShown = false; levelManager?.ClearLowPriorityNoHandToast(); }
             noHandAbsentTimer = 0f;
         }
-        else if (levelManager == null || (!levelManager.IsVerifying && !levelManager.IsUiOverlayOpen))
+        else if (!IsAnyUiOverlayOpen && (levelManager == null || !levelManager.IsVerifying))
         {
             noHandAbsentTimer += dt;
             if (noHandAbsentTimer >= NoHandPromptDelaySeconds && !noHandToastShown)
@@ -3406,6 +3458,15 @@ public class AirWeavingController : MonoBehaviour
         }
         spatialSfx.EnsureInitialized();
         spatialSfx.Configure(levelManager, ResolveMainCamera());
+        if (gestureGuide == null)
+        {
+            gestureGuide = GetComponent<AirWeavingGestureGuide>() ?? gameObject.AddComponent<AirWeavingGestureGuide>();
+        }
+        if (cachedHudMenu == null && levelManager != null)
+        {
+            cachedHudMenu = levelManager.GetComponent<CompactHudMenuController>();
+        }
+        gestureGuide.Configure(cachedHudMenu, spatialSfx, ResolveMainCamera(), txtFeedback != null ? txtFeedback.font : null);
 
         workbenchVisualRootObj.SetActive(false);
     }
@@ -3695,6 +3756,7 @@ public class AirWeavingController : MonoBehaviour
         {
             spatialSfx.StopAllImmediate();
         }
+        gestureGuide?.OnAirWeavingModeExited();
         summonVisual?.HideImmediate();
 
         if (workbenchVisualRootObj != null && workbenchVisualRootObj.activeSelf)

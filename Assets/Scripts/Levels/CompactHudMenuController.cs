@@ -15,6 +15,10 @@ using TMPro;
 public sealed class CompactHudMenuController : MonoBehaviour
 {
     private const float TopBarHeight = 72f;
+    private const float DrawerHeightCardMode = 344f;
+    private const float DrawerHeightAirMode = 398f;
+    private const float ToastDefaultBottomY = 16f;
+    private const float ToastPracticeOffsetBottomY = 76f;
     private const float DefaultToastDurationSeconds = 2.6f;
     private const float ImportantToastDurationSeconds = 4.6f;
     private const float FailureToastDurationSeconds = 5.5f;
@@ -42,6 +46,7 @@ public sealed class CompactHudMenuController : MonoBehaviour
     private static readonly Color DrawerItemModeActiveBgColor = new Color(0.08f, 0.34f, 0.28f, 0.96f);
     private static readonly Color DrawerItemResetBgColor = new Color(0.24f, 0.14f, 0.16f, 0.96f);
     private static readonly Color DrawerItemMutedBgColor = new Color(0.26f, 0.16f, 0.12f, 0.96f);
+    private static readonly Color DrawerItemGuideBgColor = new Color(0.08f, 0.28f, 0.40f, 0.96f);
     private static readonly Color InputACyanOutlineColor = new Color(0.18f, 0.85f, 1.00f, 0.96f);
     private static readonly Color InputBGoldOutlineColor = new Color(1.00f, 0.84f, 0.22f, 0.96f);
     private static readonly Color CardBottomVerifyBgColor = new Color(0.07f, 0.40f, 0.56f, 0.74f);
@@ -70,6 +75,7 @@ public sealed class CompactHudMenuController : MonoBehaviour
     private Image feedbackBackdropImage;
     private Outline feedbackBackdropOutline;
     private GameObject quotaAlertPillObj;
+    private RectTransform quotaAlertPillRect;
 
     private GameObject legacyScannerPanelObj;
     private GameObject legacyResetBtnObj;
@@ -83,9 +89,13 @@ public sealed class CompactHudMenuController : MonoBehaviour
 
     private Button menuToggleButton;
     private Image menuToggleBg;
+    private GameObject guideToggleBtnObj;
+    private Button guideToggleButton;
+    private Image guideToggleBg;
     private GameObject menuScrimObj;
     private Button menuScrimButton;
     private GameObject menuDrawerObj;
+    private RectTransform menuDrawerRect;
 
     private Button drawerModeBtn;
     private Image drawerModeBg;
@@ -99,10 +109,13 @@ public sealed class CompactHudMenuController : MonoBehaviour
     private Button drawerAudioBtn;
     private Image drawerAudioBg;
     private TMP_Text txtDrawerAudio;
+    private GameObject drawerGuideBtnObj;
+    private Button drawerGuideBtn;
 
     private bool isInitialized = false;
     private bool isMenuDrawerOpen = false;
     private bool isAirWeavingActive = false;
+    private bool isPracticePillBottomOffsetActive = false;
 
     // Toast-Only state (zero-GC)
     private string lastObservedFeedbackText;
@@ -112,6 +125,11 @@ public sealed class CompactHudMenuController : MonoBehaviour
 
     public bool IsMenuDrawerOpen => isMenuDrawerOpen;
     public bool HasActiveProtectedToast => toastRemainingSeconds > 0f && (activeToastIsProtected || !activeToastIsNoHand);
+    public Canvas TargetCanvas => targetCanvas;
+    public TMP_FontAsset SafeFont => safeFont;
+
+    public event Action OnGestureGuideRequested;
+    public event Action OnMenuDrawerOpened;
 
     public void Initialize(
         LevelAndUIManager owner,
@@ -176,14 +194,42 @@ public sealed class CompactHudMenuController : MonoBehaviour
     public void SetAirWeavingMode(bool active)
     {
         isAirWeavingActive = active;
+        if (!active)
+        {
+            isPracticePillBottomOffsetActive = false;
+            SetGuideButtonActiveState(false);
+        }
         if (!isInitialized)
         {
             return;
         }
 
         CloseMenuDrawer();
+        RefreshModeSpecificLayout();
         ConfigureFeedbackToastLayout();
         RefreshAllVisualStates();
+    }
+
+    public void SetGuideButtonActiveState(bool isGuideOpen)
+    {
+        if (guideToggleBg != null)
+        {
+            guideToggleBg.color = isGuideOpen ? MenuButtonOpenBgColor : MenuButtonBgColor;
+        }
+    }
+
+    public void SetPracticePillBottomOffset(bool active)
+    {
+        if (isPracticePillBottomOffsetActive == active)
+        {
+            return;
+        }
+
+        isPracticePillBottomOffsetActive = active;
+        if (isInitialized)
+        {
+            ConfigureFeedbackToastLayout();
+        }
     }
 
     public void RefreshAllVisualStates()
@@ -199,6 +245,7 @@ public sealed class CompactHudMenuController : MonoBehaviour
             legacyScannerPanelObj.SetActive(false);
         }
 
+        RefreshModeSpecificLayout();
         RefreshActionControlsState();
         RefreshDrawerItemLabels();
     }
@@ -263,7 +310,9 @@ public sealed class CompactHudMenuController : MonoBehaviour
         {
             manager.CloseAllModalsForMenu();
         }
+        OnMenuDrawerOpened?.Invoke();
 
+        RefreshModeSpecificLayout();
         RefreshDrawerItemLabels();
         isMenuDrawerOpen = true;
         if (menuScrimObj != null)
@@ -414,6 +463,7 @@ public sealed class CompactHudMenuController : MonoBehaviour
     private void OnDestroy()
     {
         RemoveBtnListener(menuToggleButton, ToggleMenuDrawer);
+        RemoveBtnListener(guideToggleButton, OnTopBarGuideClicked);
         RemoveBtnListener(menuScrimButton, CloseMenuDrawer);
         RemoveBtnListener(drawerModeBtn, OnDrawerModeClicked);
         RemoveBtnListener(drawerLevelBtn, OnDrawerLevelClicked);
@@ -421,7 +471,13 @@ public sealed class CompactHudMenuController : MonoBehaviour
         RemoveBtnListener(drawerReportBtn, OnDrawerReportClicked);
         RemoveBtnListener(drawerHintBtn, OnDrawerHintClicked);
         RemoveBtnListener(drawerAudioBtn, OnDrawerAudioClicked);
+        RemoveBtnListener(drawerGuideBtn, OnDrawerGuideClicked);
 
+        if (guideToggleBtnObj != null)
+        {
+            Destroy(guideToggleBtnObj);
+            guideToggleBtnObj = null;
+        }
         if (menuDrawerObj != null)
         {
             Destroy(menuDrawerObj);
@@ -437,6 +493,12 @@ public sealed class CompactHudMenuController : MonoBehaviour
             Destroy(quotaAlertPillObj);
             quotaAlertPillObj = null;
         }
+        quotaAlertPillRect = null;
+        guideToggleButton = null;
+        guideToggleBg = null;
+        menuDrawerRect = null;
+        drawerGuideBtnObj = null;
+        drawerGuideBtn = null;
         feedbackBackdropImage = null;
         feedbackBackdropOutline = null;
     }
@@ -563,6 +625,7 @@ public sealed class CompactHudMenuController : MonoBehaviour
             quotaAlertPillObj = new GameObject("Quota_AlertPill", typeof(RectTransform), typeof(Image), typeof(Outline));
             quotaAlertPillObj.transform.SetParent(topRect, false);
             RectTransform pillRect = quotaAlertPillObj.GetComponent<RectTransform>();
+            quotaAlertPillRect = pillRect;
             pillRect.anchorMin = new Vector2(1f, 0.5f);
             pillRect.anchorMax = new Vector2(1f, 0.5f);
             pillRect.pivot = new Vector2(1f, 0.5f);
@@ -624,19 +687,64 @@ public sealed class CompactHudMenuController : MonoBehaviour
         CreateHamburgerBar(btnRect, "Bar_Mid", 0f);
         CreateHamburgerBar(btnRect, "Bar_Bot", -9f);
 
+        // 1B. Tombol panduan gestur '?' tepat di sebelah kiri tombol menu (hanya tampil saat Mode Udara aktif)
+        guideToggleBtnObj = new GameObject("Btn_AirGestureGuide", typeof(RectTransform), typeof(Image), typeof(Button), typeof(Outline));
+        guideToggleBtnObj.transform.SetParent(topBarRect, false);
+        RectTransform guideBtnRect = guideToggleBtnObj.GetComponent<RectTransform>();
+        guideBtnRect.anchorMin = new Vector2(1f, 0.5f);
+        guideBtnRect.anchorMax = new Vector2(1f, 0.5f);
+        guideBtnRect.pivot = new Vector2(1f, 0.5f);
+        guideBtnRect.anchoredPosition = new Vector2(-78f, 0f);
+        guideBtnRect.sizeDelta = new Vector2(50f, 50f);
+
+        guideToggleBg = guideToggleBtnObj.GetComponent<Image>();
+        guideToggleBg.color = MenuButtonBgColor;
+        guideToggleBg.raycastTarget = true;
+
+        Outline guideBtnOutline = guideToggleBtnObj.GetComponent<Outline>();
+        guideBtnOutline.effectColor = TopBarAccentColor;
+        guideBtnOutline.effectDistance = new Vector2(1.6f, -1.6f);
+
+        guideToggleButton = guideToggleBtnObj.GetComponent<Button>();
+        guideToggleButton.targetGraphic = guideToggleBg;
+        guideToggleButton.colors = CompactBtnColorBlock;
+        guideToggleButton.onClick.AddListener(OnTopBarGuideClicked);
+
+        GameObject guideTxtObj = new GameObject("Txt_GuideIcon", typeof(RectTransform), typeof(TextMeshProUGUI));
+        guideTxtObj.transform.SetParent(guideBtnRect, false);
+        RectTransform guideTxtRect = guideTxtObj.GetComponent<RectTransform>();
+        guideTxtRect.anchorMin = Vector2.zero;
+        guideTxtRect.anchorMax = Vector2.one;
+        guideTxtRect.offsetMin = Vector2.zero;
+        guideTxtRect.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI guideTmp = guideTxtObj.GetComponent<TextMeshProUGUI>();
+        if (safeFont != null)
+        {
+            guideTmp.font = safeFont;
+        }
+        guideTmp.text = "?";
+        guideTmp.fontStyle = FontStyles.Bold;
+        guideTmp.fontSize = 26f;
+        guideTmp.alignment = TextAlignmentOptions.Center;
+        guideTmp.color = new Color(0.90f, 0.98f, 1.00f, 1f);
+        guideTmp.textWrappingMode = TextWrappingModes.NoWrap;
+        guideTmp.raycastTarget = false;
+        guideToggleBtnObj.SetActive(false);
+
         if (targetCanvas == null)
         {
             return;
         }
 
-        // 2. Scrim transparan klik-luar untuk menutup laci menu dengan 1 ketukan di luar area laci
+        // 2. Scrim transparan klik-luar di bawah Bilah Atas agar tombol '?' & menu tetap responsif dalam 1 ketukan
         menuScrimObj = new GameObject("Btn_CompactMenuOutsideScrim", typeof(RectTransform), typeof(Image), typeof(Button));
         menuScrimObj.transform.SetParent(targetCanvas.transform, false);
         RectTransform scrimRect = menuScrimObj.GetComponent<RectTransform>();
         scrimRect.anchorMin = Vector2.zero;
         scrimRect.anchorMax = Vector2.one;
         scrimRect.offsetMin = Vector2.zero;
-        scrimRect.offsetMax = Vector2.zero;
+        scrimRect.offsetMax = new Vector2(0f, -TopBarHeight);
 
         Image scrimImg = menuScrimObj.GetComponent<Image>();
         scrimImg.color = new Color(0f, 0f, 0f, 0.01f);
@@ -648,15 +756,16 @@ public sealed class CompactHudMenuController : MonoBehaviour
         menuScrimButton.onClick.AddListener(CloseMenuDrawer);
         menuScrimObj.SetActive(false);
 
-        // 3. Laci popover kompak pojok kanan atas (6 aksi meta)
+        // 3. Laci popover kompak pojok kanan atas (6 aksi meta + opsi Panduan Gestur khusus Mode Udara)
         menuDrawerObj = new GameObject("Panel_CompactMenuDrawer", typeof(RectTransform), typeof(Image), typeof(Outline));
         menuDrawerObj.transform.SetParent(targetCanvas.transform, false);
         RectTransform drawerRect = menuDrawerObj.GetComponent<RectTransform>();
+        menuDrawerRect = drawerRect;
         drawerRect.anchorMin = new Vector2(1f, 1f);
         drawerRect.anchorMax = new Vector2(1f, 1f);
         drawerRect.pivot = new Vector2(1f, 1f);
         drawerRect.anchoredPosition = new Vector2(-14f, -(TopBarHeight + 8f));
-        drawerRect.sizeDelta = new Vector2(268f, 344f);
+        drawerRect.sizeDelta = new Vector2(268f, DrawerHeightCardMode);
 
         Image drawerBg = menuDrawerObj.GetComponent<Image>();
         drawerBg.color = MenuDrawerBgColor;
@@ -680,6 +789,13 @@ public sealed class CompactHudMenuController : MonoBehaviour
         drawerHintBtn = CreateDrawerItem("Item_Hint", drawerRect, itemY, "Petunjuk (0/3)", DrawerItemBgColor, OnDrawerHintClicked, out _, out txtDrawerHint);
         itemY -= itemStep;
         drawerAudioBtn = CreateDrawerItem("Item_AudioToggle", drawerRect, itemY, "Audio: ON", DrawerItemBgColor, OnDrawerAudioClicked, out drawerAudioBg, out txtDrawerAudio);
+        itemY -= itemStep;
+        drawerGuideBtn = CreateDrawerItem("Item_GestureGuide", drawerRect, itemY, "Panduan Gestur", DrawerItemGuideBgColor, OnDrawerGuideClicked, out _, out _);
+        drawerGuideBtnObj = drawerGuideBtn != null ? drawerGuideBtn.gameObject : null;
+        if (drawerGuideBtnObj != null)
+        {
+            drawerGuideBtnObj.SetActive(false);
+        }
 
         menuDrawerObj.SetActive(false);
     }
@@ -862,12 +978,15 @@ public sealed class CompactHudMenuController : MonoBehaviour
 
         float toastWidth = isAirWeavingActive ? 1140f : 920f;
         const float toastHeight = 62f;
+        float toastBottomY = (isAirWeavingActive && isPracticePillBottomOffsetActive)
+            ? ToastPracticeOffsetBottomY
+            : ToastDefaultBottomY;
 
         RectTransform fbRect = txtFeedback.rectTransform;
         fbRect.anchorMin = new Vector2(0.5f, 0f);
         fbRect.anchorMax = new Vector2(0.5f, 0f);
         fbRect.pivot = new Vector2(0.5f, 0f);
-        fbRect.anchoredPosition = new Vector2(0f, 16f);
+        fbRect.anchoredPosition = new Vector2(0f, toastBottomY);
         fbRect.sizeDelta = new Vector2(toastWidth, toastHeight);
         txtFeedback.alignment = TextAlignmentOptions.Center;
         txtFeedback.textWrappingMode = TextWrappingModes.Normal;
@@ -884,7 +1003,7 @@ public sealed class CompactHudMenuController : MonoBehaviour
                 bgRect.anchorMin = fbRect.anchorMin;
                 bgRect.anchorMax = fbRect.anchorMax;
                 bgRect.pivot = fbRect.pivot;
-                bgRect.anchoredPosition = new Vector2(0f, 13f);
+                bgRect.anchoredPosition = new Vector2(0f, toastBottomY - 3f);
                 bgRect.sizeDelta = new Vector2(toastWidth + 28f, toastHeight + 8f);
             }
         }
@@ -1049,6 +1168,64 @@ public sealed class CompactHudMenuController : MonoBehaviour
             manager.ToggleAudioMute();
         }
         RefreshDrawerItemLabels();
+    }
+
+    private void OnTopBarGuideClicked()
+    {
+        if (!isAirWeavingActive)
+        {
+            return;
+        }
+
+        CloseMenuDrawer();
+        if (manager != null)
+        {
+            manager.CloseAllModalsForMenu();
+        }
+        OnGestureGuideRequested?.Invoke();
+    }
+
+    private void OnDrawerGuideClicked()
+    {
+        CloseMenuDrawer();
+        if (!isAirWeavingActive)
+        {
+            return;
+        }
+
+        if (manager != null)
+        {
+            manager.CloseAllModalsForMenu();
+        }
+        OnGestureGuideRequested?.Invoke();
+    }
+
+    private void RefreshModeSpecificLayout()
+    {
+        if (guideToggleBtnObj != null && guideToggleBtnObj.activeSelf != isAirWeavingActive)
+        {
+            guideToggleBtnObj.SetActive(isAirWeavingActive);
+        }
+
+        if (quotaAlertPillRect != null)
+        {
+            quotaAlertPillRect.anchoredPosition = new Vector2(isAirWeavingActive ? -138f : -80f, 0f);
+        }
+
+        if (txtQuotaStatus != null)
+        {
+            txtQuotaStatus.rectTransform.offsetMax = new Vector2(isAirWeavingActive ? -148f : -90f, -6f);
+        }
+
+        if (drawerGuideBtnObj != null && drawerGuideBtnObj.activeSelf != isAirWeavingActive)
+        {
+            drawerGuideBtnObj.SetActive(isAirWeavingActive);
+        }
+
+        if (menuDrawerRect != null)
+        {
+            menuDrawerRect.sizeDelta = new Vector2(268f, isAirWeavingActive ? DrawerHeightAirMode : DrawerHeightCardMode);
+        }
     }
 
     private static void SetObjActive(Component comp, bool active)
