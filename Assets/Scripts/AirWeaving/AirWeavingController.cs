@@ -371,6 +371,9 @@ public class AirWeavingController : MonoBehaviour
     private AirWeavingSpatialSfx spatialSfx;
     private AirWeavingGestureGuide gestureGuide;
     private CompactHudMenuController cachedHudMenu;
+    private PedagogyMasteryHud pedagogyHud;
+    private bool wasAirReadyForNextForMastery = false;
+    private int lastAirMasteryLevelIndex = -1;
     private readonly AirWeavingHandGestureDetector handGestureDetector = new AirWeavingHandGestureDetector();
     private readonly AirWeavingCircleSummoner circleSummoner = new AirWeavingCircleSummoner();
     private readonly List<GateNode> activePlacedGatesBuffer = new List<GateNode>(5);
@@ -387,6 +390,9 @@ public class AirWeavingController : MonoBehaviour
     private int lastDebugWireCount = -1;
     private int lastDebugTopologyVersion = -1;
     private bool lastDebugCircuitComplete = false;
+    private int lastEvaluatedCircuitTopologyVersion = -1;
+    private bool isLiveCircuitPassedAllFour = false;
+    private readonly List<GateNode> truthEvalVisited = new List<GateNode>(10);
     private enum HoverSfxCategory
     {
         None = 0,
@@ -426,7 +432,8 @@ public class AirWeavingController : MonoBehaviour
     public Vector3 PinchWorldPosition => pinchWorldPosition;
     public Vector3 IndexTipWorldPosition => indexTipWorldPosition;
     private bool IsAnyUiOverlayOpen => (levelManager != null && levelManager.IsUiOverlayOpen)
-                                       || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen);
+                                       || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen)
+                                       || (pedagogyHud != null && pedagogyHud.IsMasteryReportOpen);
 
     public event Action<bool> OnAirWeavingModeChanged;
     public event Action OnOutputVerifyRequested;
@@ -450,6 +457,7 @@ public class AirWeavingController : MonoBehaviour
         outputNode = output;
         txtFeedback = feedbackText;
         cachedHudMenu = levelManager != null ? levelManager.GetComponent<CompactHudMenuController>() : null;
+        BindPedagogyHudIfNeeded();
         if (gestureGuide != null)
         {
             gestureGuide.Configure(cachedHudMenu, spatialSfx, ResolveMainCamera(), txtFeedback != null ? txtFeedback.font : null);
@@ -506,6 +514,11 @@ public class AirWeavingController : MonoBehaviour
         outputTrigger?.HideImmediate();
         ResetLiveDebugMirror();
         ResetInputTouchState();
+        wasAirReadyForNextForMastery = false;
+        if (pedagogyHud != null)
+        {
+            pedagogyHud.NotifyAttemptReset();
+        }
 
         if (!isAirWeavingActive)
         {
@@ -575,9 +588,18 @@ public class AirWeavingController : MonoBehaviour
         }
         if (postDropLockoutTimer > 0f) postDropLockoutTimer = Mathf.Max(0f, postDropLockoutTimer - dt);
 
-        if (levelManager != null && levelManager.IsUiOverlayOpen)
+        BindPedagogyHudIfNeeded();
+        bool masteryReportOpen = pedagogyHud != null && pedagogyHud.IsMasteryReportOpen;
+        if ((levelManager != null && levelManager.IsUiOverlayOpen) || masteryReportOpen)
         {
-            gestureGuide?.OnExternalModalOrMenuOpened();
+            if (gestureGuide != null)
+            {
+                gestureGuide.OnExternalModalOrMenuOpened();
+            }
+        }
+        if (masteryReportOpen && spatialSfx != null)
+        {
+            spatialSfx.StopHumImmediate();
         }
         if (gestureGuide != null)
         {
@@ -623,6 +645,14 @@ public class AirWeavingController : MonoBehaviour
         UpdateCircleSummoner(mainCam, dt);
         UpdateAirDrawStrokeFade(mainCam, dt);
         SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: false);
+        if (cableRouter != null && cableRouter.TopologyVersion != lastEvaluatedCircuitTopologyVersion)
+        {
+            lastEvaluatedCircuitTopologyVersion = cableRouter.TopologyVersion;
+            if (circuitManager != null)
+            {
+                circuitManager.EvaluateCircuit();
+            }
+        }
         SyncCableRouterVisualsAfterPoseUpdate(mainCam);
         UpdateHoverSfxFeedback(dt);
         UpdateContinuousHumFeedback(mainCam, dt);
@@ -665,6 +695,11 @@ public class AirWeavingController : MonoBehaviour
             gestureGuide.CleanupImmediate();
             gestureGuide = null;
         }
+        if (pedagogyHud != null)
+        {
+            pedagogyHud.OnMasteryReportOpened -= HandleMasteryReportOpened;
+            pedagogyHud = null;
+        }
         cachedHudMenu = null;
         circuitManager?.SetManualRoutingMode(false);
         RestoreAirWeavingLabelReadabilityStyles();
@@ -674,6 +709,7 @@ public class AirWeavingController : MonoBehaviour
         pausedObserverHandlers.Clear();
         gateSlots.Clear();
         activePlacedGatesBuffer.Clear();
+        truthEvalVisited.Clear();
         airDrawPointsLocal.Clear();
         cachedMainCamera = null;
         cachedVuforiaBehaviour = null;
@@ -881,6 +917,9 @@ public class AirWeavingController : MonoBehaviour
         {
             cachedHudMenu = levelManager.GetComponent<CompactHudMenuController>();
         }
+        BindPedagogyHudIfNeeded();
+        wasAirReadyForNextForMastery = false;
+        lastAirMasteryLevelIndex = levelManager != null ? levelManager.currentLevelIndex : -1;
         if (gestureGuide != null)
         {
             gestureGuide.Configure(cachedHudMenu, spatialSfx, mainCam, txtFeedback != null ? txtFeedback.font : null);
@@ -906,6 +945,8 @@ public class AirWeavingController : MonoBehaviour
     {
         isTransitioning = true;
         isAirWeavingActive = false;
+        wasAirReadyForNextForMastery = false;
+        lastAirMasteryLevelIndex = -1;
         gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
@@ -931,6 +972,8 @@ public class AirWeavingController : MonoBehaviour
     private IEnumerator RollbackToVuforiaMode(string warningMessage)
     {
         isAirWeavingActive = false;
+        wasAirReadyForNextForMastery = false;
+        lastAirMasteryLevelIndex = -1;
         gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
@@ -1361,8 +1404,8 @@ public class AirWeavingController : MonoBehaviour
         {
             return false;
         }
-        // Hold-to-verify dinonaktifkan: zona Output hanya memprioritaskan tahan-kepal setelah level LULUS (lanjut level)
-        if (levelManager == null || !levelManager.IsReadyForNextLevel || levelManager.IsSandboxMode || levelManager.IsVerifying || IsAnyUiOverlayOpen)
+        // Hold-to-verify dinonaktifkan: zona Output hanya memprioritaskan tahan-kepal setelah rangkaian live benar-benar LULUS 4/4
+        if (levelManager == null || !levelManager.IsReadyForNextLevel || !isLiveCircuitPassedAllFour || levelManager.IsSandboxMode || levelManager.IsVerifying || IsAnyUiOverlayOpen)
         {
             return false;
         }
@@ -1652,6 +1695,10 @@ public class AirWeavingController : MonoBehaviour
 
             // Putus seluruh kabel gerbang & reset status uji manual (perubahan topologi otomatis mereset manualPassedRowMask = 0)
             cableRouter?.RemoveWiresForNode(slot.node, circuitManager);
+            if (circuitManager != null)
+            {
+                circuitManager.EvaluateCircuit();
+            }
             ResetLiveDebugMirror();
             if (!IsAnyUiOverlayOpen)
             {
@@ -1671,6 +1718,10 @@ public class AirWeavingController : MonoBehaviour
             slot.currentLocalZ = WorkbenchDepth;
             slot.currentScale = ActiveGateScale;
             slot.node.TriggerTapFeedback();
+            if (circuitManager != null)
+            {
+                circuitManager.EvaluateCircuit();
+            }
             if (spatialSfx != null && !IsAnyUiOverlayOpen)
             {
                 spatialSfx.PlayGatePlace(slot.node.transform.position);
@@ -1801,6 +1852,12 @@ public class AirWeavingController : MonoBehaviour
         else
         {
             targetNode.ToggleInputState();
+        }
+
+        // Evaluasi rangkaian sinkron agar outputNode.currentOutputValue tidak pernah tertinggal 1 frame pasca-toggle sakelar
+        if (circuitManager != null)
+        {
+            circuitManager.EvaluateCircuit();
         }
 
         targetNode.TriggerTapFeedback();
@@ -2979,6 +3036,10 @@ public class AirWeavingController : MonoBehaviour
         Quaternion worldRot = camT.rotation * WorkbenchTiltRotation;
         targetSlot.node.transform.localScale = Vector3.one * targetSlot.currentScale;
         targetSlot.node.SetExternalSpatialPose(true, worldPos, worldRot);
+        if (circuitManager != null)
+        {
+            circuitManager.EvaluateCircuit();
+        }
         targetSlot.node.TriggerTapFeedback();
         summonVisual?.TriggerBloomBurst(worldPos, isAmberNotice: false);
         if (spatialSfx != null)
@@ -3022,12 +3083,17 @@ public class AirWeavingController : MonoBehaviour
             : mainCam.transform.TransformPoint(new Vector3(outputLocalXY.x, outputLocalXY.y, WorkbenchDepth));
 
         OutputDebugGuidanceState guidanceState = EvaluateOutputDebugGuidance(outputWorldPos, out int passedRowCount);
+        UpdateAirMasteryTelemetry(guidanceState);
+
+        bool effectiveReadyForNext = isLiveCircuitPassedAllFour
+                                     && levelManager != null
+                                     && levelManager.IsReadyForNextLevel;
 
         outputTrigger.Tick(mainCam, dt, isAirWeavingActive,
             levelManager != null && levelManager.IsSandboxMode,
             levelManager != null && levelManager.IsVerifying,
             levelManager != null && levelManager.IsCircuitCompleteLive,
-            levelManager != null && levelManager.IsReadyForNextLevel,
+            effectiveReadyForNext,
             IsAnyUiOverlayOpen,
             isHandDetected, handGestureDetector.IsFistActive, handGestureDetector.PalmCursorLocalXY,
             outputLocalXY, outputWorldPos,
@@ -3068,6 +3134,8 @@ public class AirWeavingController : MonoBehaviour
         lastDebugWireCount = -1;
         lastDebugTopologyVersion = -1;
         lastDebugCircuitComplete = false;
+        lastEvaluatedCircuitTopologyVersion = -1;
+        isLiveCircuitPassedAllFour = false;
         lastSfxPassedRowMask = 0;
         lastSfxFailedRowMask = 0;
         lastSfxGuidanceState = OutputDebugGuidanceState.ConnectToOutput;
@@ -3079,7 +3147,6 @@ public class AirWeavingController : MonoBehaviour
 
         bool isSandbox = levelManager != null && levelManager.IsSandboxMode;
         bool isComplete = levelManager != null && levelManager.IsCircuitCompleteLive;
-        bool isReadyNext = levelManager != null && levelManager.IsReadyForNextLevel;
         int curLevelIdx = levelManager != null ? levelManager.currentLevelIndex : -1;
         int activeGates = circuitManager != null ? circuitManager.activeGateCardsCount : 0;
         int wireCount = circuitManager != null ? circuitManager.GetActiveConnectionCount() : 0;
@@ -3096,6 +3163,7 @@ public class AirWeavingController : MonoBehaviour
         {
             debugPassedRowMask = 0;
             debugFailedRowMask = 0;
+            isLiveCircuitPassedAllFour = false;
             lastSfxPassedRowMask = 0;
             lastSfxFailedRowMask = 0;
             if (!isComplete || curLevelIdx != lastDebugLevelIndex)
@@ -3111,12 +3179,14 @@ public class AirWeavingController : MonoBehaviour
 
         if (isSandbox || !isComplete)
         {
+            isLiveCircuitPassedAllFour = false;
             lastSfxGuidanceState = OutputDebugGuidanceState.ConnectToOutput;
             return OutputDebugGuidanceState.ConnectToOutput;
         }
 
         if (levelManager == null || levelManager.levels == null || levelManager.levels.Count == 0)
         {
+            isLiveCircuitPassedAllFour = false;
             lastSfxGuidanceState = OutputDebugGuidanceState.ConnectToOutput;
             return OutputDebugGuidanceState.ConnectToOutput;
         }
@@ -3124,6 +3194,7 @@ public class AirWeavingController : MonoBehaviour
         LevelScenario currentLevel = levelManager.levels[Mathf.Clamp(curLevelIdx, 0, levelManager.levels.Count - 1)];
         if (currentLevel == null || currentLevel.expectedTruthTable == null || currentLevel.expectedTruthTable.Length < 4)
         {
+            isLiveCircuitPassedAllFour = false;
             lastSfxGuidanceState = OutputDebugGuidanceState.ConnectToOutput;
             return OutputDebugGuidanceState.ConnectToOutput;
         }
@@ -3159,6 +3230,9 @@ public class AirWeavingController : MonoBehaviour
         }
         passedRowCount = passed;
 
+        // Verifikasi matematis penuh 4 baris graf live (Zero-GC) agar status LULUS 4/4 tidak pernah muncul pada rangkaian salah
+        bool liveCircuitMatchesTruthTable = DoesLiveCircuitMatchExpectedTruthTable(currentLevel.expectedTruthTable);
+
         OutputDebugGuidanceState resultState;
         if (isOverQuota)
         {
@@ -3168,7 +3242,7 @@ public class AirWeavingController : MonoBehaviour
         {
             resultState = OutputDebugGuidanceState.CheckRedCells;
         }
-        else if (isReadyNext || passed >= 4)
+        else if (liveCircuitMatchesTruthTable && passed >= 4)
         {
             passedRowCount = 4;
             resultState = OutputDebugGuidanceState.PassedAllFour;
@@ -3178,8 +3252,120 @@ public class AirWeavingController : MonoBehaviour
             resultState = OutputDebugGuidanceState.TestSwitches;
         }
 
+        isLiveCircuitPassedAllFour = (resultState == OutputDebugGuidanceState.PassedAllFour);
         TriggerTruthPodDebugSfx(resultState, passedRowCount, outputWorldPos);
         return resultState;
+    }
+
+    private bool DoesLiveCircuitMatchExpectedTruthTable(bool[] expectedTruthTable)
+    {
+        if (expectedTruthTable == null || expectedTruthTable.Length < 4)
+        {
+            return false;
+        }
+
+        if (outputNode == null
+            || !outputNode.isTracked
+            || outputNode.connectedInputs == null
+            || outputNode.connectedInputs.Count == 0
+            || outputNode.connectedInputs[0] == null
+            || !outputNode.connectedInputs[0].isTracked)
+        {
+            return false;
+        }
+
+        GateNode root = outputNode.connectedInputs[0];
+        for (int row = 0; row < 4; row++)
+        {
+            bool valA = (row & 2) != 0;
+            bool valB = (row & 1) != 0;
+            truthEvalVisited.Clear();
+            if (!TryEvaluateLiveNodeForInputs(root, valA, valB, depth: 0, out bool actualOut)
+                || actualOut != expectedTruthTable[row])
+            {
+                truthEvalVisited.Clear();
+                return false;
+            }
+        }
+
+        truthEvalVisited.Clear();
+        return true;
+    }
+
+    private bool TryEvaluateLiveNodeForInputs(GateNode node, bool valA, bool valB, int depth, out bool value)
+    {
+        value = false;
+        if (node == null || !node.isTracked || depth >= 8)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < truthEvalVisited.Count; i++)
+        {
+            if (truthEvalVisited[i] == node)
+            {
+                return false;
+            }
+        }
+
+        truthEvalVisited.Add(node);
+        bool ok = false;
+
+        switch (node.nodeType)
+        {
+            case NodeType.InputSource:
+                if (inputBNode != null && node == inputBNode)
+                {
+                    value = valB;
+                }
+                else
+                {
+                    value = valA;
+                }
+                ok = true;
+                break;
+
+            case NodeType.NOT:
+                if (node.connectedInputs != null && node.connectedInputs.Count >= 1
+                    && TryEvaluateLiveNodeForInputs(node.connectedInputs[0], valA, valB, depth + 1, out bool notIn))
+                {
+                    value = !notIn;
+                    ok = true;
+                }
+                break;
+
+            case NodeType.AND:
+            case NodeType.OR:
+            case NodeType.XOR:
+            case NodeType.NAND:
+                if (node.connectedInputs != null && node.connectedInputs.Count >= 2
+                    && TryEvaluateLiveNodeForInputs(node.connectedInputs[0], valA, valB, depth + 1, out bool leftVal)
+                    && TryEvaluateLiveNodeForInputs(node.connectedInputs[1], valA, valB, depth + 1, out bool rightVal))
+                {
+                    switch (node.nodeType)
+                    {
+                        case NodeType.AND: value = leftVal && rightVal; break;
+                        case NodeType.OR: value = leftVal || rightVal; break;
+                        case NodeType.XOR: value = leftVal ^ rightVal; break;
+                        case NodeType.NAND: value = !(leftVal && rightVal); break;
+                    }
+                    ok = true;
+                }
+                break;
+
+            case NodeType.OutputActuator:
+                if (node.connectedInputs != null && node.connectedInputs.Count >= 1)
+                {
+                    ok = TryEvaluateLiveNodeForInputs(node.connectedInputs[0], valA, valB, depth + 1, out value);
+                }
+                break;
+        }
+
+        if (truthEvalVisited.Count > 0)
+        {
+            truthEvalVisited.RemoveAt(truthEvalVisited.Count - 1);
+        }
+        return ok;
     }
 
     private void TriggerTruthPodDebugSfx(OutputDebugGuidanceState resultState, int passedRowCount, Vector3 outputWorldPos)
@@ -3214,6 +3400,76 @@ public class AirWeavingController : MonoBehaviour
         lastSfxPassedRowMask = debugPassedRowMask;
         lastSfxFailedRowMask = debugFailedRowMask;
         lastSfxGuidanceState = resultState;
+    }
+
+    private void BindPedagogyHudIfNeeded()
+    {
+        PedagogyMasteryHud resolved = null;
+        if (levelManager != null)
+        {
+            resolved = levelManager.GetComponent<PedagogyMasteryHud>();
+        }
+        if (resolved == null && cachedHudMenu != null)
+        {
+            resolved = cachedHudMenu.PedagogyMasteryHud;
+        }
+        if (pedagogyHud == resolved)
+        {
+            return;
+        }
+
+        if (pedagogyHud != null)
+        {
+            pedagogyHud.OnMasteryReportOpened -= HandleMasteryReportOpened;
+        }
+
+        pedagogyHud = resolved;
+        if (pedagogyHud != null)
+        {
+            pedagogyHud.OnMasteryReportOpened += HandleMasteryReportOpened;
+        }
+    }
+
+    private void HandleMasteryReportOpened()
+    {
+        if (gestureGuide != null)
+        {
+            gestureGuide.OnExternalModalOrMenuOpened();
+        }
+        if (spatialSfx != null)
+        {
+            spatialSfx.StopHumImmediate();
+        }
+    }
+
+    private void UpdateAirMasteryTelemetry(OutputDebugGuidanceState guidanceState)
+    {
+        if (!isAirWeavingActive || levelManager == null || levelManager.IsSandboxMode)
+        {
+            wasAirReadyForNextForMastery = false;
+            return;
+        }
+
+        int curLevelIdx = levelManager.currentLevelIndex;
+        if (curLevelIdx != lastAirMasteryLevelIndex)
+        {
+            lastAirMasteryLevelIndex = curLevelIdx;
+            wasAirReadyForNextForMastery = levelManager.IsReadyForNextLevel;
+        }
+
+        if (pedagogyHud != null
+            && (guidanceState == OutputDebugGuidanceState.CheckRedCells
+                || guidanceState == OutputDebugGuidanceState.ReduceGates))
+        {
+            pedagogyHud.NotifyAirDebugErrorObserved();
+        }
+
+        bool isReadyNow = isLiveCircuitPassedAllFour && levelManager.IsReadyForNextLevel;
+        if (isReadyNow && !wasAirReadyForNextForMastery && pedagogyHud != null)
+        {
+            pedagogyHud.NotifyAirLevelCompleted();
+        }
+        wasAirReadyForNextForMastery = isReadyNow;
     }
 
     private void UpdateAirWeavingStatusFeedback()

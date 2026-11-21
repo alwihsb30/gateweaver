@@ -42,7 +42,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     private const string BadgeConnectToOutput = "SAMBUNG KE OUTPUT";
     private const string BadgeReduceGates = "KURANGI GERBANG";
     private const string BadgeCheckRedCells = "CEK SEL MERAH";
-    private const string BadgePassedAllFour = "LULUS! 4/4";
+    private const string BadgePassedAllFour = "LULUS 4/4";
     private static readonly string[] BadgeTestSwitchesCache =
     {
         "UJI SAKELAR (0/4)",
@@ -229,8 +229,10 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             visualRootObj.SetActive(true);
         }
 
-        // Edge detection pasca-Auto-Win: wajib Re-Arm singkat agar selebrasi tidak langsung melompat level
-        bool effectiveReadyForNext = isReadyForNextLevel && isCircuitComplete;
+        // Edge detection pasca-Auto-Win: hanya aktif jika rangkaian live benar-benar lulus 4/4 (0 sel merah & kuota valid)
+        bool effectiveReadyForNext = isReadyForNextLevel
+                                     && isCircuitComplete
+                                     && guidanceState == OutputDebugGuidanceState.PassedAllFour;
         if (effectiveReadyForNext && !wasReadyForNext)
         {
             requiresRearm = true;
@@ -293,7 +295,6 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         UpdateVisuals(
             mainCam.transform,
             outputWorldPos,
-            effectiveReadyForNext,
             guidanceState,
             passedRowCount,
             isUiOverlayOpen);
@@ -321,7 +322,6 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     private void UpdateVisuals(
         Transform camT,
         Vector3 outputWorldPos,
-        bool isReadyForNextLevel,
         OutputDebugGuidanceState guidanceState,
         int passedRowCount,
         bool isUiOverlayOpen)
@@ -344,8 +344,8 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         // Geser sedikit ke belakang (+camForward) dengan radius luas mengelilingi luar bodi 3D Output agar bebas clipping
         Vector3 haloCenter = outputWorldPos + (camUp * HaloCenterUpOffset) + (camForward * HaloDepthBehindOutput);
 
-        // A. Halo Diegetik sesuai status debugging live
-        if (isReadyForNextLevel || guidanceState == OutputDebugGuidanceState.PassedAllFour)
+        // A. Halo Diegetik sesuai status debugging live (hijau HANYA jika rangkaian live benar-benar PassedAllFour)
+        if (guidanceState == OutputDebugGuidanceState.PassedAllFour)
         {
             float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 5.0f));
             float innerR = HaloRadius + (0.010f * pulse);
@@ -420,8 +420,8 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             // Sejajar penuh dengan bidang kamera (flat camera-facing, bebas efek miring/terpelintir di sisi layar)
             badgeRootObj.transform.rotation = camT.rotation;
 
-            OutputDebugGuidanceState effectiveState = isReadyForNextLevel ? OutputDebugGuidanceState.PassedAllFour : guidanceState;
-            string desiredText = ResolveGuidanceText(effectiveState, passedRowCount, out Color desiredColor, out float desiredWidth);
+            // Lencana selalu mengikuti status debugging live agar tidak pernah menimpa CEK SEL MERAH / KURANGI GERBANG
+            string desiredText = ResolveGuidanceText(guidanceState, passedRowCount, out Color desiredColor, out float desiredWidth);
 
             if (!string.Equals(desiredText, lastBadgeText, StringComparison.Ordinal) && badgeText != null)
             {
