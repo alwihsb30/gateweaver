@@ -18,8 +18,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
     public const float DefaultElevationPitchDeg = 36.0f;
     private static readonly Quaternion DefaultBaseTiltRotation = Quaternion.Euler(-DefaultElevationPitchDeg, 0f, 0f);
 
-    // Framing awal 0.58x memuat utuh lapangan hologram 2.0x (termasuk Output kanan & rak NOT); Ultra-Wide Zoom 0.18x..15.0x
-    public const float DefaultZoomScale = 0.58f;
+    // Framing awal 0.62x memuat utuh lapangan hologram 2.0x yang lebih rapat; Ultra-Wide Zoom 0.18x..15.0x
+    public const float DefaultZoomScale = 0.62f;
     public const float MinZoomScale = 0.18f;
     public const float MaxZoomScale = 15.0f;
 
@@ -52,6 +52,13 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private const float ZoomSpringOmega = 14.0f;
     private const float PanSpringOmega = 14.0f;
     private const float ParallaxSpringOmega = 7.5f;
+
+    // Kurva Sensitivitas Non-Linear + Soft Detent halus di sudut pandang nyaman 36° (orbit 360° analog tetap 100% bebas)
+    private const float OrbitNonLinearRefStepDeg = 2.60f;
+    private const float OrbitNonLinearFineFloor = 0.48f;
+    private const float OrbitSoftDetentCaptureAngleDeg = 9.0f;
+    private const float OrbitSoftDetentPullRate = 4.6f;
+    private const float OrbitSoftDetentMaxCoastSpeedDegPerSec = 10.0f;
 
     // Parameter True Z-Axis Push/Pull Logaritmik Simetris (terpisah dari Zoom skala & Anchor 2D; log(curEstDepth / anchorEstDepth))
     private const float TwoHandDepthMinDeadzone = 0.018f;
@@ -107,6 +114,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private static readonly Color ContactGateParkedColor = new Color(0.20f, 0.86f, 1.00f, 0.56f);
     private static readonly Color ContactGateLiftedColor = new Color(1.00f, 0.88f, 0.30f, 0.68f);
     private static readonly Color ContactGateDeleteColor = new Color(1.00f, 0.26f, 0.22f, 0.86f);
+    private static readonly Color GridSnapTargetOuterColor = new Color(0.30f, 1.00f, 0.84f, 0.86f);
+    private static readonly Color GridSnapTargetInnerColor = new Color(0.76f, 1.00f, 0.38f, 0.72f);
 
     public struct ContactNodeDescriptor
     {
@@ -161,6 +170,12 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private Material[] contactInnerMats;
     private Material[] contactStemMats;
 
+    // Pratinjau Cincin Target Magnetic Grid Snap + Auto-Separate (1 pasang LineRenderer pra-alokasi, Zero-GC)
+    private LineRenderer gridSnapTargetOuterRing;
+    private LineRenderer gridSnapTargetInnerRing;
+    private Material gridSnapTargetOuterMat;
+    private Material gridSnapTargetInnerMat;
+
     private struct ContactSlotCache
     {
         public bool valid;
@@ -192,7 +207,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     private float targetZoomScale = DefaultZoomScale;
     private float currentZoomScale = DefaultZoomScale;
-    private float currentLogZoom = -0.54472718f; // Mathf.Log(DefaultZoomScale = 0.58f)
+    private float currentLogZoom = -0.47803580f; // Mathf.Log(DefaultZoomScale = 0.62f)
     private float velocityLogZoom = 0f;
 
     private Vector3 targetPanOffset = Vector3.zero;
@@ -406,19 +421,27 @@ public sealed class AirWeavingStageController : MonoBehaviour
             contactElevationStems[i].enabled = false;
         }
 
+        // 8. Pratinjau Cincin Target Magnetic Grid Snap + Auto-Separate (terbaring di lantai dek XZ, Zero-GC)
+        gridSnapTargetOuterMat = CreateSafeSpritesMaterial(GridSnapTargetOuterColor, 2983);
+        gridSnapTargetInnerMat = CreateSafeSpritesMaterial(GridSnapTargetInnerColor, 2983);
+        gridSnapTargetOuterRing = CreateLocalLine("HoloStage_GridSnapOuter", floorVisualGroupObj.transform, ContactRingSegments, loop: true, width: 0.0078f, gridSnapTargetOuterMat);
+        gridSnapTargetInnerRing = CreateLocalLine("HoloStage_GridSnapInner", floorVisualGroupObj.transform, ContactRingSegments, loop: true, width: 0.0046f, gridSnapTargetInnerMat);
+        gridSnapTargetOuterRing.enabled = false;
+        gridSnapTargetInnerRing.enabled = false;
+
         isInitialized = true;
         ResetViewToDefault(immediate: true);
         if (mainCam != null)
         {
             RebuildStaticFloorGridGeometry(
                 ComputeAspectScale(mainCam),
-                assemblyMinBaseX: -1.48f,
-                assemblyMaxBaseX: 1.52f,
-                assemblyMinZ: -1.56f,
-                assemblyMaxZ: 0.92f,
-                inputBaseX: -2.52f,
-                outputBaseX: 2.56f,
-                parkingRackZ: 1.64f);
+                assemblyMinBaseX: -1.40f,
+                assemblyMaxBaseX: 1.44f,
+                assemblyMinZ: -1.44f,
+                assemblyMaxZ: 0.88f,
+                inputBaseX: -2.16f,
+                outputBaseX: 2.20f,
+                parkingRackZ: 1.56f);
         }
         HideImmediate();
     }
@@ -481,6 +504,9 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 contactSlotCaches[i].valid = false;
             }
         }
+
+        if (gridSnapTargetOuterRing != null) gridSnapTargetOuterRing.enabled = false;
+        if (gridSnapTargetInnerRing != null) gridSnapTargetInnerRing.enabled = false;
 
         if (stageRootObj != null && stageRootObj.activeSelf)
         {
@@ -944,10 +970,13 @@ public sealed class AirWeavingStageController : MonoBehaviour
         Quaternion stageRotBefore = targetOrbitRotation * DefaultBaseTiltRotation;
         Vector3 focusCamBefore = pivotBefore + (stageRotBefore * (orbitFocusLocal * targetZoomScale));
 
-        // 3. Pre-multiply Quaternion Arcball 360° pada sumbu layar kamera (camT.up, camT.right, camT.forward)
-        Quaternion deltaYaw = Quaternion.AngleAxis(yawDeltaDeg, camTransform != null ? camTransform.up : Vector3.up);
-        Quaternion deltaPitch = Quaternion.AngleAxis(pitchDeltaDeg, camTransform != null ? camTransform.right : Vector3.right);
-        Quaternion deltaRoll = Quaternion.AngleAxis(rollDeltaDeg, camTransform != null ? camTransform.forward : Vector3.forward);
+        // 3. Pre-multiply Quaternion Arcball 360° dengan kurva sensitivitas non-linear (gerakan mikro presisi, sapuan lebar penuh)
+        float shapedYawDeg = ShapeOrbitSensitivityDeg(yawDeltaDeg);
+        float shapedPitchDeg = ShapeOrbitSensitivityDeg(pitchDeltaDeg);
+        float shapedRollDeg = ShapeOrbitSensitivityDeg(rollDeltaDeg);
+        Quaternion deltaYaw = Quaternion.AngleAxis(shapedYawDeg, camTransform != null ? camTransform.up : Vector3.up);
+        Quaternion deltaPitch = Quaternion.AngleAxis(shapedPitchDeg, camTransform != null ? camTransform.right : Vector3.right);
+        Quaternion deltaRoll = Quaternion.AngleAxis(shapedRollDeg, camTransform != null ? camTransform.forward : Vector3.forward);
         Quaternion deltaWorld = deltaRoll * deltaPitch * deltaYaw;
         Quaternion deltaCamLocal = camTransform != null
             ? (Quaternion.Inverse(camTransform.rotation) * deltaWorld * camTransform.rotation)
@@ -1566,6 +1595,34 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 if (coastingSpeedDegPerSec <= CoastAngularStopSpeedDegPerSec) coastingSpeedDegPerSec = 0f;
                 if (Mathf.Abs(coastLogZoomVelocity) <= StageCoastStopEpsilon) coastLogZoomVelocity = 0f;
                 if (coastPanVelocity.sqrMagnitude <= StageCoastStopEpsilon * StageCoastStopEpsilon) coastPanVelocity = Vector3.zero;
+
+                // Soft Detent halus di sudut pandang nyaman 36° (targetOrbitRotation -> Quaternion.identity)
+                // hanya saat dilepas pelan dalam zona < 9° agar orbit 360° analog tetap 100% bebas tanpa terasa nyangkut.
+                if (coastingSpeedDegPerSec <= OrbitSoftDetentMaxCoastSpeedDegPerSec)
+                {
+                    float devFromComfortDeg = Quaternion.Angle(targetOrbitRotation, Quaternion.identity);
+                    if (devFromComfortDeg > 0.02f && devFromComfortDeg < OrbitSoftDetentCaptureAngleDeg)
+                    {
+                        float proximity = 1f - (devFromComfortDeg / OrbitSoftDetentCaptureAngleDeg);
+                        float pullRate = OrbitSoftDetentPullRate * (0.45f + (0.55f * proximity));
+                        float detentAlpha = 1f - Mathf.Exp(-pullRate * dt);
+                        Quaternion prevRot = targetOrbitRotation;
+                        targetOrbitRotation = NormalizeQuaternion(Quaternion.Slerp(targetOrbitRotation, Quaternion.identity, detentAlpha));
+                        if (hasActiveOrbitFocus)
+                        {
+                            Vector3 pivotBeforeDetent = new Vector3(
+                                targetPanOffset.x,
+                                StagePivotCameraOffsetY + targetPanOffset.y,
+                                refDepth + targetPanOffset.z);
+                            Vector3 focusCamBeforeDetent = pivotBeforeDetent + ((prevRot * DefaultBaseTiltRotation) * (orbitFocusLocal * targetZoomScale));
+                            Quaternion detentDelta = NormalizeQuaternion(targetOrbitRotation * Quaternion.Inverse(prevRot));
+                            Vector3 pivotAfterDetent = focusCamBeforeDetent + (detentDelta * (pivotBeforeDetent - focusCamBeforeDetent));
+                            targetPanOffset.x = pivotAfterDetent.x;
+                            targetPanOffset.y = pivotAfterDetent.y - StagePivotCameraOffsetY;
+                            targetPanOffset.z = pivotAfterDetent.z - refDepth;
+                        }
+                    }
+                }
             }
         }
 
@@ -1666,7 +1723,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
         Vector2 grabbedGateStageXZ,
         bool isGrabbedGateOutsideZone,
         ContactNodeDescriptor[] contactNodes,
-        int contactNodeCount)
+        int contactNodeCount,
+        bool showGridSnapTarget = false,
+        Vector2 gridSnapTargetXZ = default,
+        float grabbedGateHoverY = BaseHoverHeight)
     {
         if (!isInitialized || mainCam == null || stageRootTransform == null)
         {
@@ -1921,6 +1981,54 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 stemCol = stemCol
             };
         }
+
+        // 3. Pratinjau Cincin Target Magnetic Grid Snap + Auto-Separate (tampil halus di lantai dek saat GateGrab di AssemblyZone)
+        if (gridSnapTargetOuterRing != null && gridSnapTargetInnerRing != null)
+        {
+            if (showGridSnapTarget && isGrabbingGate && !isGrabbedGateOutsideZone)
+            {
+                float nearDeckT = 1f - Mathf.Clamp01((grabbedGateHoverY - BaseHoverHeight) / Mathf.Max(0.12f, GrabExtraLiftHeight * 2.2f));
+                float snapPulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 6.5f));
+                float alphaScale = Mathf.Lerp(0.46f, 0.94f, nearDeckT);
+
+                Color snapOuterCol = new Color(
+                    GridSnapTargetOuterColor.r,
+                    GridSnapTargetOuterColor.g,
+                    GridSnapTargetOuterColor.b,
+                    GridSnapTargetOuterColor.a * alphaScale);
+                Color snapInnerCol = new Color(
+                    GridSnapTargetInnerColor.r,
+                    GridSnapTargetInnerColor.g,
+                    GridSnapTargetInnerColor.b,
+                    GridSnapTargetInnerColor.a * alphaScale);
+
+                float snapOuterRadius = 0.215f + (0.014f * snapPulse);
+                float snapInnerRadius = 0.088f + (0.008f * (1f - snapPulse));
+                DrawLocalTableXZCircle(
+                    gridSnapTargetOuterRing,
+                    gridSnapTargetOuterMat,
+                    gridSnapTargetXZ.x,
+                    ContactRingLocalY + 0.002f,
+                    gridSnapTargetXZ.y,
+                    snapOuterRadius,
+                    snapOuterCol,
+                    Mathf.Lerp(0.0064f, 0.0092f, nearDeckT));
+                DrawLocalTableXZCircle(
+                    gridSnapTargetInnerRing,
+                    gridSnapTargetInnerMat,
+                    gridSnapTargetXZ.x,
+                    ContactRingLocalY + 0.0025f,
+                    gridSnapTargetXZ.y,
+                    snapInnerRadius,
+                    snapInnerCol,
+                    0.0046f);
+            }
+            else
+            {
+                if (gridSnapTargetOuterRing.enabled) gridSnapTargetOuterRing.enabled = false;
+                if (gridSnapTargetInnerRing.enabled) gridSnapTargetInnerRing.enabled = false;
+            }
+        }
     }
 
     // =========================================================================
@@ -2026,12 +2134,12 @@ public sealed class AirWeavingStageController : MonoBehaviour
         float arenaFrontZ = assemblyMinZ - 0.16f;
         float arenaBackZ = assemblyMaxZ + 0.16f;
 
-        // Batas Dek Meja Hologram Utuh 2.0x (mencakup Sayap Input Kiri, Zona Rakit Tengah, Sayap Output Kanan + Truth Pod, & Teras Rak Parkir Belakang)
-        float deckLeftX = Mathf.Min(inputBaseX - 0.56f, assemblyMinBaseX - 1.20f) * aspectScale;
-        float deckRightX = Mathf.Max(outputBaseX + 0.68f, assemblyMaxBaseX + 1.28f) * aspectScale;
-        float deckFrontZ = assemblyMinZ - 0.36f;
-        float deckBackZ = parkingRackZ + 0.56f;
-        float deckChamfer = 0.48f;
+        // Batas Dek Meja Hologram Utuh 2.0x yang dirapatkan (mengurangi ruang mati di sisi kiri Input & kanan Output)
+        float deckLeftX = Mathf.Min(inputBaseX - 0.44f, assemblyMinBaseX - 0.96f) * aspectScale;
+        float deckRightX = Mathf.Max(outputBaseX + 0.54f, assemblyMaxBaseX + 1.04f) * aspectScale;
+        float deckFrontZ = assemblyMinZ - 0.30f;
+        float deckBackZ = parkingRackZ + 0.48f;
+        float deckChamfer = 0.44f;
 
         // Simpan bounding box dek untuk clamping Focus-Point Orbit & perhitungan OBB Dynamic Pan Bounds
         deckMinX = deckLeftX;
@@ -2085,31 +2193,31 @@ public sealed class AirWeavingStageController : MonoBehaviour
         float gridY = StageFloorLocalY + 0.001f;
         RebuildFloorGridRibbonMesh(deckLeftX, deckRightX, deckFrontZ, deckBackZ, deckChamfer, gridY);
 
-        // 5. Dermaga Sayap Terminal Input (Kiri), Sayap Output (Kanan), & Teras Rak Parkir (Belakang Meja) 2.0x rata di permukaan dek XZ
-        float inBayOuterX = (inputBaseX - 0.40f) * aspectScale;
-        float inBayInnerX = arenaLeftX - (0.08f * aspectScale);
+        // 5. Dermaga Sayap Terminal Input (Kiri), Sayap Output (Kanan), & Teras Rak Parkir (Belakang Meja) yang dirapatkan
+        float inBayOuterX = (inputBaseX - 0.34f) * aspectScale;
+        float inBayInnerX = arenaLeftX - (0.06f * aspectScale);
         if (wingGuideRenderers[0] != null)
         {
             wingGuideRenderers[0].SetPosition(0, new Vector3(inBayInnerX, gridY, arenaBackZ - 0.08f));
-            wingGuideRenderers[0].SetPosition(1, new Vector3(inBayOuterX, gridY, arenaBackZ - 0.20f));
+            wingGuideRenderers[0].SetPosition(1, new Vector3(inBayOuterX, gridY, arenaBackZ - 0.18f));
             wingGuideRenderers[0].SetPosition(2, new Vector3(inBayOuterX, gridY, arenaFrontZ + 0.08f));
             wingGuideRenderers[0].SetPosition(3, new Vector3(inBayInnerX, gridY, arenaFrontZ + 0.04f));
         }
 
-        float outBayInnerX = arenaRightX + (0.08f * aspectScale);
-        float outBayOuterX = (outputBaseX + 0.48f) * aspectScale;
+        float outBayInnerX = arenaRightX + (0.06f * aspectScale);
+        float outBayOuterX = (outputBaseX + 0.42f) * aspectScale;
         if (wingGuideRenderers[1] != null)
         {
-            wingGuideRenderers[1].SetPosition(0, new Vector3(outBayInnerX, gridY, arenaBackZ - 0.12f));
-            wingGuideRenderers[1].SetPosition(1, new Vector3(outBayOuterX, gridY, arenaBackZ - 0.24f));
-            wingGuideRenderers[1].SetPosition(2, new Vector3(outBayOuterX, gridY, arenaFrontZ + 0.12f));
-            wingGuideRenderers[1].SetPosition(3, new Vector3(outBayInnerX, gridY, arenaFrontZ + 0.08f));
+            wingGuideRenderers[1].SetPosition(0, new Vector3(outBayInnerX, gridY, arenaBackZ - 0.10f));
+            wingGuideRenderers[1].SetPosition(1, new Vector3(outBayOuterX, gridY, arenaBackZ - 0.20f));
+            wingGuideRenderers[1].SetPosition(2, new Vector3(outBayOuterX, gridY, arenaFrontZ + 0.10f));
+            wingGuideRenderers[1].SetPosition(3, new Vector3(outBayInnerX, gridY, arenaFrontZ + 0.06f));
         }
 
-        float rackFrontZ = arenaBackZ + 0.10f;
-        float rackBackZ = parkingRackZ + 0.40f;
-        float rackLeftX = -1.92f * aspectScale;
-        float rackRightX = 1.92f * aspectScale;
+        float rackFrontZ = arenaBackZ + 0.08f;
+        float rackBackZ = parkingRackZ + 0.36f;
+        float rackLeftX = -1.78f * aspectScale;
+        float rackRightX = 1.78f * aspectScale;
         if (wingGuideRenderers[2] != null)
         {
             wingGuideRenderers[2].SetPosition(0, new Vector3(rackLeftX, gridY, rackFrontZ));
@@ -2391,6 +2499,19 @@ public sealed class AirWeavingStageController : MonoBehaviour
         mat.renderQueue = renderQueue;
         ownedMaterials.Add(mat);
         return mat;
+    }
+
+    private static float ShapeOrbitSensitivityDeg(float rawDeltaDeg)
+    {
+        float absDeg = Mathf.Abs(rawDeltaDeg);
+        if (absDeg <= 0.0001f)
+        {
+            return 0f;
+        }
+        float t = Mathf.Clamp01(absDeg / OrbitNonLinearRefStepDeg);
+        float smooth = t * t * (3f - (2f * t));
+        float gain = Mathf.Lerp(OrbitNonLinearFineFloor, 1.0f, smooth);
+        return rawDeltaDeg * gain;
     }
 
     private static Quaternion NormalizeQuaternion(Quaternion q)

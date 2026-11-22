@@ -364,6 +364,10 @@ public sealed class CompactHudMenuController : MonoBehaviour
     private RectTransform guideToggleRect;
     private Button guideToggleButton;
     private Image guideToggleBg;
+    private GameObject recenterStageBtnObj;
+    private RectTransform recenterStageRect;
+    private Button recenterStageButton;
+    private Image recenterStageBg;
     private GameObject menuScrimObj;
     private Button menuScrimButton;
     private GameObject menuDrawerObj;
@@ -409,6 +413,7 @@ public sealed class CompactHudMenuController : MonoBehaviour
     public TMP_FontAsset SafeFont => safeFont;
 
     public event Action OnGestureGuideRequested;
+    public event Action OnStageRecenterRequested;
     public event Action OnMenuDrawerOpened;
 
     public void Initialize(
@@ -770,6 +775,7 @@ public sealed class CompactHudMenuController : MonoBehaviour
     {
         RemoveBtnListener(menuToggleButton, ToggleMenuDrawer);
         RemoveBtnListener(guideToggleButton, OnTopBarGuideClicked);
+        RemoveBtnListener(recenterStageButton, OnTopBarRecenterClicked);
         RemoveBtnListener(menuScrimButton, CloseMenuDrawer);
         RemoveBtnListener(drawerModeBtn, OnDrawerModeClicked);
         RemoveBtnListener(drawerLevelBtn, OnDrawerLevelClicked);
@@ -1144,6 +1150,36 @@ public sealed class CompactHudMenuController : MonoBehaviour
         guideTmp.raycastTarget = false;
         guideToggleBtnObj.SetActive(false);
 
+        // 1C. Tombol cepat Re-Center kamera berbentuk Squircle (60x58 px) di sebelah kiri tombol '?' (khusus Mode Udara)
+        recenterStageBtnObj = new GameObject("Btn_AirStageRecenter", typeof(RectTransform), typeof(Image), typeof(Button), typeof(Outline));
+        recenterStageBtnObj.transform.SetParent(topRect, false);
+        RectTransform recenterBtnRect = recenterStageBtnObj.GetComponent<RectTransform>();
+        recenterStageRect = recenterBtnRect;
+        recenterBtnRect.anchorMin = new Vector2(1f, 0.5f);
+        recenterBtnRect.anchorMax = new Vector2(1f, 0.5f);
+        recenterBtnRect.pivot = new Vector2(1f, 0.5f);
+        recenterBtnRect.anchoredPosition = new Vector2(-(TopEdgeMarginX + ((SquircleBtnWidth + TopRightBtnGapX) * 2f)), 0f);
+        recenterBtnRect.sizeDelta = new Vector2(SquircleBtnWidth, SquircleBtnHeight);
+
+        recenterStageBg = recenterStageBtnObj.GetComponent<Image>();
+        ApplyRoundedSquircle(recenterStageBg);
+        recenterStageBg.color = MenuButtonBgColor;
+        recenterStageBg.raycastTarget = true;
+
+        Outline recenterBtnOutline = recenterStageBtnObj.GetComponent<Outline>();
+        recenterBtnOutline.effectColor = new Color(0.20f, 0.88f, 1.00f, 0.45f);
+        recenterBtnOutline.effectDistance = new Vector2(1.4f, -1.4f);
+
+        AttachRoundedBorderOverlay(recenterBtnRect, "Btn_AirStageRecenter_Border", GetRoundedSquircleBorderSprite(), TopBarAccentColor);
+
+        recenterStageButton = recenterStageBtnObj.GetComponent<Button>();
+        recenterStageButton.targetGraphic = recenterStageBg;
+        recenterStageButton.colors = CompactBtnColorBlock;
+        recenterStageButton.onClick.AddListener(OnTopBarRecenterClicked);
+
+        CreateRecenterCrosshairIcon(recenterBtnRect);
+        recenterStageBtnObj.SetActive(false);
+
         if (targetCanvas == null)
         {
             return;
@@ -1284,6 +1320,51 @@ public sealed class CompactHudMenuController : MonoBehaviour
         Image img = barObj.GetComponent<Image>();
         ApplyRoundedPill(img);
         img.color = new Color(0.93f, 0.99f, 1.00f, 1f);
+        img.raycastTarget = false;
+    }
+
+    private static void CreateRecenterCrosshairIcon(RectTransform parent)
+    {
+        Color iconColor = new Color(0.93f, 0.99f, 1.00f, 1f);
+
+        // Cincin target pusat (22x22 px) memakai sprite rounded pill border agar 100% bebas missing glyph font
+        GameObject ringObj = new GameObject("Icon_RecenterRing", typeof(RectTransform), typeof(Image));
+        ringObj.transform.SetParent(parent, false);
+        RectTransform ringRect = ringObj.GetComponent<RectTransform>();
+        ringRect.anchorMin = new Vector2(0.5f, 0.5f);
+        ringRect.anchorMax = new Vector2(0.5f, 0.5f);
+        ringRect.pivot = new Vector2(0.5f, 0.5f);
+        ringRect.anchoredPosition = Vector2.zero;
+        ringRect.sizeDelta = new Vector2(22f, 22f);
+
+        Image ringImg = ringObj.GetComponent<Image>();
+        ringImg.sprite = GetRoundedPillBorderSprite();
+        ringImg.type = Image.Type.Sliced;
+        ringImg.color = iconColor;
+        ringImg.raycastTarget = false;
+
+        // Titik pusat (6x6 px) + 4 garis bidik tipis Utara/Selatan/Barat/Timur
+        CreateRecenterTick(parent, "Icon_RecenterDot", Vector2.zero, new Vector2(6f, 6f), iconColor);
+        CreateRecenterTick(parent, "Icon_RecenterTop", new Vector2(0f, 13.5f), new Vector2(3.2f, 7f), iconColor);
+        CreateRecenterTick(parent, "Icon_RecenterBottom", new Vector2(0f, -13.5f), new Vector2(3.2f, 7f), iconColor);
+        CreateRecenterTick(parent, "Icon_RecenterLeft", new Vector2(-13.5f, 0f), new Vector2(7f, 3.2f), iconColor);
+        CreateRecenterTick(parent, "Icon_RecenterRight", new Vector2(13.5f, 0f), new Vector2(7f, 3.2f), iconColor);
+    }
+
+    private static void CreateRecenterTick(RectTransform parent, string name, Vector2 pos, Vector2 size, Color color)
+    {
+        GameObject obj = new GameObject(name, typeof(RectTransform), typeof(Image));
+        obj.transform.SetParent(parent, false);
+        RectTransform rect = obj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = pos;
+        rect.sizeDelta = size;
+
+        Image img = obj.GetComponent<Image>();
+        ApplyRoundedPill(img);
+        img.color = color;
         img.raycastTarget = false;
     }
 
@@ -1660,8 +1741,14 @@ public sealed class CompactHudMenuController : MonoBehaviour
             guideToggleRect.anchoredPosition = new Vector2(-guideRightX, 0f);
         }
 
+        float recenterRightX = guideRightX + SquircleBtnWidth + TopRightBtnGapX;
+        if (recenterStageRect != null)
+        {
+            recenterStageRect.anchoredPosition = new Vector2(-recenterRightX, 0f);
+        }
+
         float quotaRightX = isAirWeavingActive
-            ? (guideRightX + SquircleBtnWidth + TopRightBtnGapX)
+            ? (recenterRightX + SquircleBtnWidth + TopRightBtnGapX)
             : guideRightX;
         if (quotaAlertPillRect != null)
         {
@@ -1799,6 +1886,17 @@ public sealed class CompactHudMenuController : MonoBehaviour
         OnGestureGuideRequested?.Invoke();
     }
 
+    private void OnTopBarRecenterClicked()
+    {
+        if (!isAirWeavingActive)
+        {
+            return;
+        }
+
+        CloseMenuDrawer();
+        OnStageRecenterRequested?.Invoke();
+    }
+
     private void OnDrawerGuideClicked()
     {
         CloseMenuDrawer();
@@ -1819,6 +1917,11 @@ public sealed class CompactHudMenuController : MonoBehaviour
         if (guideToggleBtnObj != null && guideToggleBtnObj.activeSelf != isAirWeavingActive)
         {
             guideToggleBtnObj.SetActive(isAirWeavingActive);
+        }
+
+        if (recenterStageBtnObj != null && recenterStageBtnObj.activeSelf != isAirWeavingActive)
+        {
+            recenterStageBtnObj.SetActive(isAirWeavingActive);
         }
 
         if (drawerGuideBtnObj != null && drawerGuideBtnObj.activeSelf != isAirWeavingActive)

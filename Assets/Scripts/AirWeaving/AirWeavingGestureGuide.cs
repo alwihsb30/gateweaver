@@ -633,7 +633,7 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         string dotGlyph = SupportsGlyph('\u00B7') ? "\u00B7" : "|";
         string dashGlyph = SupportsGlyph('\u2013') ? "\u2013" : "-";
 
-        step1PromptText = "Sentuh sakelar kiri dengan ujung telunjuk";
+        step1PromptText = "Kepal tangan di sakelar kiri untuk balik 0/1";
         step2PromptText = $"Putar 1{dashGlyph}4 jari atau jempol, lalu buka 5 jari";
         step3PromptText = "Cubit orb port lalu sambungkan 1 kabel";
         step4PromptText = "Kepal gerbang lalu buang keluar 4 siku";
@@ -747,10 +747,10 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
             guideCardRect,
             rowY,
             rowHeight,
-            "TELUNJUK",
+            "KEPAL INPUT",
             TagIndexBgColor,
             TagIndexAccentColor,
-            $"<color=#6EFFB8><b>Sakelar Input:</b></color> Sentuh ringan ujung telunjuk pada sakelar kiri untuk membalik 0 {arrowGlyph} 1.");
+            $"<color=#6EFFB8><b>Sakelar Input:</b></color> Arahkan tangan terbuka ke sakelar kiri lalu kepal sejenak untuk membalik 0 {arrowGlyph} 1.");
         rowY -= rowStep;
 
         CreateGuideRuleRow(

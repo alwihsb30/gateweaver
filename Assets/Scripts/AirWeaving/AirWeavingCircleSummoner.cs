@@ -22,32 +22,35 @@ public sealed class AirWeavingCircleSummoner
 
     public const int MaxTrailPoints = 72;
 
-    private const int PoseVoteWindow = 3;
-    private const float MinPointSpacing = 0.015f;
-    private const float MinCircleRadius = 0.045f;
+    private const int PoseVoteWindow = 5;
+    private const int PoseVoteMajorityThreshold = 4;
+    private const int MinTrailPointsForCharge = 8;
+    private const float MinPointSpacing = 0.020f;
+    private const float MinTotalArcLengthForStartVisual = 0.18f;
+    private const float MinTotalArcLengthForReady = 0.42f;
+    private const float MinCircleRadius = 0.085f;
     private const float MaxCircleRadius = 0.650f;
-    private const float StartVisualAngleDegrees = 55f;
-    private const float PoseLockAngleDegrees = 65f;
-    private const float ShapeCheckAngleDegrees = 110f;
-    private const float MinCircularityRatio = 0.32f;
-    private const float MinDirectionalCoherence = 0.58f;
-    private const float TargetSweepDegrees = 185f;
+    private const float StartVisualAngleDegrees = 85f;
+    private const float PoseLockAngleDegrees = 100f;
+    private const float ShapeCheckAngleDegrees = 135f;
+    private const float MinCircularityRatio = 0.46f;
+    private const float MinDirectionalCoherence = 0.72f;
+    private const float TargetSweepDegrees = 235f;
     private const float MaxSingleTurnRadians = 2.356f; // 135 deg: lonjakan balik tajam dianggap zig-zag
 
-    private const float PoseConfirmHoldSeconds = 0.110f;
-    private const float PoseDropoutGraceSeconds = 0.160f;
-    private const float ChargeStallTimeoutSeconds = 0.65f;
-    private const float ChargeHandLostGraceSeconds = 0.25f;
+    private const float PoseConfirmHoldSeconds = 0.220f;
+    private const float PoseDropoutGraceSeconds = 0.140f;
+    private const float ChargeStallTimeoutSeconds = 0.60f;
+    private const float ChargeHandLostGraceSeconds = 0.22f;
     private const float ReadyWindowSeconds = 2.20f;
-    private const float ReadyHandLostGraceSeconds = 0.30f;
-    private const float OpenFiveBloomDebounceSeconds = 0.030f;
-    private const float PostSummonCooldownSeconds = 0.65f;
+    private const float ReadyHandLostGraceSeconds = 0.28f;
+    private const float OpenFiveBloomDebounceSeconds = 0.075f;
+    private const float PostSummonCooldownSeconds = 0.75f;
 
-    // Margin zona mulai summon dari Idle: luas ke atas (+0.72) karena ujung jari yang teracung ke atas
-    // secara alami berada 0.35..0.60 unit di atas telapak saat tangan berada di tengah kamera.
-    private const float StartZoneMarginX = 0.38f;
-    private const float StartZoneMarginBottomY = 0.18f;
-    private const float StartZoneMarginTopY = 0.72f;
+    // Margin zona mulai summon dari Idle diperketat agar tidak melebar ke terminal Input/Output maupun Rak Parkir.
+    private const float StartZoneMarginX = 0.14f;
+    private const float StartZoneMarginBottomY = 0.12f;
+    private const float StartZoneMarginTopY = 0.32f;
 
     private readonly Vector2[] trailPoints = new Vector2[MaxTrailPoints];
     private int trailCount = 0;
@@ -311,10 +314,13 @@ public sealed class AirWeavingCircleSummoner
 
             AppendTrailSample(activeTip, dt);
 
-            if (EvaluateCircleGeometry(out Vector2 center, out float estRad, out float absSweepDeg, out float coherence, out float circularity))
+            if (EvaluateCircleGeometry(out Vector2 center, out float estRad, out float absSweepDeg, out float coherence, out float circularity, out float totalArcLength))
             {
-                // Masuk Charging hanya berdasar sudut belok kumulatif & koherensi (radius/circularity baru dievaluasi >= 110°)
-                if (absSweepDeg >= StartVisualAngleDegrees
+                // Masuk Charging hanya bila sudut belok, koherensi, radius minimal, dan panjang goresan nyata terpenuhi
+                if (trailCount >= MinTrailPointsForCharge
+                    && totalArcLength >= MinTotalArcLengthForStartVisual
+                    && absSweepDeg >= StartVisualAngleDegrees
+                    && estRad >= (MinCircleRadius * 0.65f)
                     && estRad <= MaxCircleRadius
                     && coherence >= MinDirectionalCoherence)
                 {
@@ -328,8 +334,11 @@ public sealed class AirWeavingCircleSummoner
                     poseDropoutTimer = 0f;
                     stallTimer = 0f;
 
-                    // Antisipasi gerakan sangat cepat dalam 1-2 frame yang langsung melewati target sapuan penuh
-                    if (absSweepDeg >= TargetSweepDegrees && estRad >= MinCircleRadius && circularity >= MinCircularityRatio)
+                    // Antisipasi gerakan cepat namun tetap wajib lolos panjang goresan & circularity ketat
+                    if (absSweepDeg >= TargetSweepDegrees
+                        && totalArcLength >= MinTotalArcLengthForReady
+                        && estRad >= MinCircleRadius
+                        && circularity >= MinCircularityRatio)
                     {
                         EnterReadyStage(isRelaxedOpenFiveBloom);
                     }
@@ -391,7 +400,7 @@ public sealed class AirWeavingCircleSummoner
             return;
         }
 
-        if (EvaluateCircleGeometry(out Vector2 cCenter, out float cRad, out float cAbsDeg, out float cCoherence, out float cCircularity))
+        if (EvaluateCircleGeometry(out Vector2 cCenter, out float cRad, out float cAbsDeg, out float cCoherence, out float cCircularity, out float cTotalArcLength))
         {
             if (cRad > MaxCircleRadius || (cAbsDeg >= ShapeCheckAngleDegrees && cCoherence < MinDirectionalCoherence))
             {
@@ -410,8 +419,11 @@ public sealed class AirWeavingCircleSummoner
             accumulatedSweepDeg = cAbsDeg;
             chargeProgress = Mathf.Clamp01(cAbsDeg / TargetSweepDegrees);
 
-            // Evaluasi ketat radius (>= 0.045) & circularity (>= 0.32) dilakukan setelah sapuan penuh (>= 185° > 110°)
-            bool shapeOk = cRad >= MinCircleRadius && cCircularity >= MinCircularityRatio;
+            // Evaluasi ketat jumlah titik, panjang goresan, radius, & circularity setelah sapuan penuh (>= 235°)
+            bool shapeOk = trailCount >= MinTrailPointsForCharge
+                           && cTotalArcLength >= MinTotalArcLengthForReady
+                           && cRad >= MinCircleRadius
+                           && cCircularity >= MinCircularityRatio;
             if (cAbsDeg >= TargetSweepDegrees && cCoherence >= MinDirectionalCoherence && shapeOk)
             {
                 EnterReadyStage(isRelaxedOpenFiveBloom);
@@ -555,13 +567,15 @@ public sealed class AirWeavingCircleSummoner
         out float estimatedRadius,
         out float absSweepDeg,
         out float coherence,
-        out float circularity)
+        out float circularity,
+        out float totalArcLength)
     {
         center = Vector2.zero;
         estimatedRadius = 0f;
         absSweepDeg = 0f;
         coherence = 0f;
         circularity = 0f;
+        totalArcLength = 0f;
 
         if (trailCount < 3)
         {
@@ -588,12 +602,12 @@ public sealed class AirWeavingCircleSummoner
         float maxAxis = Mathf.Max(rx, ry);
         float minAxis = Mathf.Min(rx, ry);
 
-        // Untuk busur setengah lingkaran (~185°), meanRadius bbox hanya 0.75*R sejati sedangkan maxAxis = R sejati
+        // Untuk busur lingkaran, gabungkan meanRadius dan 0.85*maxAxis agar estimasi radius stabil
         estimatedRadius = Mathf.Max(meanRadius, maxAxis * 0.85f);
         center = new Vector2((minX + maxX) * 0.5f, (minY + maxY) * 0.5f);
         circularity = maxAxis > 0.001f ? (minAxis / maxAxis) : 0f;
 
-        // Chord turning angle kumulatif segmen-ke-segmen (sum dHeading):
+        // Chord turning angle kumulatif segmen-ke-segmen (sum dHeading) + panjang total goresan:
         // 100% stabil dan independen dari pergeseran pusat lingkaran pada busur awal.
         float signedTurnRad = 0f;
         float absTurnRad = 0f;
@@ -609,7 +623,9 @@ public sealed class AirWeavingCircleSummoner
                 continue;
             }
 
-            Vector2 dir = seg / Mathf.Sqrt(sqrLen);
+            float segLen = Mathf.Sqrt(sqrLen);
+            totalArcLength += segLen;
+            Vector2 dir = seg / segLen;
             if (hasPrevDir)
             {
                 float cross = (prevDir.x * dir.y) - (prevDir.y * dir.x);
@@ -639,7 +655,7 @@ public sealed class AirWeavingCircleSummoner
 
     private SummonHandPose ComputeMajoritySummonPose()
     {
-        if (poseVoteFilled < 2)
+        if (poseVoteFilled < PoseVoteMajorityThreshold)
         {
             return SummonHandPose.None;
         }
@@ -662,13 +678,12 @@ public sealed class AirWeavingCircleSummoner
             }
         }
 
-        // Vote jendela 3 frame: butuh >= 2/3 agar cepat namun tahan kedipan 1 frame
-        const int threshold = 2;
-        if (cAnd >= threshold) return SummonHandPose.OneFingerAnd;
-        if (cOr >= threshold) return SummonHandPose.TwoFingersOr;
-        if (cXor >= threshold) return SummonHandPose.ThreeFingersXor;
-        if (cNand >= threshold) return SummonHandPose.FourFingersNand;
-        if (cNot >= threshold) return SummonHandPose.ThumbOnlyNot;
+        // Vote jendela 5 frame: butuh >= 4/5 agar gerakan transisi jari alami tidak salah memicu summon
+        if (cAnd >= PoseVoteMajorityThreshold) return SummonHandPose.OneFingerAnd;
+        if (cOr >= PoseVoteMajorityThreshold) return SummonHandPose.TwoFingersOr;
+        if (cXor >= PoseVoteMajorityThreshold) return SummonHandPose.ThreeFingersXor;
+        if (cNand >= PoseVoteMajorityThreshold) return SummonHandPose.FourFingersNand;
+        if (cNot >= PoseVoteMajorityThreshold) return SummonHandPose.ThumbOnlyNot;
         return SummonHandPose.None;
     }
 

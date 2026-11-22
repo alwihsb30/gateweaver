@@ -63,6 +63,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private const float PortStubBaseRadius = 0.0046f;
     private const float SocketBaseRadius = 0.039f;
     private const float SocketScaleBlendSpeed = 16.0f;
+    private const float PortDragAnticipationRadius = 0.56f;
+    private const float PortDragAnticipationScaleBoost = 0.15f;
     private const float DragColorBlendSpeed = 18.0f;
     private const float LiveDragTipFreeSpringOmega = 24.0f;
     private const float LiveDragTipSnapSpringOmega = 34.0f;
@@ -262,6 +264,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private Vector3 smoothedLiveDragTipWorld = Vector3.zero;
     private Vector3 liveDragTipVelocity = Vector3.zero;
     private bool hasSmoothedLiveDragTip = false;
+    private Vector2 lastLiveDragCursorLocalXY = Vector2.zero;
+    private bool hasLastLiveDragCursorLocalXY = false;
     private bool hasUnpluggedEdgeBackup = false;
     private ManualConnectionEdge unpluggedEdgeBackup;
 
@@ -627,6 +631,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         lastLockedTargetSlot = -1;
         hasSmoothedLiveDragTip = false;
         liveDragTipVelocity = Vector3.zero;
+        hasLastLiveDragCursorLocalXY = false;
         if (liveDragTube != null && liveDragTube.meshRenderer != null)
         {
             liveDragTube.meshRenderer.enabled = false;
@@ -872,6 +877,11 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         // 4. Perbarui damping ujung kabel aktif berbasis dt (licin, berat, presisi tanpa teleportasi saat snap/unsnap)
         if (isDraggingCable)
         {
+            if (isHandDetected && !hardBlocked)
+            {
+                lastLiveDragCursorLocalXY = assistedLivePinchXY;
+                hasLastLiveDragCursorLocalXY = true;
+            }
             bool snappedNow = snappedTargetPortIndex >= 0 && snappedTargetPortIndex < activePorts.Count;
             Vector3 desiredTipWorld = snappedNow
                 ? activePorts[snappedTargetPortIndex].handleWorldPos
@@ -898,6 +908,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         {
             hasSmoothedLiveDragTip = false;
             liveDragTipVelocity = Vector3.zero;
+            hasLastLiveDragCursorLocalXY = false;
         }
 
         // 5. Perbarui seluruh Soket Port 3D, Kabel Tabung 3D Live Drag, & 100% Kabel Tabung 3D Terpasang + Paket Sinyal
@@ -1918,6 +1929,20 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 orbEmission += PortHoverOrbEmission * (0.30f * aimAssistPullStrength);
                 socketRimLinear = Color.Lerp(socketRimLinear, PortHoverRimLinear, 0.55f * aimAssistPullStrength);
                 socketRimIntensity += 0.35f * aimAssistPullStrength;
+            }
+
+            // Micro-Feedback Tahap 9 (Zero-GC): antisipasi soket port membesar ringan (~1.15x) saat ujung kabel Pinch mendekat
+            if (isDraggingCable && isCompatible && !isSnapped && hasLastLiveDragCursorLocalXY)
+            {
+                float anticipationRadius = PortDragAnticipationRadius * Mathf.Max(MinPortScreenSpaceHitboxScale, p.apparentScale);
+                float distToDragTip = Vector2.Distance(lastLiveDragCursorLocalXY, p.handleLocalXY);
+                if (distToDragTip < anticipationRadius)
+                {
+                    float proxT = 1f - (distToDragTip / Mathf.Max(0.001f, anticipationRadius));
+                    float smoothProx = proxT * proxT * (3f - (2f * proxT));
+                    targetRadiusFactor *= 1f + (PortDragAnticipationScaleBoost * smoothProx);
+                    socketRimIntensity += 0.22f * smoothProx;
+                }
             }
 
             if (advanceSmoothThisCall)
