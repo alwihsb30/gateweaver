@@ -630,6 +630,7 @@ public class AirWeavingController : MonoBehaviour
     private Vector3 lastTruthPodWorldAnchor = Vector3.zero;
 
     private AirWeavingStageController stageController;
+    private AirWeavingLightingAndShaderRig lightingAndShaderRig;
     private AirWeavingOutputTrigger outputTrigger;
     private AirWeavingHologramVisual hologramVisual;
     private AirWeavingCableRouter cableRouter;
@@ -1010,6 +1011,7 @@ public class AirWeavingController : MonoBehaviour
                 stageParallaxPalmXY,
                 WorkbenchDepth);
         }
+        lightingAndShaderRig?.TickLightingRig(mainCam, stageController != null ? stageController.StageRoot : null);
         UpdateHandWakeAudioFeedback(dt);
         UpdateCableRouterInteraction(mainCam);
         UpdateWorkbenchInteractions(mainCam, dt);
@@ -1052,6 +1054,7 @@ public class AirWeavingController : MonoBehaviour
 
     private void OnDisable()
     {
+        lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         ShutdownNativeAndCameraImmediate();
     }
 
@@ -1084,6 +1087,7 @@ public class AirWeavingController : MonoBehaviour
         }
         cachedHudMenu = null;
         circuitManager?.SetManualRoutingMode(false);
+        lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         RestoreAirWeavingLabelReadabilityStyles();
         ShutdownNativeAndCameraImmediate();
         DestroyVisualRigAndMaterials();
@@ -1270,6 +1274,10 @@ public class AirWeavingController : MonoBehaviour
         // 8. Tata seluruh 8 GateNode (Input A, Input B, Output terkunci di papan roti; 5 gerbang di Rak Parkir Atas)
         InitializeWorkbenchSlots(mainCam);
         ApplyAirWeavingLabelReadabilityStyles();
+        lightingAndShaderRig?.ActivateForAirWeaving(
+            mainCam,
+            stageController != null ? stageController.StageRoot : null,
+            cachedGateNodes);
 
         isHandDetected = false;
         wasHandDetected = false;
@@ -1396,6 +1404,7 @@ public class AirWeavingController : MonoBehaviour
         activeCableHoverHandSlot = -1;
         cableRouter?.ClearAllWires(circuitManager);
         circuitManager?.SetManualRoutingMode(false);
+        lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         RestoreAirWeavingLabelReadabilityStyles();
         ShutdownNativeAndCameraImmediate();
         HideAllAirWeavingVisuals();
@@ -1421,6 +1430,7 @@ public class AirWeavingController : MonoBehaviour
         }
 
         RestoreAirWeavingLabelReadabilityStyles();
+        lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         RefreshGateNodesList();
         for (int i = 0; i < cachedGateNodes.Count; i++)
         {
@@ -5828,13 +5838,22 @@ public class AirWeavingController : MonoBehaviour
         GateNode secPortFocusedNode = (canShowHover && cableRouter != null) ? cableRouter.SecondaryHoveredPortNode : null;
         bool inputAHovered = canShowHover && (hoveredInputNode == inputANode || secondaryHoveredInputNode == inputANode);
         bool inputBHovered = canShowHover && (hoveredInputNode == inputBNode || secondaryHoveredInputNode == inputBNode);
-        hologramVisual.UpdateNodeFrame(0, camT, inputANode, true, false, false,
-            inputAHovered ? AirWeavingHologramVisual.NodeHoloState.BodyHovered : AirWeavingHologramVisual.NodeHoloState.Idle,
-            stageRoot);
-        hologramVisual.UpdateNodeFrame(1, camT, inputBNode, false, true, false,
-            inputBHovered ? AirWeavingHologramVisual.NodeHoloState.BodyHovered : AirWeavingHologramVisual.NodeHoloState.Idle,
-            stageRoot);
+        AirWeavingHologramVisual.NodeHoloState inputAState = inputAHovered
+            ? AirWeavingHologramVisual.NodeHoloState.BodyHovered
+            : AirWeavingHologramVisual.NodeHoloState.Idle;
+        AirWeavingHologramVisual.NodeHoloState inputBState = inputBHovered
+            ? AirWeavingHologramVisual.NodeHoloState.BodyHovered
+            : AirWeavingHologramVisual.NodeHoloState.Idle;
+        hologramVisual.UpdateNodeFrame(0, camT, inputANode, true, false, false, inputAState, stageRoot);
+        hologramVisual.UpdateNodeFrame(1, camT, inputBNode, false, true, false, inputBState, stageRoot);
         hologramVisual.UpdateNodeFrame(2, camT, outputNode, false, false, true, AirWeavingHologramVisual.NodeHoloState.Idle, stageRoot);
+        if (lightingAndShaderRig != null)
+        {
+            float outputHoldProg = outputTrigger != null ? outputTrigger.ChargeProgress : 0f;
+            lightingAndShaderRig.UpdateNodeFresnelState(inputANode, true, false, false, inputAState);
+            lightingAndShaderRig.UpdateNodeFresnelState(inputBNode, false, true, false, inputBState);
+            lightingAndShaderRig.UpdateNodeFresnelState(outputNode, false, false, true, AirWeavingHologramVisual.NodeHoloState.Idle, outputHoldProg);
+        }
 
         // Efek ripple 3D singkat sejajar bidang meja XZ saat ujung telunjuk menyentuh sakelar Input A / B
         float rippleA = inputATouchRippleTimer > 0f ? (1f - (inputATouchRippleTimer / InputTouchRippleDuration)) : 0f;
@@ -5874,6 +5893,7 @@ public class AirWeavingController : MonoBehaviour
             }
 
             hologramVisual.UpdateNodeFrame(3 + i, camT, slot.node, false, false, false, state, stageRoot);
+            lightingAndShaderRig?.UpdateNodeFresnelState(slot.node, false, false, false, state);
         }
 
         bool draggingCable = cableRouter != null && cableRouter.IsDraggingCable;
@@ -6733,8 +6753,17 @@ public class AirWeavingController : MonoBehaviour
             Destroy(col);
         }
 
-        // Sprites/Default (Cull Off, ZWrite Off) + renderQueue 1500: kebal backface culling saat mirror & selalu di belakang 3D
-        videoQuadMaterial = CreateSafeSpritesMaterial(Color.white, 1500);
+        // ARBackdropDimming (Cull Off, ZWrite Off, ZTest Always, Blend Off, Queue 1500): meredupkan latar + vignette
+        // agar hologram, grid 17x13, & kabel langsung kontras tajam tanpa menyentuh BackgroundPlane Vuforia Mode Kartu.
+        videoQuadMaterial = AirWeavingLightingAndShaderRig.CreateBackdropDimmingMaterial(out _);
+        if (videoQuadMaterial != null)
+        {
+            ownedMaterials.Add(videoQuadMaterial);
+        }
+        else
+        {
+            videoQuadMaterial = CreateSafeSpritesMaterial(Color.white, 1500);
+        }
         videoQuadRenderer = meshObj.GetComponent<Renderer>();
         if (videoQuadRenderer != null)
         {
@@ -6828,6 +6857,11 @@ public class AirWeavingController : MonoBehaviour
             stageController = GetComponent<AirWeavingStageController>() ?? gameObject.AddComponent<AirWeavingStageController>();
         }
         stageController.EnsureInitialized(ResolveMainCamera());
+
+        if (lightingAndShaderRig == null)
+        {
+            lightingAndShaderRig = GetComponent<AirWeavingLightingAndShaderRig>() ?? gameObject.AddComponent<AirWeavingLightingAndShaderRig>();
+        }
 
         // 2. Cincin Hover / Grab Highlight ramping di sekitar alas target gerbang atau terminal Input
         GameObject hoverObj = new GameObject("AR_HoverHighlightRing");

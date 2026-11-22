@@ -83,6 +83,23 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private static readonly int EmissionColorPropId = Shader.PropertyToID("_EmissionColor");
     private static readonly int MetallicPropId = Shader.PropertyToID("_Metallic");
     private static readonly int GlossinessPropId = Shader.PropertyToID("_Glossiness");
+    private static readonly int RimColorPropId = Shader.PropertyToID("_RimColor");
+    private static readonly int RimPowerPropId = Shader.PropertyToID("_RimPower");
+    private static readonly int RimIntensityPropId = Shader.PropertyToID("_RimIntensity");
+
+    // Palet Fresnel Rim Glow dalam Linear Space eksplisit untuk MaterialPropertyBlock.SetColor (tajam, bebas pucat)
+    private static readonly Color CableHighRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.24f, 1.00f, 0.94f);
+    private static readonly Color CableLowRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.95f, 0.34f, 0.14f);
+    private static readonly Color DragFreeRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.26f, 0.98f, 1.00f);
+    private static readonly Color DragSnappedRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(1.00f, 0.90f, 0.24f);
+    private static readonly Color DragInvalidRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(1.00f, 0.22f, 0.16f);
+    private static readonly Color PortIdleRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.32f, 0.78f, 1.00f);
+    private static readonly Color PortHoverRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.36f, 1.00f, 0.98f);
+    private static readonly Color PortValidRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.26f, 1.00f, 0.56f);
+    private static readonly Color PortReplaceRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(1.00f, 0.80f, 0.22f);
+    private static readonly Color PortSnapRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(1.00f, 0.94f, 0.26f);
+    private static readonly Color PacketHighRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.60f, 1.00f, 1.00f);
+    private static readonly Color PacketLowRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(1.00f, 0.44f, 0.16f);
 
     // Palet PBR Built-in Forward (Linear Color Space) — kontras kuat Sinyal 1 vs Sinyal 0 vs Live Drag
     private static readonly Color CableHighAlbedo = new Color(0.10f, 0.88f, 1.00f, 1f);
@@ -187,12 +204,13 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
 
     private GameObject rootObj;
 
-    // 1 Shared Material Built-in Standard PBR + 1 MaterialPropertyBlock (Zero-GC, OpenGLES3-safe)
+    // 1 Shared Material HologramFresnelHardware 1-Pass (fallback Standard) + 1 MaterialPropertyBlock (Zero-GC, OpenGLES3-safe)
     private Material pbrSharedMat;
     private MaterialPropertyBlock sharedMpb;
     private bool pbrHasEmissionProp = false;
     private bool pbrHasMetallicProp = false;
     private bool pbrHasGlossinessProp = false;
+    private bool pbrHasRimProps = false;
 
     // Mesh 3D Statis Shared (dibangun sekali di EnsureVisualsCreated, dibersihkan di OnDestroy)
     private Mesh sharedSocketCollarMesh;
@@ -250,6 +268,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     // Warna transisi dinamis Live Drag Tube (halus tanpa alokasi)
     private Color currentDragAlbedo = DragFreeAlbedo;
     private Color currentDragEmission = DragFreeEmission;
+    private Color currentDragRimLinear = DragFreeRimLinear;
+    private float currentDragRimIntensity = 1.05f;
     private float currentDragRadius = TubeRadiusDragFree;
 
     // Snap Release-Latch (300 ms) + Sticky Snap Hysteresis + Soft Magnetic Aim-Assist
@@ -425,11 +445,15 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             tubeSinTable[j] = Mathf.Sin(angle);
         }
 
-        // 1. Satu Shared Material Built-in Standard PBR (kompatibel Forward Linear Color Space & OpenGLES3)
+        // 1. Satu Shared Material HologramFresnelHardware 1-Pass (fallback Standard PBR, Forward Linear & OpenGLES3)
         pbrSharedMat = CreatePbrStandardMaterial(Color.white, metallic: 0.58f, glossiness: 0.84f);
         pbrHasEmissionProp = pbrSharedMat != null && pbrSharedMat.HasProperty(EmissionColorPropId);
         pbrHasMetallicProp = pbrSharedMat != null && pbrSharedMat.HasProperty(MetallicPropId);
         pbrHasGlossinessProp = pbrSharedMat != null && pbrSharedMat.HasProperty(GlossinessPropId);
+        pbrHasRimProps = pbrSharedMat != null
+                         && pbrSharedMat.HasProperty(RimColorPropId)
+                         && pbrSharedMat.HasProperty(RimPowerPropId)
+                         && pbrSharedMat.HasProperty(RimIntensityPropId);
         sharedMpb = new MaterialPropertyBlock();
 
         // 2. Bangun Mesh 3D Statis Shared (Torus Collar, Energy Core Orb, Lock Halo Ring, Conduit Stub, Signal Capsule)
@@ -1749,6 +1773,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             Color collarEmission;
             Color orbAlbedo;
             Color orbEmission;
+            Color socketRimLinear;
+            float socketRimPower;
+            float socketRimIntensity;
             float targetRadiusFactor = 1.00f;
             float orbRatio = 0.58f;
 
@@ -1758,6 +1785,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 collarEmission = PortSnapLockOrbEmission * (0.95f + (0.35f * pulse));
                 orbAlbedo = PortSnapLockOrbColor;
                 orbEmission = PortSnapLockOrbEmission * (1.20f + (0.30f * pulse));
+                socketRimLinear = PortSnapRimLinear;
+                socketRimPower = 1.95f;
+                socketRimIntensity = 1.55f + (0.25f * pulse);
                 targetRadiusFactor = 1.50f + (0.14f * pulse);
                 orbRatio = 0.68f;
             }
@@ -1767,6 +1797,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 collarEmission = PortHoverOrbEmission * (0.85f + (0.30f * pulse));
                 orbAlbedo = PortHoverOrbColor;
                 orbEmission = PortHoverOrbEmission * (1.10f + (0.25f * pulse));
+                socketRimLinear = PortHoverRimLinear;
+                socketRimPower = 2.05f;
+                socketRimIntensity = 1.35f + (0.20f * pulse);
                 targetRadiusFactor = 1.40f + (0.12f * pulse);
                 orbRatio = 0.65f;
             }
@@ -1778,6 +1811,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     collarEmission = PortValidTargetOrbEmission * (0.60f + (0.30f * pulse));
                     orbAlbedo = PortValidTargetOrbColor;
                     orbEmission = PortValidTargetOrbEmission * (0.92f + (0.28f * pulse));
+                    socketRimLinear = PortValidRimLinear;
+                    socketRimPower = 2.15f;
+                    socketRimIntensity = 1.15f + (0.20f * pulse);
                     targetRadiusFactor = 1.32f + (0.14f * pulse);
                     orbRatio = 0.64f;
                 }
@@ -1787,6 +1823,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     collarEmission = PortReplaceHintOrbEmission * (0.55f + (0.25f * pulse));
                     orbAlbedo = PortReplaceHintOrbColor;
                     orbEmission = PortReplaceHintOrbEmission * (0.88f + (0.22f * pulse));
+                    socketRimLinear = PortReplaceRimLinear;
+                    socketRimPower = 2.20f;
+                    socketRimIntensity = 1.08f + (0.16f * pulse);
                     targetRadiusFactor = 1.15f + (0.10f * pulse);
                     orbRatio = 0.60f;
                 }
@@ -1796,6 +1835,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     collarEmission = PortValidTargetOrbEmission * (0.55f + (0.25f * pulse));
                     orbAlbedo = PortValidTargetOrbColor;
                     orbEmission = PortValidTargetOrbEmission * (0.85f + (0.25f * pulse));
+                    socketRimLinear = PortValidRimLinear;
+                    socketRimPower = 2.20f;
+                    socketRimIntensity = 1.10f + (0.18f * pulse);
                     targetRadiusFactor = 1.24f + (0.12f * pulse);
                     orbRatio = 0.62f;
                 }
@@ -1808,6 +1850,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     collarEmission = CableHighEmission * (0.48f + (0.12f * pulse));
                     orbAlbedo = CableHighAlbedo;
                     orbEmission = CableHighEmission * (0.95f + (0.18f * pulse));
+                    socketRimLinear = CableHighRimLinear;
+                    socketRimPower = 2.35f;
+                    socketRimIntensity = 1.05f + (0.12f * pulse);
                     targetRadiusFactor = 1.08f;
                     orbRatio = 0.62f;
                 }
@@ -1817,6 +1862,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     collarEmission = CableLowEmission * 0.65f;
                     orbAlbedo = PortInConnectedLowOrbColor;
                     orbEmission = PortInConnectedLowOrbEmission;
+                    socketRimLinear = CableLowRimLinear;
+                    socketRimPower = 2.85f;
+                    socketRimIntensity = 0.46f;
                     targetRadiusFactor = 0.98f;
                     orbRatio = 0.54f;
                 }
@@ -1829,6 +1877,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     collarEmission = PortInConnectedHighOrbEmission * (0.46f + (0.10f * pulse));
                     orbAlbedo = PortInConnectedHighOrbColor;
                     orbEmission = PortInConnectedHighOrbEmission * (0.95f + (0.16f * pulse));
+                    socketRimLinear = CableHighRimLinear;
+                    socketRimPower = 2.35f;
+                    socketRimIntensity = 1.00f + (0.12f * pulse);
                     targetRadiusFactor = 1.06f;
                     orbRatio = 0.61f;
                 }
@@ -1838,6 +1889,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     collarEmission = CableLowEmission * 0.55f;
                     orbAlbedo = PortInConnectedLowOrbColor;
                     orbEmission = PortInConnectedLowOrbEmission;
+                    socketRimLinear = CableLowRimLinear;
+                    socketRimPower = 2.85f;
+                    socketRimIntensity = 0.44f;
                     targetRadiusFactor = 0.96f;
                     orbRatio = 0.54f;
                 }
@@ -1849,6 +1903,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 collarEmission = PortInEmptyOrbEmission * 0.42f;
                 orbAlbedo = PortInEmptyOrbColor;
                 orbEmission = PortInEmptyOrbEmission * 0.85f;
+                socketRimLinear = PortIdleRimLinear;
+                socketRimPower = 2.60f;
+                socketRimIntensity = 0.66f;
                 targetRadiusFactor = 0.98f;
                 orbRatio = 0.54f;
             }
@@ -1859,6 +1916,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 targetRadiusFactor += 0.20f * aimAssistPullStrength;
                 collarEmission += PortHoverOrbEmission * (0.35f * aimAssistPullStrength);
                 orbEmission += PortHoverOrbEmission * (0.30f * aimAssistPullStrength);
+                socketRimLinear = Color.Lerp(socketRimLinear, PortHoverRimLinear, 0.55f * aimAssistPullStrength);
+                socketRimIntensity += 0.35f * aimAssistPullStrength;
             }
 
             if (advanceSmoothThisCall)
@@ -1872,13 +1931,13 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             Vector3 upHint = Mathf.Abs(Vector3.Dot(socketAxis, tableUp)) < 0.95f ? tableUp : camT.forward;
             Quaternion socketRot = Quaternion.LookRotation(socketAxis, upHint);
 
-            // 1. 3D Torus Collar (logam PBR reflektif dengan pendar tepi reaktif)
+            // 1. 3D Torus Collar (logam PBR-lite reflektif dengan Fresnel rim reaktif)
             if (sock.collarTransform != null && sock.collarRenderer != null)
             {
                 sock.collarTransform.position = p.handleWorldPos;
                 sock.collarTransform.rotation = socketRot;
                 sock.collarTransform.localScale = Vector3.one * finalSocketRadius;
-                ApplyPbrPropertyBlock(sock.collarRenderer, collarAlbedo, collarEmission, metallic: 0.84f, glossiness: 0.90f);
+                ApplyPbrPropertyBlock(sock.collarRenderer, collarAlbedo, collarEmission, metallic: 0.84f, glossiness: 0.90f, socketRimLinear, socketRimPower, socketRimIntensity);
                 if (!sock.collarRenderer.enabled) sock.collarRenderer.enabled = true;
             }
 
@@ -1888,7 +1947,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 sock.orbTransform.position = p.handleWorldPos + (socketAxis * (finalSocketRadius * 0.08f));
                 sock.orbTransform.rotation = socketRot;
                 sock.orbTransform.localScale = Vector3.one * (finalSocketRadius * orbRatio);
-                ApplyPbrPropertyBlock(sock.orbRenderer, orbAlbedo, orbEmission, metallic: 0.20f, glossiness: 0.94f);
+                ApplyPbrPropertyBlock(sock.orbRenderer, orbAlbedo, orbEmission, metallic: 0.20f, glossiness: 0.94f, socketRimLinear, 1.85f, socketRimIntensity * 0.85f);
                 if (!sock.orbRenderer.enabled) sock.orbRenderer.enabled = true;
             }
 
@@ -1912,7 +1971,10 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                         Color.Lerp(StubIdleAlbedo, collarAlbedo, 0.45f),
                         collarEmission * 0.28f,
                         metallic: 0.78f,
-                        glossiness: 0.82f);
+                        glossiness: 0.82f,
+                        socketRimLinear,
+                        2.75f,
+                        socketRimIntensity * 0.48f);
                     if (!sock.stubRenderer.enabled) sock.stubRenderer.enabled = true;
                 }
                 else if (sock.stubRenderer.enabled)
@@ -1928,13 +1990,14 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 Color haloEmission = isSnapped
                     ? PortSnapLockOrbEmission * (1.18f + (0.30f * pulse))
                     : PortHoverOrbEmission * (1.02f + (0.22f * pulse));
+                Color haloRimLinear = isSnapped ? PortSnapRimLinear : PortHoverRimLinear;
                 float haloRadius = finalSocketRadius * (isSnapped ? (1.62f + (0.10f * pulse)) : (1.52f + (0.08f * pulse)));
                 float spinAngleDeg = timeNow * (isSnapped ? 110f : 55f);
 
                 lockHaloRingTransform.position = p.handleWorldPos + (socketAxis * (finalSocketRadius * 0.14f));
                 lockHaloRingTransform.rotation = socketRot * Quaternion.Euler(0f, 0f, spinAngleDeg);
                 lockHaloRingTransform.localScale = Vector3.one * haloRadius;
-                ApplyPbrPropertyBlock(lockHaloRingRenderer, haloAlbedo, haloEmission, metallic: 0.40f, glossiness: 0.92f);
+                ApplyPbrPropertyBlock(lockHaloRingRenderer, haloAlbedo, haloEmission, metallic: 0.40f, glossiness: 0.92f, haloRimLinear, 1.80f, isSnapped ? 1.60f : 1.30f);
                 if (!lockHaloRingRenderer.enabled) lockHaloRingRenderer.enabled = true;
                 drewLockHalo = true;
             }
@@ -2040,24 +2103,32 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         float dragPulse = 1f + (0.08f * Mathf.Sin(timeNow * 10.0f));
         Color targetAlbedo;
         Color targetEmission;
+        Color targetRimLinear;
+        float targetRimIntensity;
         float targetRadius;
 
         if (snapped)
         {
             targetAlbedo = DragSnappedAlbedo;
             targetEmission = DragSnappedEmission * dragPulse;
+            targetRimLinear = DragSnappedRimLinear;
+            targetRimIntensity = 1.45f * dragPulse;
             targetRadius = TubeRadiusDragSnapped * dragPulse;
         }
         else if (isHoveringInvalidTargetDuringDrag)
         {
             targetAlbedo = DragInvalidAlbedo;
             targetEmission = DragInvalidEmission * (0.95f + (0.20f * Mathf.Sin(timeNow * 15.0f)));
+            targetRimLinear = DragInvalidRimLinear;
+            targetRimIntensity = 1.35f * (0.95f + (0.18f * Mathf.Sin(timeNow * 15.0f)));
             targetRadius = TubeRadiusDragInvalid;
         }
         else
         {
             targetAlbedo = DragFreeAlbedo;
             targetEmission = DragFreeEmission;
+            targetRimLinear = DragFreeRimLinear;
+            targetRimIntensity = 1.05f;
             targetRadius = TubeRadiusDragFree;
         }
 
@@ -2069,6 +2140,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             float alpha = 1f - Mathf.Exp(-DragColorBlendSpeed * animDt);
             currentDragAlbedo = Color.Lerp(currentDragAlbedo, targetAlbedo, alpha);
             currentDragEmission = Color.Lerp(currentDragEmission, targetEmission, alpha);
+            currentDragRimLinear = Color.Lerp(currentDragRimLinear, targetRimLinear, alpha);
+            currentDragRimIntensity = Mathf.Lerp(currentDragRimIntensity, targetRimIntensity, alpha);
             currentDragRadius = Mathf.Lerp(currentDragRadius, targetRadius, alpha);
         }
 
@@ -2079,7 +2152,10 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             currentDragAlbedo,
             currentDragEmission,
             metallic: snapped ? 0.50f : 0.46f,
-            glossiness: 0.88f);
+            glossiness: 0.88f,
+            currentDragRimLinear,
+            rimPower: snapped ? 2.00f : 2.25f,
+            currentDragRimIntensity);
 
         if (!liveDragTube.meshRenderer.enabled)
         {
@@ -2159,7 +2235,10 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     CableHighAlbedo,
                     CableHighEmission * highEmissionPulse,
                     metallic: 0.44f,
-                    glossiness: 0.88f);
+                    glossiness: 0.88f,
+                    CableHighRimLinear,
+                    rimPower: 2.35f,
+                    rimIntensity: 1.15f * highEmissionPulse);
             }
             else
             {
@@ -2168,7 +2247,10 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     CableLowAlbedo,
                     CableLowEmission,
                     metallic: 0.78f,
-                    glossiness: 0.80f);
+                    glossiness: 0.80f,
+                    CableLowRimLinear,
+                    rimPower: 3.00f,
+                    rimIntensity: 0.42f);
             }
 
             if (!slot.meshRenderer.enabled)
@@ -2284,7 +2366,10 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 baseAlbedo,
                 baseEmission * (0.25f + (0.95f * smoothEdge)),
                 metallic: 0.16f,
-                glossiness: 0.95f);
+                glossiness: 0.95f,
+                isHigh ? PacketHighRimLinear : PacketLowRimLinear,
+                rimPower: 1.85f,
+                rimIntensity: (isHigh ? 1.25f : 0.65f) * (0.35f + (0.65f * smoothEdge)));
 
             if (!rend.enabled)
             {
@@ -2874,7 +2959,10 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         Color albedo,
         Color emission,
         float metallic,
-        float glossiness)
+        float glossiness,
+        Color rimColorLinear,
+        float rimPower,
+        float rimIntensity)
     {
         if (renderer == null || sharedMpb == null)
         {
@@ -2895,12 +2983,27 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         {
             sharedMpb.SetFloat(GlossinessPropId, glossiness);
         }
+        if (pbrHasRimProps)
+        {
+            sharedMpb.SetColor(RimColorPropId, rimColorLinear);
+            sharedMpb.SetFloat(RimPowerPropId, rimPower);
+            sharedMpb.SetFloat(RimIntensityPropId, rimIntensity);
+        }
         renderer.SetPropertyBlock(sharedMpb);
     }
 
     private Material CreatePbrStandardMaterial(Color baseColor, float metallic, float glossiness)
     {
-        Shader shader = Shader.Find("Standard");
+        bool usesCustomHardwareShader = false;
+        Shader shader = AirWeavingLightingAndShaderRig.ResolveHardwareFresnelShader();
+        if (shader != null && shader.isSupported)
+        {
+            usesCustomHardwareShader = true;
+        }
+        else
+        {
+            shader = Shader.Find("Standard");
+        }
         if (shader == null || !shader.isSupported)
         {
             shader = Shader.Find("Legacy Shaders/Diffuse");
@@ -2938,10 +3041,23 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
         if (mat.HasProperty(EmissionColorPropId))
         {
-            mat.EnableKeyword("_EMISSION");
-            mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
-            // Nilai non-nol kecil agar varian shader _EMISSION tidak pernah di-strip saat runtime & build IL2CPP OpenGLES3
-            mat.SetColor(EmissionColorPropId, new Color(0.01f, 0.01f, 0.01f, 1f));
+            if (usesCustomHardwareShader)
+            {
+                mat.SetColor(EmissionColorPropId, Color.black);
+            }
+            else
+            {
+                mat.EnableKeyword("_EMISSION");
+                mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+                // Nilai non-nol kecil agar varian shader _EMISSION tidak pernah di-strip saat runtime & build IL2CPP OpenGLES3
+                mat.SetColor(EmissionColorPropId, new Color(0.01f, 0.01f, 0.01f, 1f));
+            }
+        }
+        if (usesCustomHardwareShader && mat.HasProperty(RimColorPropId))
+        {
+            mat.SetColor(RimColorPropId, CableHighRimLinear);
+            mat.SetFloat(RimPowerPropId, 2.4f);
+            mat.SetFloat(RimIntensityPropId, 0.65f);
         }
 
         ownedMaterials.Add(mat);

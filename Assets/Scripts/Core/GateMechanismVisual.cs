@@ -21,6 +21,9 @@ public sealed class GateMechanismVisual : MonoBehaviour
     private static readonly int EmissionColorPropId = Shader.PropertyToID("_EmissionColor");
     private static readonly int GlossinessPropId = Shader.PropertyToID("_Glossiness");
     private static readonly int MetallicPropId = Shader.PropertyToID("_Metallic");
+    private static readonly int RimColorPropId = Shader.PropertyToID("_RimColor");
+    private static readonly int RimPowerPropId = Shader.PropertyToID("_RimPower");
+    private static readonly int RimIntensityPropId = Shader.PropertyToID("_RimIntensity");
 
     // Palet sci-fi selaras AR_BaseTile3D, Quaternius Props, & saluran energi GateNode
     private static readonly Color MetalDarkColor = new Color(0.14f, 0.18f, 0.24f, 1f);
@@ -50,12 +53,33 @@ public sealed class GateMechanismVisual : MonoBehaviour
     private MaterialPropertyBlock mpb;
 
     // Kelompok renderer yang diberi warna dinamis via MaterialPropertyBlock (zero-GC)
+    private Renderer[] chassisRenderers;
     private Renderer[] inputARenderers;
     private Renderer[] inputBRenderers;
     private Renderer[] midBusRenderers;
     private Renderer[] outputRenderers;
     private Renderer[] powerCoreRenderers;
     private Renderer[] auxHighlightRenderers;
+
+    // State external hardware shader & Fresnel Rim Glow (tracking-agnostic, Zero-GC, 0% regresi Mode Kartu v5)
+    private Shader savedMetalDarkShader;
+    private int savedMetalDarkQueue = -1;
+    private Shader savedMetalSteelShader;
+    private int savedMetalSteelQueue = -1;
+    private Shader savedEmissiveShader;
+    private int savedEmissiveQueue = -1;
+    private bool hasExternalHardwareShader = false;
+    private bool hasExternalRimHighlight = false;
+    private Color externalRimColorLinear = Color.black;
+    private float externalRimPower = 2.8f;
+    private float externalRimIntensity = -1f;
+    private bool lastInAConnected = false;
+    private bool lastInAValue = false;
+    private bool lastInBConnected = false;
+    private bool lastInBValue = false;
+    private bool lastOutputValue = false;
+    private bool lastInputsComplete = false;
+    private bool lastIsParkedPreview = true;
 
     // Transform bergerak per tipe gerbang
     private Transform animPivotA;
@@ -127,6 +151,7 @@ public sealed class GateMechanismVisual : MonoBehaviour
                 break;
         }
 
+        CacheChassisRenderers(chamberRoot);
         isBuilt = true;
         lastColorStateKey = int.MinValue;
         UpdateMechanism(false, false, false, false, false, isParkedPreview: true, deltaTime: 1f);
@@ -170,6 +195,13 @@ public sealed class GateMechanismVisual : MonoBehaviour
         if (colorKey != lastColorStateKey)
         {
             lastColorStateKey = colorKey;
+            lastInAConnected = isInAConnected;
+            lastInAValue = inAValue;
+            lastInBConnected = isInBConnected;
+            lastInBValue = inBValue;
+            lastOutputValue = outputValue;
+            lastInputsComplete = inputsComplete;
+            lastIsParkedPreview = isParkedPreview;
             ApplyEmissiveStates(isInAConnected, inAValue, isInBConnected, inBValue, outputValue, inputsComplete, isParkedPreview);
         }
 
@@ -194,18 +226,201 @@ public sealed class GateMechanismVisual : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Mengganti 3 shared material mekanisme ke custom hardware shader 1-pass (tracking-agnostic) sambil menyimpan
+    /// snapshot shader bawaan untuk pemulihan penuh Mode Kartu v5.
+    /// </summary>
+    public void ApplyExternalHardwareShader(Shader customShader)
+    {
+        if (!isBuilt || customShader == null || !customShader.isSupported)
+        {
+            return;
+        }
+
+        if (!hasExternalHardwareShader)
+        {
+            savedMetalDarkShader = metalDarkMat != null ? metalDarkMat.shader : null;
+            savedMetalDarkQueue = metalDarkMat != null ? metalDarkMat.renderQueue : -1;
+            savedMetalSteelShader = metalSteelMat != null ? metalSteelMat.shader : null;
+            savedMetalSteelQueue = metalSteelMat != null ? metalSteelMat.renderQueue : -1;
+            savedEmissiveShader = emissiveSharedMat != null ? emissiveSharedMat.shader : null;
+            savedEmissiveQueue = emissiveSharedMat != null ? emissiveSharedMat.renderQueue : -1;
+        }
+
+        ApplyShaderToSharedMat(metalDarkMat, customShader, clearEmission: true);
+        ApplyShaderToSharedMat(metalSteelMat, customShader, clearEmission: true);
+        ApplyShaderToSharedMat(emissiveSharedMat, customShader, clearEmission: false);
+
+        emissiveHasEmissionProp = emissiveSharedMat != null && emissiveSharedMat.HasProperty(EmissionColorPropId);
+        hasExternalHardwareShader = true;
+
+        if (hasExternalRimHighlight)
+        {
+            ApplyChassisRimHighlight();
+        }
+        ApplyEmissiveStates(lastInAConnected, lastInAValue, lastInBConnected, lastInBValue, lastOutputValue, lastInputsComplete, lastIsParkedPreview);
+    }
+
+    /// <summary>
+    /// Memulihkan 3 shared material ke shader bawaan Mode Kartu v5 &amp; membersihkan seluruh override Fresnel MPB.
+    /// </summary>
+    public void RestoreDefaultHardwareShaders()
+    {
+        if (!isBuilt)
+        {
+            return;
+        }
+
+        if (hasExternalHardwareShader)
+        {
+            RestoreSharedMatShader(metalDarkMat, savedMetalDarkShader, savedMetalDarkQueue);
+            RestoreSharedMatShader(metalSteelMat, savedMetalSteelShader, savedMetalSteelQueue);
+            RestoreSharedMatShader(emissiveSharedMat, savedEmissiveShader, savedEmissiveQueue);
+            emissiveHasEmissionProp = emissiveSharedMat != null && emissiveSharedMat.HasProperty(EmissionColorPropId);
+            hasExternalHardwareShader = false;
+        }
+
+        hasExternalRimHighlight = false;
+        externalRimIntensity = -1f;
+
+        if (chassisRenderers != null)
+        {
+            for (int i = 0; i < chassisRenderers.Length; i++)
+            {
+                if (chassisRenderers[i] != null)
+                {
+                    chassisRenderers[i].SetPropertyBlock(null);
+                }
+            }
+        }
+
+        ApplyEmissiveStates(lastInAConnected, lastInAValue, lastInBConnected, lastInBValue, lastOutputValue, lastInputsComplete, lastIsParkedPreview);
+    }
+
+    /// <summary>
+    /// Menerapkan warna Fresnel Rim Glow (Linear eksplisit) via MaterialPropertyBlock secara Zero-GC
+    /// ke seluruh sasis logam &amp; saluran energi mekanisme gerbang tanpa menimpa warna status logika.
+    /// </summary>
+    public void SetExternalRimHighlight(Color linearRimColor, float rimPower, float rimIntensity)
+    {
+        if (!isBuilt || !hasExternalHardwareShader)
+        {
+            return;
+        }
+
+        if (hasExternalRimHighlight
+            && Mathf.Abs(externalRimColorLinear.r - linearRimColor.r) < 0.005f
+            && Mathf.Abs(externalRimColorLinear.g - linearRimColor.g) < 0.005f
+            && Mathf.Abs(externalRimColorLinear.b - linearRimColor.b) < 0.005f
+            && Mathf.Abs(externalRimPower - rimPower) < 0.02f
+            && Mathf.Abs(externalRimIntensity - rimIntensity) < 0.015f)
+        {
+            return;
+        }
+
+        hasExternalRimHighlight = true;
+        externalRimColorLinear = linearRimColor;
+        externalRimPower = rimPower;
+        externalRimIntensity = rimIntensity;
+
+        ApplyChassisRimHighlight();
+        ApplyEmissiveStates(lastInAConnected, lastInAValue, lastInBConnected, lastInBValue, lastOutputValue, lastInputsComplete, lastIsParkedPreview);
+    }
+
+    private void CacheChassisRenderers(Transform chamberRoot)
+    {
+        if (chamberRoot == null)
+        {
+            chassisRenderers = null;
+            return;
+        }
+
+        Renderer[] all = chamberRoot.GetComponentsInChildren<Renderer>(true);
+        int matchCount = 0;
+        for (int i = 0; i < all.Length; i++)
+        {
+            Renderer r = all[i];
+            if (r != null && (r.sharedMaterial == metalDarkMat || r.sharedMaterial == metalSteelMat))
+            {
+                matchCount++;
+            }
+        }
+
+        chassisRenderers = new Renderer[matchCount];
+        int cursor = 0;
+        for (int i = 0; i < all.Length; i++)
+        {
+            Renderer r = all[i];
+            if (r != null && (r.sharedMaterial == metalDarkMat || r.sharedMaterial == metalSteelMat))
+            {
+                chassisRenderers[cursor++] = r;
+            }
+        }
+    }
+
+    private void ApplyChassisRimHighlight()
+    {
+        if (chassisRenderers == null || mpb == null)
+        {
+            return;
+        }
+
+        mpb.Clear();
+        mpb.SetColor(RimColorPropId, externalRimColorLinear);
+        mpb.SetFloat(RimPowerPropId, externalRimPower);
+        mpb.SetFloat(RimIntensityPropId, externalRimIntensity);
+
+        for (int i = 0; i < chassisRenderers.Length; i++)
+        {
+            if (chassisRenderers[i] != null)
+            {
+                chassisRenderers[i].SetPropertyBlock(mpb);
+            }
+        }
+    }
+
+    private static void ApplyShaderToSharedMat(Material mat, Shader customShader, bool clearEmission)
+    {
+        if (mat == null || customShader == null)
+        {
+            return;
+        }
+
+        mat.shader = customShader;
+        mat.renderQueue = -1;
+        if (clearEmission && mat.HasProperty(EmissionColorPropId))
+        {
+            mat.SetColor(EmissionColorPropId, Color.black);
+        }
+    }
+
+    private static void RestoreSharedMatShader(Material mat, Shader originalShader, int originalQueue)
+    {
+        if (mat == null || originalShader == null)
+        {
+            return;
+        }
+
+        mat.shader = originalShader;
+        mat.renderQueue = originalQueue;
+    }
+
     private void OnDestroy()
     {
         DestroyMat(ref metalDarkMat);
         DestroyMat(ref metalSteelMat);
         DestroyMat(ref emissiveSharedMat);
         mpb = null;
+        chassisRenderers = null;
         inputARenderers = null;
         inputBRenderers = null;
         midBusRenderers = null;
         outputRenderers = null;
         powerCoreRenderers = null;
         auxHighlightRenderers = null;
+        savedMetalDarkShader = null;
+        savedMetalSteelShader = null;
+        savedEmissiveShader = null;
     }
 
     // =========================================================================
@@ -915,6 +1130,12 @@ public sealed class GateMechanismVisual : MonoBehaviour
         if (emissiveHasEmissionProp)
         {
             mpb.SetColor(EmissionColorPropId, emissionColor);
+        }
+        if (hasExternalHardwareShader && hasExternalRimHighlight)
+        {
+            mpb.SetColor(RimColorPropId, externalRimColorLinear);
+            mpb.SetFloat(RimPowerPropId, externalRimPower);
+            mpb.SetFloat(RimIntensityPropId, externalRimIntensity * 0.58f);
         }
 
         for (int i = 0; i < group.Length; i++)

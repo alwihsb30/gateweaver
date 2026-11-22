@@ -26,6 +26,9 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
     private static readonly int EmissionColorPropId = Shader.PropertyToID("_EmissionColor");
     private static readonly int GlossinessPropId = Shader.PropertyToID("_Glossiness");
     private static readonly int MetallicPropId = Shader.PropertyToID("_Metallic");
+    private static readonly int RimColorPropId = Shader.PropertyToID("_RimColor");
+    private static readonly int RimPowerPropId = Shader.PropertyToID("_RimPower");
+    private static readonly int RimIntensityPropId = Shader.PropertyToID("_RimIntensity");
 
     private static readonly string[] BinaryRowLabels = { "00", "01", "10", "11" };
 
@@ -77,6 +80,19 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
     private readonly Renderer[] cellPlateRenderers = new Renderer[CellCount];
     private readonly Renderer[] cellRimRenderers = new Renderer[CellCount];
     private readonly TextMeshPro[] cellBinaryLabels = new TextMeshPro[CellCount];
+    private readonly Renderer[] frameRenderers = new Renderer[5];
+
+    private Shader savedTrayMetalShader;
+    private int savedTrayMetalQueue = -1;
+    private Shader savedTrayTrimShader;
+    private int savedTrayTrimQueue = -1;
+    private Shader savedEmissiveShader;
+    private int savedEmissiveQueue = -1;
+    private bool hasExternalHardwareShader = false;
+    private bool hasExternalFrameRim = false;
+    private Color externalFrameRimColorLinear = Color.black;
+    private float externalFrameRimPower = 2.8f;
+    private float externalFrameRimIntensity = -1f;
 
     private readonly bool[] expectedTargets = new bool[CellCount];
     private readonly OutputPodCellStatus[] cellStatuses = new OutputPodCellStatus[CellCount];
@@ -113,15 +129,15 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         Transform root = podRootObj.transform;
 
         // Rangka nampan gelap simetris + lis tipis
-        CreatePart("Pod_TrayBody", PrimitiveType.Cube, root,
+        frameRenderers[0] = CreatePart("Pod_TrayBody", PrimitiveType.Cube, root,
             Vector3.zero, Vector3.zero, new Vector3(0.504f, 0.018f, 0.242f), trayMetalMat);
-        CreatePart("Pod_TrimTop", PrimitiveType.Cube, root,
+        frameRenderers[1] = CreatePart("Pod_TrimTop", PrimitiveType.Cube, root,
             new Vector3(0f, 0.008f, 0.118f), Vector3.zero, new Vector3(0.508f, 0.007f, 0.008f), trayTrimMat);
-        CreatePart("Pod_TrimBottom", PrimitiveType.Cube, root,
+        frameRenderers[2] = CreatePart("Pod_TrimBottom", PrimitiveType.Cube, root,
             new Vector3(0f, 0.008f, -0.118f), Vector3.zero, new Vector3(0.508f, 0.007f, 0.008f), trayTrimMat);
-        CreatePart("Pod_CrossDividerV", PrimitiveType.Cube, root,
+        frameRenderers[3] = CreatePart("Pod_CrossDividerV", PrimitiveType.Cube, root,
             new Vector3(0f, 0.007f, 0f), Vector3.zero, new Vector3(0.007f, 0.007f, 0.226f), trayTrimMat);
-        CreatePart("Pod_CrossDividerH", PrimitiveType.Cube, root,
+        frameRenderers[4] = CreatePart("Pod_CrossDividerH", PrimitiveType.Cube, root,
             new Vector3(0f, 0.007f, 0f), Vector3.zero, new Vector3(0.490f, 0.007f, 0.007f), trayTrimMat);
 
         for (int row = 0; row < CellCount; row++)
@@ -323,6 +339,152 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         return cachedMainCamera;
     }
 
+    /// <summary>
+    /// Mengganti 3 shared material Pod ke custom hardware shader 1-pass sambil menyimpan snapshot shader bawaan
+    /// untuk pemulihan penuh Mode Kartu v5. Sel biner 00/01/10/11 tetap jernih (rim = 0 pada pelat sel).
+    /// </summary>
+    public void ApplyExternalHardwareShader(Shader customShader)
+    {
+        if (!isInitialized || customShader == null || !customShader.isSupported)
+        {
+            return;
+        }
+
+        if (!hasExternalHardwareShader)
+        {
+            savedTrayMetalShader = trayMetalMat != null ? trayMetalMat.shader : null;
+            savedTrayMetalQueue = trayMetalMat != null ? trayMetalMat.renderQueue : -1;
+            savedTrayTrimShader = trayTrimMat != null ? trayTrimMat.shader : null;
+            savedTrayTrimQueue = trayTrimMat != null ? trayTrimMat.renderQueue : -1;
+            savedEmissiveShader = emissiveSharedMat != null ? emissiveSharedMat.shader : null;
+            savedEmissiveQueue = emissiveSharedMat != null ? emissiveSharedMat.renderQueue : -1;
+        }
+
+        ApplyShaderToMat(trayMetalMat, customShader, clearEmission: true);
+        ApplyShaderToMat(trayTrimMat, customShader, clearEmission: true);
+        ApplyShaderToMat(emissiveSharedMat, customShader, clearEmission: false);
+        if (emissiveSharedMat != null && emissiveSharedMat.HasProperty(RimIntensityPropId))
+        {
+            emissiveSharedMat.SetFloat(RimIntensityPropId, 0f);
+        }
+
+        emissiveHasEmissionProp = emissiveSharedMat != null && emissiveSharedMat.HasProperty(EmissionColorPropId);
+        hasExternalHardwareShader = true;
+
+        if (hasExternalFrameRim)
+        {
+            ApplyFrameRimHighlight();
+        }
+        ApplyAllCellVisuals();
+    }
+
+    /// <summary>
+    /// Memulihkan shader bawaan Mode Kartu v5 pada Pod 2x2 dan membersihkan MPB rangka.
+    /// </summary>
+    public void RestoreDefaultHardwareShaders()
+    {
+        if (!isInitialized)
+        {
+            return;
+        }
+
+        if (hasExternalHardwareShader)
+        {
+            RestoreMatShader(trayMetalMat, savedTrayMetalShader, savedTrayMetalQueue);
+            RestoreMatShader(trayTrimMat, savedTrayTrimShader, savedTrayTrimQueue);
+            RestoreMatShader(emissiveSharedMat, savedEmissiveShader, savedEmissiveQueue);
+            emissiveHasEmissionProp = emissiveSharedMat != null && emissiveSharedMat.HasProperty(EmissionColorPropId);
+            hasExternalHardwareShader = false;
+        }
+
+        hasExternalFrameRim = false;
+        externalFrameRimIntensity = -1f;
+
+        for (int i = 0; i < frameRenderers.Length; i++)
+        {
+            if (frameRenderers[i] != null)
+            {
+                frameRenderers[i].SetPropertyBlock(null);
+            }
+        }
+
+        ApplyAllCellVisuals();
+    }
+
+    /// <summary>
+    /// Menerapkan Fresnel Rim Glow halus khusus pada rangka logam Pod (Linear eksplisit, Zero-GC).
+    /// </summary>
+    public void SetExternalFrameRimHighlight(Color linearRimColor, float rimPower, float rimIntensity)
+    {
+        if (!isInitialized || !hasExternalHardwareShader)
+        {
+            return;
+        }
+
+        if (hasExternalFrameRim
+            && Mathf.Abs(externalFrameRimColorLinear.r - linearRimColor.r) < 0.005f
+            && Mathf.Abs(externalFrameRimColorLinear.g - linearRimColor.g) < 0.005f
+            && Mathf.Abs(externalFrameRimColorLinear.b - linearRimColor.b) < 0.005f
+            && Mathf.Abs(externalFrameRimPower - rimPower) < 0.02f
+            && Mathf.Abs(externalFrameRimIntensity - rimIntensity) < 0.015f)
+        {
+            return;
+        }
+
+        hasExternalFrameRim = true;
+        externalFrameRimColorLinear = linearRimColor;
+        externalFrameRimPower = rimPower;
+        externalFrameRimIntensity = rimIntensity;
+        ApplyFrameRimHighlight();
+    }
+
+    private void ApplyFrameRimHighlight()
+    {
+        if (mpb == null)
+        {
+            return;
+        }
+
+        mpb.Clear();
+        mpb.SetColor(RimColorPropId, externalFrameRimColorLinear);
+        mpb.SetFloat(RimPowerPropId, externalFrameRimPower);
+        mpb.SetFloat(RimIntensityPropId, externalFrameRimIntensity);
+
+        for (int i = 0; i < frameRenderers.Length; i++)
+        {
+            if (frameRenderers[i] != null)
+            {
+                frameRenderers[i].SetPropertyBlock(mpb);
+            }
+        }
+    }
+
+    private static void ApplyShaderToMat(Material mat, Shader customShader, bool clearEmission)
+    {
+        if (mat == null || customShader == null)
+        {
+            return;
+        }
+
+        mat.shader = customShader;
+        mat.renderQueue = -1;
+        if (clearEmission && mat.HasProperty(EmissionColorPropId))
+        {
+            mat.SetColor(EmissionColorPropId, Color.black);
+        }
+    }
+
+    private static void RestoreMatShader(Material mat, Shader originalShader, int originalQueue)
+    {
+        if (mat == null || originalShader == null)
+        {
+            return;
+        }
+
+        mat.shader = originalShader;
+        mat.renderQueue = originalQueue;
+    }
+
     private void OnDestroy()
     {
         DestroyMat(ref trayMetalMat);
@@ -331,6 +493,9 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         mpb = null;
         ownerGateNode = null;
         cachedMainCamera = null;
+        savedTrayMetalShader = null;
+        savedTrayTrimShader = null;
+        savedEmissiveShader = null;
     }
 
     // =========================================================================
@@ -468,6 +633,10 @@ public sealed class OutputTruthPodVisual : MonoBehaviour
         if (emissiveHasEmissionProp)
         {
             mpb.SetColor(EmissionColorPropId, emissionColor);
+        }
+        if (hasExternalHardwareShader)
+        {
+            mpb.SetFloat(RimIntensityPropId, 0f);
         }
         rend.SetPropertyBlock(mpb);
     }

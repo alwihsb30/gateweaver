@@ -373,6 +373,29 @@ public class GateNode : MonoBehaviour
     private static readonly int EmissionColorPropId = Shader.PropertyToID("_EmissionColor");
     private static readonly int GlossinessPropId = Shader.PropertyToID("_Glossiness");
     private static readonly int MetallicPropId = Shader.PropertyToID("_Metallic");
+    private static readonly int ModePropId = Shader.PropertyToID("_Mode");
+    private static readonly int RimColorPropId = Shader.PropertyToID("_RimColor");
+    private static readonly int RimPowerPropId = Shader.PropertyToID("_RimPower");
+    private static readonly int RimIntensityPropId = Shader.PropertyToID("_RimIntensity");
+
+    private struct SavedHardwareMaterialState
+    {
+        public Material material;
+        public Shader originalShader;
+        public int originalRenderQueue;
+        public bool hadEmissionKeyword;
+        public bool hadEmissionProperty;
+        public Color savedEmissionColor;
+    }
+
+    private readonly List<SavedHardwareMaterialState> savedHardwareMaterials = new List<SavedHardwareMaterialState>(16);
+    private readonly List<Renderer> hardwareRimRenderers = new List<Renderer>(24);
+    private MaterialPropertyBlock hardwareRimMpb;
+    private bool hasExternalHardwareShader = false;
+    private bool hasExternalRimHighlight = false;
+    private Color lastExternalRimColorLinear = Color.black;
+    private float lastExternalRimPower = 2.8f;
+    private float lastExternalRimIntensity = -1f;
     private static readonly Color ReactiveAccentHighColor = new Color(0.14f, 1.00f, 0.78f, 1f);
     private static readonly Color ReactiveAccentLowColor = new Color(0.76f, 0.22f, 0.10f, 1f);
     private static readonly Color TapInspectBurstColor = new Color(1.00f, 0.76f, 0.22f, 1f);
@@ -545,6 +568,12 @@ public class GateNode : MonoBehaviour
             DestroyProceduralMaterial(ref mat);
         }
         managedMaterials.Clear();
+        savedHardwareMaterials.Clear();
+        hardwareRimRenderers.Clear();
+        hardwareRimMpb = null;
+        hasExternalHardwareShader = false;
+        hasExternalRimHighlight = false;
+        lastExternalRimIntensity = -1f;
         totemReactiveAccentMaterials.Clear();
         dioramaVariantReactiveAccentMaterials = null;
         portInAMaterial = null;
@@ -2587,10 +2616,334 @@ public class GateNode : MonoBehaviour
     }
 
     /// <summary>
+    /// Menerapkan custom hardware shader 1-pass (tracking-agnostic) hanya pada material lit opaque
+    /// (renderQueue &lt; 2500, bukan RenderType Transparent, Standard _Mode &lt; 2, menjaga kaca/sirene transparan tetap utuh)
+    /// sekaligus meneruskan ke GateMechanismVisual &amp; OutputTruthPodVisual.
+    /// </summary>
+    public void ApplyExternalHardwareShader(Shader customShader)
+    {
+        if (mechanismVisual != null)
+        {
+            mechanismVisual.ApplyExternalHardwareShader(customShader);
+        }
+        if (outputTruthPod != null)
+        {
+            outputTruthPod.ApplyExternalHardwareShader(customShader);
+        }
+
+        if (customShader == null || !customShader.isSupported)
+        {
+            return;
+        }
+
+        if (hasExternalHardwareShader)
+        {
+            RestoreOwnHardwareShadersOnly();
+        }
+
+        savedHardwareMaterials.Clear();
+        hardwareRimRenderers.Clear();
+
+        // 5 gerbang logika berbasis GateMechanismVisual sudah ditangani langsung oleh mechanismVisual di atas
+        bool skipTotemBecauseMechanismOwnsIt = mechanismVisual != null && mechanismVisual.IsBuilt;
+        if (totemRootObj != null && !skipTotemBecauseMechanismOwnsIt)
+        {
+            CollectAndSwitchOpaqueHardwareRenderers(totemRootObj, customShader);
+        }
+
+        if (outputDioramaRootObj != null)
+        {
+            CollectAndSwitchOpaqueHardwareRenderers(outputDioramaRootObj, customShader);
+        }
+
+        hasExternalHardwareShader = true;
+        hasExternalRimHighlight = false;
+        lastExternalRimIntensity = -1f;
+
+        lastAppliedAccentState = -1;
+        lastAppliedAccentDioramaVariant = -1;
+        UpdateReactiveAccentMaterials();
+    }
+
+    /// <summary>
+    /// Memulihkan 100% seluruh shader, renderQueue, emisi, &amp; MPB material bawaan Mode Kartu v5.
+    /// </summary>
+    public void RestoreDefaultHardwareShaders()
+    {
+        if (mechanismVisual != null)
+        {
+            mechanismVisual.RestoreDefaultHardwareShaders();
+        }
+        if (outputTruthPod != null)
+        {
+            outputTruthPod.RestoreDefaultHardwareShaders();
+        }
+
+        RestoreOwnHardwareShadersOnly();
+    }
+
+    /// <summary>
+    /// Menerapkan Fresnel Rim Glow (Linear eksplisit) via MaterialPropertyBlock secara Zero-GC
+    /// pada seluruh bodi hardware opaque node, mekanisme Open Cutaway, dan rangka Pod Truth Table.
+    /// </summary>
+    public void SetExternalRimHighlight(Color linearRimColor, float rimPower, float rimIntensity)
+    {
+        if (mechanismVisual != null)
+        {
+            mechanismVisual.SetExternalRimHighlight(linearRimColor, rimPower, rimIntensity);
+        }
+        if (outputTruthPod != null)
+        {
+            outputTruthPod.SetExternalFrameRimHighlight(linearRimColor, rimPower, rimIntensity * 0.45f);
+        }
+
+        if (!hasExternalHardwareShader || hardwareRimRenderers.Count == 0)
+        {
+            return;
+        }
+
+        if (hasExternalRimHighlight
+            && Mathf.Abs(lastExternalRimColorLinear.r - linearRimColor.r) < 0.005f
+            && Mathf.Abs(lastExternalRimColorLinear.g - linearRimColor.g) < 0.005f
+            && Mathf.Abs(lastExternalRimColorLinear.b - linearRimColor.b) < 0.005f
+            && Mathf.Abs(lastExternalRimPower - rimPower) < 0.02f
+            && Mathf.Abs(lastExternalRimIntensity - rimIntensity) < 0.015f)
+        {
+            return;
+        }
+
+        hasExternalRimHighlight = true;
+        lastExternalRimColorLinear = linearRimColor;
+        lastExternalRimPower = rimPower;
+        lastExternalRimIntensity = rimIntensity;
+
+        if (hardwareRimMpb == null)
+        {
+            hardwareRimMpb = new MaterialPropertyBlock();
+        }
+
+        hardwareRimMpb.Clear();
+        hardwareRimMpb.SetColor(RimColorPropId, linearRimColor);
+        hardwareRimMpb.SetFloat(RimPowerPropId, rimPower);
+        hardwareRimMpb.SetFloat(RimIntensityPropId, rimIntensity);
+
+        for (int i = 0; i < hardwareRimRenderers.Count; i++)
+        {
+            Renderer rend = hardwareRimRenderers[i];
+            if (rend != null)
+            {
+                rend.SetPropertyBlock(hardwareRimMpb);
+            }
+        }
+    }
+
+    private void CollectAndSwitchOpaqueHardwareRenderers(GameObject rootObj, Shader customShader)
+    {
+        Renderer[] renderers = rootObj.GetComponentsInChildren<Renderer>(true);
+        for (int r = 0; r < renderers.Length; r++)
+        {
+            Renderer rend = renderers[r];
+            if (rend == null || rend is LineRenderer || rend is ParticleSystemRenderer)
+            {
+                continue;
+            }
+
+            Material[] mats = rend.sharedMaterials;
+            if (mats == null || mats.Length == 0)
+            {
+                continue;
+            }
+
+            bool rendererUsesHardwareShader = false;
+            for (int m = 0; m < mats.Length; m++)
+            {
+                Material mat = mats[m];
+                if (mat == null)
+                {
+                    continue;
+                }
+
+                if (ContainsSavedHardwareMaterial(mat))
+                {
+                    rendererUsesHardwareShader = true;
+                    continue;
+                }
+
+                if (!IsEligibleOpaqueLitMaterial(mat, customShader))
+                {
+                    continue;
+                }
+
+                bool hadEmissionProp = mat.HasProperty(EmissionColorPropId);
+                bool hadEmissionKw = mat.IsKeywordEnabled("_EMISSION");
+                Color savedEmission = hadEmissionProp ? mat.GetColor(EmissionColorPropId) : Color.black;
+
+                savedHardwareMaterials.Add(new SavedHardwareMaterialState
+                {
+                    material = mat,
+                    originalShader = mat.shader,
+                    originalRenderQueue = mat.renderQueue,
+                    hadEmissionKeyword = hadEmissionKw,
+                    hadEmissionProperty = hadEmissionProp,
+                    savedEmissionColor = savedEmission
+                });
+
+                mat.shader = customShader;
+                mat.renderQueue = -1;
+                if (!hadEmissionKw && mat.HasProperty(EmissionColorPropId))
+                {
+                    mat.SetColor(EmissionColorPropId, Color.black);
+                }
+
+                rendererUsesHardwareShader = true;
+            }
+
+            if (rendererUsesHardwareShader)
+            {
+                hardwareRimRenderers.Add(rend);
+            }
+        }
+    }
+
+    private bool ContainsSavedHardwareMaterial(Material candidate)
+    {
+        for (int i = 0; i < savedHardwareMaterials.Count; i++)
+        {
+            if (savedHardwareMaterials[i].material == candidate)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private bool IsEligibleOpaqueLitMaterial(Material mat, Shader targetShader)
+    {
+        if (mat == null || mat.shader == null || mat.shader == targetShader)
+        {
+            return false;
+        }
+
+        if (mat == v5SirenBeamMaterial
+            || mat == labelBackdropMaterial
+            || mat == shockwaveMaterial
+            || mat == lineMaterial
+            || mat == conduitSheathMat
+            || mat == sparkBurstMaterial
+            || mat == dataPacketMaterial
+            || mat == socketMaterial)
+        {
+            return false;
+        }
+
+        string matName = mat.name;
+        if (!string.IsNullOrEmpty(matName)
+            && (matName.IndexOf("Glass", StringComparison.OrdinalIgnoreCase) >= 0
+                || matName.IndexOf("Beam", StringComparison.OrdinalIgnoreCase) >= 0))
+        {
+            return false;
+        }
+
+        string shaderName = mat.shader.name;
+        if (string.IsNullOrEmpty(shaderName)
+            || shaderName.StartsWith("Sprites/", StringComparison.OrdinalIgnoreCase)
+            || shaderName.StartsWith("UI/", StringComparison.OrdinalIgnoreCase)
+            || shaderName.StartsWith("TextMeshPro/", StringComparison.OrdinalIgnoreCase)
+            || shaderName.StartsWith("Unlit/", StringComparison.OrdinalIgnoreCase)
+            || shaderName.StartsWith("Hidden/", StringComparison.OrdinalIgnoreCase)
+            || shaderName.StartsWith("Particles/", StringComparison.OrdinalIgnoreCase)
+            || shaderName.StartsWith("GateWeaver/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        int effectiveQueue = mat.renderQueue >= 0 ? mat.renderQueue : mat.shader.renderQueue;
+        if (effectiveQueue >= 2500 || mat.shader.renderQueue >= 2500)
+        {
+            return false;
+        }
+
+        string renderType = mat.GetTag("RenderType", false, string.Empty);
+        if (string.Equals(renderType, "Transparent", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(renderType, "TransparentCutout", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(renderType, "Overlay", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (mat.IsKeywordEnabled("_ALPHABLEND_ON") || mat.IsKeywordEnabled("_ALPHAPREMULTIPLY_ON"))
+        {
+            return false;
+        }
+
+        if (mat.HasProperty(ModePropId) && mat.GetFloat(ModePropId) >= 2.0f)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private void RestoreOwnHardwareShadersOnly()
+    {
+        for (int i = 0; i < savedHardwareMaterials.Count; i++)
+        {
+            SavedHardwareMaterialState state = savedHardwareMaterials[i];
+            Material mat = state.material;
+            if (mat == null)
+            {
+                continue;
+            }
+
+            if (state.originalShader != null)
+            {
+                mat.shader = state.originalShader;
+            }
+            mat.renderQueue = state.originalRenderQueue;
+            if (state.hadEmissionProperty && mat.HasProperty(EmissionColorPropId))
+            {
+                mat.SetColor(EmissionColorPropId, state.savedEmissionColor);
+            }
+            if (state.hadEmissionKeyword)
+            {
+                mat.EnableKeyword("_EMISSION");
+            }
+            else
+            {
+                mat.DisableKeyword("_EMISSION");
+            }
+        }
+        savedHardwareMaterials.Clear();
+
+        for (int i = 0; i < hardwareRimRenderers.Count; i++)
+        {
+            Renderer rend = hardwareRimRenderers[i];
+            if (rend != null)
+            {
+                rend.SetPropertyBlock(null);
+            }
+        }
+        hardwareRimRenderers.Clear();
+
+        bool hadActive = hasExternalHardwareShader;
+        hasExternalHardwareShader = false;
+        hasExternalRimHighlight = false;
+        lastExternalRimIntensity = -1f;
+
+        if (hadActive)
+        {
+            lastAppliedAccentState = -1;
+            lastAppliedAccentDioramaVariant = -1;
+            UpdateReactiveAccentMaterials();
+        }
+    }
+
+    /// <summary>
     /// Melepas seluruh kendali pose/skala eksternal v6 dan mengembalikan node ke Mode Kartu Vuforia v5.
     /// </summary>
     public void ClearExternalSpatialOverride()
     {
+        RestoreDefaultHardwareShaders();
         externalParkedPreview = false;
         useExternalSpatialPose = false;
         SetGroundRenderersEnabled(true);
