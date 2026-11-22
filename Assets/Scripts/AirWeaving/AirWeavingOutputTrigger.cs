@@ -29,6 +29,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     private const int RingSegments = 28;
     private const float OutputInteractRadius = 0.28f;
     private const float OutputRearmRadius = 0.38f;
+    private const float MinScreenSpaceHitboxScale = 0.82f;
     private const float FistHoldDurationSeconds = 0.45f;
     private const float RearmCooldownSeconds = 0.85f;
     private const float HaloCenterUpOffset = 0.065f;
@@ -235,9 +236,12 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         float zoomClamp = Mathf.Clamp(stageZoomScale, AirWeavingStageController.MinZoomScale, AirWeavingStageController.MaxZoomScale);
         float outputCamZ = mainCam.transform.InverseTransformPoint(outputWorldPos).z;
         bool outputBehindCamera = outputCamZ <= 0.25f;
-        float hitRadiusScale = outputBehindCamera
+        float rawVisualScale = outputBehindCamera
             ? 0.55f
-            : Mathf.Clamp(zoomClamp * (ReferenceCameraDepth / Mathf.Max(0.35f, outputCamZ)), 0.55f, 6.0f);
+            : Mathf.Clamp(zoomClamp * (ReferenceCameraDepth / Mathf.Max(0.35f, outputCamZ)), 0.18f, 6.0f);
+        float hitRadiusScale = outputBehindCamera
+            ? MinScreenSpaceHitboxScale
+            : Mathf.Clamp(rawVisualScale, MinScreenSpaceHitboxScale, 6.0f);
 
         // Edge detection pasca-Auto-Win: hanya aktif jika rangkaian live benar-benar lulus 4/4 (0 sel merah & kuota valid)
         bool effectiveReadyForNext = isReadyForNextLevel
@@ -256,7 +260,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             rearmCooldownTimer = Mathf.Max(0f, rearmCooldownTimer - dt);
         }
 
-        Vector2 targetCenterLocalXY = new Vector2(outputLocalXY.x + (0.03f * hitRadiusScale), outputLocalXY.y + (0.10f * hitRadiusScale));
+        Vector2 targetCenterLocalXY = new Vector2(outputLocalXY.x + (0.03f * rawVisualScale), outputLocalXY.y + (0.10f * rawVisualScale));
         float distToOutput = isHandDetected ? Vector2.Distance(cursorLocalXY, targetCenterLocalXY) : float.MaxValue;
 
         if (requiresRearm && rearmCooldownTimer <= 0f && (!isHandDetected || !isFistActive || distToOutput > (OutputRearmRadius * hitRadiusScale)))

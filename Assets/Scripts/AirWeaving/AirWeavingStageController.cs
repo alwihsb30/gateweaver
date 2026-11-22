@@ -18,8 +18,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
     public const float DefaultElevationPitchDeg = 36.0f;
     private static readonly Quaternion DefaultBaseTiltRotation = Quaternion.Euler(-DefaultElevationPitchDeg, 0f, 0f);
 
-    // Framing awal 0.52x memuat utuh lapangan hologram 2x pada layar awal; Ultra-Wide Zoom 0.18x..15.0x untuk overview hingga makro
-    public const float DefaultZoomScale = 0.52f;
+    // Framing awal 0.74x memuat utuh lapangan hologram 1.5x dengan ukuran gerbang lega; Ultra-Wide Zoom 0.18x..15.0x
+    public const float DefaultZoomScale = 0.74f;
     public const float MinZoomScale = 0.18f;
     public const float MaxZoomScale = 15.0f;
 
@@ -79,9 +79,12 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private const float CoastReleasePanDeadzoneUnitsPerSec = 0.20f;
     private const float CoastReleaseDepthDeadzoneMetersPerSec = 0.32f;
 
-    private const int GridInternalVerticalLines = 19;
-    private const int GridInternalHorizontalLines = 15;
-    private const int ContactRingSegments = 28;
+    private const int GridInternalVerticalLines = 11;
+    private const int GridInternalHorizontalLines = 9;
+    private const int GridTotalLineCount = GridInternalVerticalLines + GridInternalHorizontalLines;
+    private const float GridNormalHalfWidth = 0.0020f;
+    private const float GridCenterAxisHalfWidth = 0.0032f;
+    private const int ContactRingSegments = 20;
     private const int MaxContactRingSlots = 8; // 0: InputA, 1: InputB, 2: Output, 3..7: 5 Gerbang Logika
 
     private static readonly Color FloorDeckGlassColor = new Color(0.02f, 0.14f, 0.26f, 0.20f);
@@ -125,13 +128,20 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private Material floorDeckQuadMat;
     private readonly Vector3[] floorDeckVerticesBuffer = new Vector3[9];
 
+    // Grid proyeksi internal 11x9 digabung menjadi 1 static ribbon Mesh (Cull Off, 1 draw call, 0 CPU per frame)
+    private MeshFilter floorGridRibbonMeshFilter;
+    private MeshRenderer floorGridRibbonRenderer;
+    private Mesh floorGridRibbonMesh;
+    private Material gridRibbonMat;
+    private readonly Vector3[] gridRibbonVertices = new Vector3[GridTotalLineCount * 4];
+    private readonly Color32[] gridRibbonColors = new Color32[GridTotalLineCount * 4];
+    private readonly int[] gridRibbonTriangles = new int[GridTotalLineCount * 6];
+
     private LineRenderer outerBorderShadowRenderer;
     private LineRenderer outerBorderGlowRenderer;
     private LineRenderer innerArenaBorderRenderer;
     private LineRenderer[] cornerShadowRenderers;
     private LineRenderer[] cornerBracketRenderers;
-    private LineRenderer[] verticalGridRenderers;
-    private LineRenderer[] horizontalGridRenderers;
     private LineRenderer[] wingGuideRenderers;
 
     private Material outerBorderShadowMat;
@@ -139,8 +149,6 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private Material innerArenaBorderMat;
     private Material cornerShadowMat;
     private Material cornerBracketMat;
-    private Material gridLineMat;
-    private Material centerAxisMat;
     private Material wingLineMat;
 
     private LineRenderer[] contactOuterRings;
@@ -150,10 +158,29 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private Material[] contactInnerMats;
     private Material[] contactStemMats;
 
+    private struct ContactSlotCache
+    {
+        public bool valid;
+        public float x;
+        public float z;
+        public float hoverY;
+        public float outerR;
+        public float innerR;
+        public float outerW;
+        public float innerW;
+        public float stemW;
+        public Color outerCol;
+        public Color innerCol;
+        public Color stemCol;
+    }
+
     private readonly List<Material> ownedMaterials = new List<Material>(40);
     private readonly Vector3[] borderLoopBuffer = new Vector3[8];
     private readonly Vector3[] cornerPointsBuffer = new Vector3[3];
     private readonly Vector3[] ringLocalBuffer = new Vector3[ContactRingSegments];
+    private readonly float[] contactCosTable = new float[ContactRingSegments];
+    private readonly float[] contactSinTable = new float[ContactRingSegments];
+    private readonly ContactSlotCache[] contactSlotCaches = new ContactSlotCache[MaxContactRingSlots];
     private readonly Vector3[] stemLocalBuffer = new Vector3[2];
 
     // State Air-Orbit 360° Quaternion Arcball Murni (tanpa Euler clamp / gimbal lock), Focus-Point Orbit, Ultra-Wide Zoom, & Dynamic Hand Parallax
@@ -162,7 +189,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     private float targetZoomScale = DefaultZoomScale;
     private float currentZoomScale = DefaultZoomScale;
-    private float currentLogZoom = -0.65392647f; // Mathf.Log(DefaultZoomScale = 0.52f)
+    private float currentLogZoom = -0.30110509f; // Mathf.Log(DefaultZoomScale = 0.74f)
     private float velocityLogZoom = 0f;
 
     private Vector3 targetPanOffset = Vector3.zero;
@@ -213,14 +240,14 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     private bool isInitialized = false;
     private float lastBuiltGridAspectScale = -1f;
-    private float deckMinX = -3.08f;
-    private float deckMaxX = 3.24f;
-    private float deckMinZ = -1.92f;
-    private float deckMaxZ = 2.20f;
-    private float deckHalfW = 3.16f;
-    private float deckHalfZ = 2.06f;
-    private float deckCenterX = 0.08f;
-    private float deckCenterZ = 0.14f;
+    private float deckMinX = -2.31f;
+    private float deckMaxX = 2.43f;
+    private float deckMinZ = -1.44f;
+    private float deckMaxZ = 1.65f;
+    private float deckHalfW = 2.37f;
+    private float deckHalfZ = 1.545f;
+    private float deckCenterX = 0.06f;
+    private float deckCenterZ = 0.105f;
     private const float DeckMinY = 0.00f;
     private const float DeckMaxY = 0.45f;
 
@@ -278,16 +305,22 @@ public sealed class AirWeavingStageController : MonoBehaviour
         floorVisualGroupObj = new GameObject("HoloStage_HorizontalTableFloor3D");
         floorVisualGroupObj.transform.SetParent(stageRootTransform, false);
 
-        // 1. Material Lantai Proyeksi & Grid Sci-Fi (Sprites/Default aman OpenGLES3)
+        // 1. Material Lantai Proyeksi & Grid Sci-Fi (Sprites/Default = Cull Off, aman 360° upside-down & OpenGLES3)
         floorDeckQuadMat = CreateSafeSpritesMaterial(FloorDeckGlassColor, 2975);
-        gridLineMat = CreateSafeSpritesMaterial(FloorGridLineColor, 2977);
-        centerAxisMat = CreateSafeSpritesMaterial(FloorCenterAxisColor, 2978);
+        gridRibbonMat = CreateSafeSpritesMaterial(Color.white, 2977);
         wingLineMat = CreateSafeSpritesMaterial(FloorWingLineColor, 2978);
         innerArenaBorderMat = CreateSafeSpritesMaterial(FloorInnerArenaBorderColor, 2979);
         outerBorderShadowMat = CreateSafeSpritesMaterial(FloorOuterShadowColor, 2979);
         outerBorderGlowMat = CreateSafeSpritesMaterial(FloorOuterBorderColor, 2980);
         cornerShadowMat = CreateSafeSpritesMaterial(FloorOuterShadowColor, 2980);
         cornerBracketMat = CreateSafeSpritesMaterial(FloorOuterBorderColor, 2981);
+
+        for (int i = 0; i < ContactRingSegments; i++)
+        {
+            float angle = (i / (float)ContactRingSegments) * Mathf.PI * 2f;
+            contactCosTable[i] = Mathf.Cos(angle);
+            contactSinTable[i] = Mathf.Sin(angle);
+        }
 
         // 2. Bidang Kaca Meja Hologram Horizontal Utuh (Mesh Oktagon Ber-Chamfer rata di bidang XZ lokal panggung)
         GameObject deckObj = new GameObject("HoloStage_FloorGlassDeck");
@@ -317,32 +350,30 @@ public sealed class AirWeavingStageController : MonoBehaviour
             cornerBracketRenderers[c] = CreateLocalLine($"HoloStage_CornerBracket_{c}", floorVisualGroupObj.transform, 3, loop: false, width: 0.0085f, cornerBracketMat);
         }
 
-        // 5. Grid Proyeksi Sci-Fi Internal di Bidang XZ Meja Utuh (Garis Bujur X & Garis Lintang Z)
-        verticalGridRenderers = new LineRenderer[GridInternalVerticalLines];
-        for (int v = 0; v < GridInternalVerticalLines; v++)
+        // 5. Grid Proyeksi Sci-Fi Internal 11x9 sebagai 1 Static Ribbon Mesh (Cull Off Sprites/Default + vertex colors)
+        GameObject gridObj = new GameObject("HoloStage_FloorGridRibbon");
+        gridObj.transform.SetParent(floorVisualGroupObj.transform, false);
+        floorGridRibbonMeshFilter = gridObj.AddComponent<MeshFilter>();
+        floorGridRibbonRenderer = gridObj.AddComponent<MeshRenderer>();
+        floorGridRibbonRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        floorGridRibbonRenderer.receiveShadows = false;
+        if (gridRibbonMat != null)
         {
-            bool isCenter = v == (GridInternalVerticalLines / 2);
-            verticalGridRenderers[v] = CreateLocalLine(
-                $"HoloStage_GridX_{v}",
-                floorVisualGroupObj.transform,
-                2,
-                loop: false,
-                width: isCenter ? 0.0042f : 0.0026f,
-                isCenter ? centerAxisMat : gridLineMat);
+            floorGridRibbonRenderer.sharedMaterial = gridRibbonMat;
         }
-
-        horizontalGridRenderers = new LineRenderer[GridInternalHorizontalLines];
-        for (int h = 0; h < GridInternalHorizontalLines; h++)
+        floorGridRibbonMesh = new Mesh { name = "HoloStage_UnifiedGridRibbonMesh" };
+        for (int lineIdx = 0; lineIdx < GridTotalLineCount; lineIdx++)
         {
-            bool isCenter = h == (GridInternalHorizontalLines / 2);
-            horizontalGridRenderers[h] = CreateLocalLine(
-                $"HoloStage_GridZ_{h}",
-                floorVisualGroupObj.transform,
-                2,
-                loop: false,
-                width: isCenter ? 0.0042f : 0.0026f,
-                isCenter ? centerAxisMat : gridLineMat);
+            int vBase = lineIdx * 4;
+            int tBase = lineIdx * 6;
+            gridRibbonTriangles[tBase] = vBase;
+            gridRibbonTriangles[tBase + 1] = vBase + 1;
+            gridRibbonTriangles[tBase + 2] = vBase + 2;
+            gridRibbonTriangles[tBase + 3] = vBase;
+            gridRibbonTriangles[tBase + 4] = vBase + 2;
+            gridRibbonTriangles[tBase + 5] = vBase + 3;
         }
+        floorGridRibbonMeshFilter.sharedMesh = floorGridRibbonMesh;
 
         // 6. Garis Pembatas & Dermaga Sayap Input (Kiri), Sayap Output (Kanan), & Teras Rak Parkir (Belakang Meja)
         wingGuideRenderers = new LineRenderer[3];
@@ -378,13 +409,13 @@ public sealed class AirWeavingStageController : MonoBehaviour
         {
             RebuildStaticFloorGridGeometry(
                 ComputeAspectScale(mainCam),
-                assemblyMinBaseX: -1.48f,
-                assemblyMaxBaseX: 1.52f,
-                assemblyMinZ: -1.56f,
-                assemblyMaxZ: 0.92f,
-                inputBaseX: -2.52f,
-                outputBaseX: 2.56f,
-                parkingRackZ: 1.64f);
+                assemblyMinBaseX: -1.11f,
+                assemblyMaxBaseX: 1.14f,
+                assemblyMinZ: -1.17f,
+                assemblyMaxZ: 0.69f,
+                inputBaseX: -1.89f,
+                outputBaseX: 1.92f,
+                parkingRackZ: 1.23f);
         }
         HideImmediate();
     }
@@ -444,6 +475,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 if (contactOuterRings[i] != null) contactOuterRings[i].enabled = false;
                 if (contactInnerRings[i] != null) contactInnerRings[i].enabled = false;
                 if (contactElevationStems[i] != null) contactElevationStems[i].enabled = false;
+                contactSlotCaches[i].valid = false;
             }
         }
 
@@ -1639,6 +1671,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 if (outerRing != null && outerRing.enabled) outerRing.enabled = false;
                 if (innerRing != null && innerRing.enabled) innerRing.enabled = false;
                 if (stemLine != null && stemLine.enabled) stemLine.enabled = false;
+                contactSlotCaches[i].valid = false;
                 continue;
             }
 
@@ -1685,46 +1718,102 @@ public sealed class AirWeavingStageController : MonoBehaviour
             float fadeFactor = desc.isParked ? 0.92f : Mathf.Lerp(1.0f, 0.54f, liftNormalized);
             Color outerCol = new Color(baseColor.r, baseColor.g, baseColor.b, baseColor.a * fadeFactor);
             Color innerCol = new Color(baseColor.r, baseColor.g, baseColor.b, baseColor.a * 0.64f * fadeFactor);
+            float outerW = desc.isGrabbed ? 0.0080f : (desc.isParked ? 0.0052f : 0.0066f);
+            float innerW = desc.isParked ? 0.0034f : 0.0040f;
+            float stemAlpha = desc.isGrabbed
+                ? Mathf.Lerp(0.46f, 0.78f, liftNormalized)
+                : (desc.isParked ? 0.28f : 0.36f);
+            Color stemCol = new Color(baseColor.r, baseColor.g, baseColor.b, stemAlpha);
+            float stemW = desc.isGrabbed ? 0.0052f : (desc.isParked ? 0.0030f : 0.0036f);
 
-            DrawLocalTableXZCircle(
-                outerRing,
-                contactOuterMats[i],
-                desc.stageLocalPos.x,
-                ContactRingLocalY,
-                desc.stageLocalPos.z,
-                effectiveRadius,
-                outerCol,
-                desc.isGrabbed ? 0.0080f : (desc.isParked ? 0.0052f : 0.0066f));
+            ContactSlotCache prev = contactSlotCaches[i];
+            bool geomDirty = !prev.valid
+                             || Mathf.Abs(desc.stageLocalPos.x - prev.x) > 0.0004f
+                             || Mathf.Abs(desc.stageLocalPos.z - prev.z) > 0.0004f
+                             || Mathf.Abs(hoverHeightY - prev.hoverY) > 0.0004f
+                             || Mathf.Abs(effectiveRadius - prev.outerR) > 0.0004f
+                             || Mathf.Abs(innerRadius - prev.innerR) > 0.0004f;
+            bool styleDirty = !prev.valid
+                              || Mathf.Abs(outerW - prev.outerW) > 0.0002f
+                              || Mathf.Abs(innerW - prev.innerW) > 0.0002f
+                              || Mathf.Abs(stemW - prev.stemW) > 0.0002f
+                              || !ColorsApproxEqual(outerCol, prev.outerCol)
+                              || !ColorsApproxEqual(innerCol, prev.innerCol)
+                              || !ColorsApproxEqual(stemCol, prev.stemCol);
 
-            DrawLocalTableXZCircle(
-                innerRing,
-                contactInnerMats[i],
-                desc.stageLocalPos.x,
-                ContactRingLocalY + 0.001f,
-                desc.stageLocalPos.z,
-                innerRadius,
-                innerCol,
-                desc.isParked ? 0.0034f : 0.0040f);
+            if (!geomDirty && !styleDirty)
+            {
+                if (outerRing != null && !outerRing.enabled) outerRing.enabled = true;
+                if (innerRing != null && !innerRing.enabled) innerRing.enabled = true;
+                if (stemLine != null && !stemLine.enabled) stemLine.enabled = true;
+                continue;
+            }
+
+            if (geomDirty)
+            {
+                DrawLocalTableXZCircle(
+                    outerRing,
+                    contactOuterMats[i],
+                    desc.stageLocalPos.x,
+                    ContactRingLocalY,
+                    desc.stageLocalPos.z,
+                    effectiveRadius,
+                    outerCol,
+                    outerW);
+
+                DrawLocalTableXZCircle(
+                    innerRing,
+                    contactInnerMats[i],
+                    desc.stageLocalPos.x,
+                    ContactRingLocalY + 0.001f,
+                    desc.stageLocalPos.z,
+                    innerRadius,
+                    innerCol,
+                    innerW);
+            }
+            else if (styleDirty)
+            {
+                ApplyRingStyleOnly(outerRing, contactOuterMats[i], outerCol, outerW);
+                ApplyRingStyleOnly(innerRing, contactInnerMats[i], innerCol, innerW);
+            }
 
             // Tiang proyeksi vertikal tegak lurus dari setiap node aktif/parkir turun ke pusat cincin bayangan di permukaan meja
             if (stemLine != null)
             {
-                float stemAlpha = desc.isGrabbed
-                    ? Mathf.Lerp(0.46f, 0.78f, liftNormalized)
-                    : (desc.isParked ? 0.28f : 0.36f);
-                Color stemCol = new Color(baseColor.r, baseColor.g, baseColor.b, stemAlpha);
-                if (contactStemMats[i] != null)
+                if (styleDirty)
                 {
-                    contactStemMats[i].color = stemCol;
+                    if (contactStemMats[i] != null)
+                    {
+                        contactStemMats[i].color = stemCol;
+                    }
+                    stemLine.widthMultiplier = stemW;
+                    stemLine.startColor = stemCol;
+                    stemLine.endColor = stemCol;
                 }
-                stemLocalBuffer[0] = new Vector3(desc.stageLocalPos.x, ContactRingLocalY, desc.stageLocalPos.z);
-                stemLocalBuffer[1] = new Vector3(desc.stageLocalPos.x, Mathf.Max(ContactRingLocalY + 0.02f, hoverHeightY - 0.015f), desc.stageLocalPos.z);
-                stemLine.enabled = true;
-                stemLine.widthMultiplier = desc.isGrabbed ? 0.0052f : (desc.isParked ? 0.0030f : 0.0036f);
-                stemLine.startColor = stemCol;
-                stemLine.endColor = stemCol;
-                stemLine.SetPositions(stemLocalBuffer);
+                if (geomDirty)
+                {
+                    stemLocalBuffer[0] = new Vector3(desc.stageLocalPos.x, ContactRingLocalY, desc.stageLocalPos.z);
+                    stemLocalBuffer[1] = new Vector3(desc.stageLocalPos.x, Mathf.Max(ContactRingLocalY + 0.02f, hoverHeightY - 0.015f), desc.stageLocalPos.z);
+                    stemLine.SetPositions(stemLocalBuffer);
+                }
+                if (!stemLine.enabled) stemLine.enabled = true;
             }
+
+            contactSlotCaches[i] = new ContactSlotCache
+            {
+                valid = true,
+                x = desc.stageLocalPos.x,
+                z = desc.stageLocalPos.z,
+                hoverY = hoverHeightY,
+                outerR = effectiveRadius,
+                innerR = innerRadius,
+                outerW = outerW,
+                innerW = innerW,
+                stemW = stemW,
+                outerCol = outerCol,
+                innerCol = innerCol,
+                stemCol = stemCol
+            };
         }
     }
 
@@ -1831,12 +1920,12 @@ public sealed class AirWeavingStageController : MonoBehaviour
         float arenaFrontZ = assemblyMinZ - 0.16f;
         float arenaBackZ = assemblyMaxZ + 0.16f;
 
-        // Batas Dek Meja Hologram Utuh 2x (mencakup Sayap Input Kiri, Zona Rakit Tengah, Sayap Output Kanan + Truth Pod, & Teras Rak Parkir Belakang)
-        float deckLeftX = Mathf.Min(inputBaseX - 0.56f, assemblyMinBaseX - 1.20f) * aspectScale;
-        float deckRightX = Mathf.Max(outputBaseX + 0.68f, assemblyMaxBaseX + 1.28f) * aspectScale;
-        float deckFrontZ = assemblyMinZ - 0.36f;
-        float deckBackZ = parkingRackZ + 0.56f;
-        float deckChamfer = 0.48f;
+        // Batas Dek Meja Hologram Utuh 1.5x (mencakup Sayap Input Kiri, Zona Rakit Tengah, Sayap Output Kanan + Truth Pod, & Teras Rak Parkir Belakang)
+        float deckLeftX = Mathf.Min(inputBaseX - 0.42f, assemblyMinBaseX - 0.90f) * aspectScale;
+        float deckRightX = Mathf.Max(outputBaseX + 0.51f, assemblyMaxBaseX + 0.96f) * aspectScale;
+        float deckFrontZ = assemblyMinZ - 0.27f;
+        float deckBackZ = parkingRackZ + 0.42f;
+        float deckChamfer = 0.36f;
 
         // Simpan bounding box dek untuk clamping Focus-Point Orbit & perhitungan OBB Dynamic Pan Bounds
         deckMinX = deckLeftX;
@@ -1863,7 +1952,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
             outerBorderShadowRenderer.SetPositions(borderLoopBuffer);
         }
 
-        float arenaChamfer = 0.20f;
+        float arenaChamfer = 0.16f;
         FillChamferedTableXZRectLoop(borderLoopBuffer, arenaLeftX, arenaRightX, arenaFrontZ, arenaBackZ, arenaChamfer, StageFloorLocalY + 0.001f);
         if (innerArenaBorderRenderer != null)
         {
@@ -1871,8 +1960,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
         }
 
         // 3. 4 Siku Sudut Zona Rakit Dipertegas di Permukaan Meja XZ
-        float armX = 0.31f * aspectScale;
-        float armZ = 0.31f;
+        float armX = 0.24f * aspectScale;
+        float armZ = 0.24f;
         float cornerY = StageFloorLocalY + 0.0025f;
         float shadowY = StageFloorLocalY + 0.0015f;
 
@@ -1886,66 +1975,112 @@ public sealed class AirWeavingStageController : MonoBehaviour
         SetLocalTableCornerBracket(cornerBracketRenderers[2], arenaRightX, arenaBackZ - armZ, arenaRightX, arenaBackZ, arenaRightX - armX, arenaBackZ, cornerY);
         SetLocalTableCornerBracket(cornerBracketRenderers[3], arenaLeftX + armX, arenaBackZ, arenaLeftX, arenaBackZ, arenaLeftX, arenaBackZ - armZ, cornerY);
 
-        // 4. Garis Grid Proyeksi Internal Menyatu di Seluruh Dek Meja XZ 2x (terpotong rapi mengikuti batas chamfer oktagon)
+        // 4. Garis Grid Proyeksi Internal 11x9 sebagai 1 Static Ribbon Mesh (Cull Off, 1 draw call, 0 beban CPU per frame)
         float gridY = StageFloorLocalY + 0.001f;
-        for (int v = 0; v < GridInternalVerticalLines; v++)
-        {
-            float frac = (v + 1f) / (GridInternalVerticalLines + 1f);
-            float gx = Mathf.Lerp(deckLeftX + 0.14f, deckRightX - 0.14f, frac);
-            float chamferInsetZ = ComputeOctagonZInsetAtX(gx, deckLeftX, deckRightX, deckChamfer);
-            LineRenderer lr = verticalGridRenderers[v];
-            if (lr != null)
-            {
-                lr.SetPosition(0, new Vector3(gx, gridY, deckFrontZ + chamferInsetZ + 0.025f));
-                lr.SetPosition(1, new Vector3(gx, gridY, deckBackZ - chamferInsetZ - 0.025f));
-            }
-        }
+        RebuildFloorGridRibbonMesh(deckLeftX, deckRightX, deckFrontZ, deckBackZ, deckChamfer, gridY);
 
-        for (int h = 0; h < GridInternalHorizontalLines; h++)
-        {
-            float frac = (h + 1f) / (GridInternalHorizontalLines + 1f);
-            float gz = Mathf.Lerp(deckFrontZ + 0.14f, deckBackZ - 0.14f, frac);
-            float chamferInsetX = ComputeOctagonXInsetAtZ(gz, deckFrontZ, deckBackZ, deckChamfer);
-            LineRenderer lr = horizontalGridRenderers[h];
-            if (lr != null)
-            {
-                lr.SetPosition(0, new Vector3(deckLeftX + chamferInsetX + 0.025f, gridY, gz));
-                lr.SetPosition(1, new Vector3(deckRightX - chamferInsetX - 0.025f, gridY, gz));
-            }
-        }
-
-        // 5. Dermaga Sayap Terminal Input (Kiri), Sayap Output (Kanan), & Teras Rak Parkir (Belakang Meja) 2x rata di permukaan dek XZ
-        float inBayOuterX = (inputBaseX - 0.40f) * aspectScale;
+        // 5. Dermaga Sayap Terminal Input (Kiri), Sayap Output (Kanan), & Teras Rak Parkir (Belakang Meja) 1.5x rata di permukaan dek XZ
+        float inBayOuterX = (inputBaseX - 0.30f) * aspectScale;
         float inBayInnerX = arenaLeftX - (0.08f * aspectScale);
         if (wingGuideRenderers[0] != null)
         {
             wingGuideRenderers[0].SetPosition(0, new Vector3(inBayInnerX, gridY, arenaBackZ - 0.08f));
-            wingGuideRenderers[0].SetPosition(1, new Vector3(inBayOuterX, gridY, arenaBackZ - 0.20f));
+            wingGuideRenderers[0].SetPosition(1, new Vector3(inBayOuterX, gridY, arenaBackZ - 0.16f));
             wingGuideRenderers[0].SetPosition(2, new Vector3(inBayOuterX, gridY, arenaFrontZ + 0.08f));
             wingGuideRenderers[0].SetPosition(3, new Vector3(inBayInnerX, gridY, arenaFrontZ + 0.04f));
         }
 
         float outBayInnerX = arenaRightX + (0.08f * aspectScale);
-        float outBayOuterX = (outputBaseX + 0.48f) * aspectScale;
+        float outBayOuterX = (outputBaseX + 0.36f) * aspectScale;
         if (wingGuideRenderers[1] != null)
         {
-            wingGuideRenderers[1].SetPosition(0, new Vector3(outBayInnerX, gridY, arenaBackZ - 0.12f));
-            wingGuideRenderers[1].SetPosition(1, new Vector3(outBayOuterX, gridY, arenaBackZ - 0.24f));
-            wingGuideRenderers[1].SetPosition(2, new Vector3(outBayOuterX, gridY, arenaFrontZ + 0.12f));
-            wingGuideRenderers[1].SetPosition(3, new Vector3(outBayInnerX, gridY, arenaFrontZ + 0.08f));
+            wingGuideRenderers[1].SetPosition(0, new Vector3(outBayInnerX, gridY, arenaBackZ - 0.10f));
+            wingGuideRenderers[1].SetPosition(1, new Vector3(outBayOuterX, gridY, arenaBackZ - 0.18f));
+            wingGuideRenderers[1].SetPosition(2, new Vector3(outBayOuterX, gridY, arenaFrontZ + 0.10f));
+            wingGuideRenderers[1].SetPosition(3, new Vector3(outBayInnerX, gridY, arenaFrontZ + 0.06f));
         }
 
-        float rackFrontZ = arenaBackZ + 0.10f;
-        float rackBackZ = parkingRackZ + 0.40f;
-        float rackLeftX = -1.92f * aspectScale;
-        float rackRightX = 1.92f * aspectScale;
+        float rackFrontZ = arenaBackZ + 0.08f;
+        float rackBackZ = parkingRackZ + 0.30f;
+        float rackLeftX = -1.44f * aspectScale;
+        float rackRightX = 1.44f * aspectScale;
         if (wingGuideRenderers[2] != null)
         {
             wingGuideRenderers[2].SetPosition(0, new Vector3(rackLeftX, gridY, rackFrontZ));
             wingGuideRenderers[2].SetPosition(1, new Vector3(rackRightX, gridY, rackFrontZ));
-            wingGuideRenderers[2].SetPosition(2, new Vector3(rackRightX - (0.16f * aspectScale), gridY, rackBackZ));
-            wingGuideRenderers[2].SetPosition(3, new Vector3(rackLeftX + (0.16f * aspectScale), gridY, rackBackZ));
+            wingGuideRenderers[2].SetPosition(2, new Vector3(rackRightX - (0.12f * aspectScale), gridY, rackBackZ));
+            wingGuideRenderers[2].SetPosition(3, new Vector3(rackLeftX + (0.12f * aspectScale), gridY, rackBackZ));
         }
+    }
+
+    private void RebuildFloorGridRibbonMesh(
+        float deckLeftX,
+        float deckRightX,
+        float deckFrontZ,
+        float deckBackZ,
+        float deckChamfer,
+        float gridY)
+    {
+        if (floorGridRibbonMesh == null)
+        {
+            return;
+        }
+
+        Color32 normalCol = FloorGridLineColor;
+        Color32 centerCol = FloorCenterAxisColor;
+        int lineCursor = 0;
+
+        // Garis bujur X (sejajar sumbu Z)
+        for (int v = 0; v < GridInternalVerticalLines; v++)
+        {
+            bool isCenter = v == (GridInternalVerticalLines / 2);
+            float frac = (v + 1f) / (GridInternalVerticalLines + 1f);
+            float gx = Mathf.Lerp(deckLeftX + 0.12f, deckRightX - 0.12f, frac);
+            float chamferInsetZ = ComputeOctagonZInsetAtX(gx, deckLeftX, deckRightX, deckChamfer);
+            float z0 = deckFrontZ + chamferInsetZ + 0.025f;
+            float z1 = deckBackZ - chamferInsetZ - 0.025f;
+            float hw = isCenter ? GridCenterAxisHalfWidth : GridNormalHalfWidth;
+            Color32 col = isCenter ? centerCol : normalCol;
+
+            int vBase = lineCursor * 4;
+            gridRibbonVertices[vBase] = new Vector3(gx - hw, gridY, z0);
+            gridRibbonVertices[vBase + 1] = new Vector3(gx + hw, gridY, z0);
+            gridRibbonVertices[vBase + 2] = new Vector3(gx + hw, gridY, z1);
+            gridRibbonVertices[vBase + 3] = new Vector3(gx - hw, gridY, z1);
+            gridRibbonColors[vBase] = col;
+            gridRibbonColors[vBase + 1] = col;
+            gridRibbonColors[vBase + 2] = col;
+            gridRibbonColors[vBase + 3] = col;
+            lineCursor++;
+        }
+
+        // Garis lintang Z (sejajar sumbu X)
+        for (int h = 0; h < GridInternalHorizontalLines; h++)
+        {
+            bool isCenter = h == (GridInternalHorizontalLines / 2);
+            float frac = (h + 1f) / (GridInternalHorizontalLines + 1f);
+            float gz = Mathf.Lerp(deckFrontZ + 0.12f, deckBackZ - 0.12f, frac);
+            float chamferInsetX = ComputeOctagonXInsetAtZ(gz, deckFrontZ, deckBackZ, deckChamfer);
+            float x0 = deckLeftX + chamferInsetX + 0.025f;
+            float x1 = deckRightX - chamferInsetX - 0.025f;
+            float hw = isCenter ? GridCenterAxisHalfWidth : GridNormalHalfWidth;
+            Color32 col = isCenter ? centerCol : normalCol;
+
+            int vBase = lineCursor * 4;
+            gridRibbonVertices[vBase] = new Vector3(x0, gridY, gz - hw);
+            gridRibbonVertices[vBase + 1] = new Vector3(x1, gridY, gz - hw);
+            gridRibbonVertices[vBase + 2] = new Vector3(x1, gridY, gz + hw);
+            gridRibbonVertices[vBase + 3] = new Vector3(x0, gridY, gz + hw);
+            gridRibbonColors[vBase] = col;
+            gridRibbonColors[vBase + 1] = col;
+            gridRibbonColors[vBase + 2] = col;
+            gridRibbonColors[vBase + 3] = col;
+            lineCursor++;
+        }
+
+        floorGridRibbonMesh.SetVertices(gridRibbonVertices);
+        floorGridRibbonMesh.SetColors(gridRibbonColors);
+        floorGridRibbonMesh.SetIndices(gridRibbonTriangles, MeshTopology.Triangles, 0, calculateBounds: true);
     }
 
     private void RebuildOctagonFloorDeckMesh(
@@ -2054,6 +2189,30 @@ public sealed class AirWeavingStageController : MonoBehaviour
         lr.SetPositions(cornerPointsBuffer);
     }
 
+    private static bool ColorsApproxEqual(Color a, Color b)
+    {
+        return Mathf.Abs(a.r - b.r) < 0.003f
+               && Mathf.Abs(a.g - b.g) < 0.003f
+               && Mathf.Abs(a.b - b.b) < 0.003f
+               && Mathf.Abs(a.a - b.a) < 0.003f;
+    }
+
+    private static void ApplyRingStyleOnly(LineRenderer lr, Material mat, Color color, float width)
+    {
+        if (lr == null)
+        {
+            return;
+        }
+        if (mat != null)
+        {
+            mat.color = color;
+        }
+        lr.enabled = true;
+        lr.widthMultiplier = width;
+        lr.startColor = color;
+        lr.endColor = color;
+    }
+
     private void DrawLocalTableXZCircle(
         LineRenderer lr,
         Material mat,
@@ -2071,11 +2230,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
         for (int i = 0; i < ContactRingSegments; i++)
         {
-            float angle = (i / (float)ContactRingSegments) * Mathf.PI * 2f;
             ringLocalBuffer[i] = new Vector3(
-                centerX + (Mathf.Cos(angle) * radius),
+                centerX + (contactCosTable[i] * radius),
                 centerY,
-                centerZ + (Mathf.Sin(angle) * radius));
+                centerZ + (contactSinTable[i] * radius));
         }
 
         if (mat != null)
@@ -2167,6 +2325,11 @@ public sealed class AirWeavingStageController : MonoBehaviour
             Destroy(floorDeckOctagonMesh);
             floorDeckOctagonMesh = null;
         }
+        if (floorGridRibbonMesh != null)
+        {
+            Destroy(floorGridRibbonMesh);
+            floorGridRibbonMesh = null;
+        }
         if (stageRootObj != null)
         {
             Destroy(stageRootObj);
@@ -2174,6 +2337,9 @@ public sealed class AirWeavingStageController : MonoBehaviour
         }
         stageRootTransform = null;
         floorVisualGroupObj = null;
+        floorGridRibbonMeshFilter = null;
+        floorGridRibbonRenderer = null;
+        gridRibbonMat = null;
 
         for (int i = 0; i < ownedMaterials.Count; i++)
         {

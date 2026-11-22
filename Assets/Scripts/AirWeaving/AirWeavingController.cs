@@ -31,7 +31,7 @@ public class AirWeavingController : MonoBehaviour
     private const int RequestedCamWidth = 480;
     private const int RequestedCamHeight = 360;
     private const int RequestedCamFps = 30;
-    private const int MaxInferenceLongEdge = 384;
+    private const int MaxInferenceLongEdge = 288;
     private const int LandmarkCount = 21;
 
     private const float VuforiaReleaseDelaySeconds = 0.45f;
@@ -101,15 +101,16 @@ public class AirWeavingController : MonoBehaviour
     private const float TwoHandSingleHandUpgradeWindowSeconds = 0.190f;
     private const float TwoHandFistResetHoldSeconds = 0.55f;
 
-    // Parameter Quality Gate, Stabilisasi Dual-Hand, Exclusive Gesture Arbiter, & Confidence Bertingkat MediaPipe (Tahap 5.5+)
-    private const float MediaPipeMinHandDetectionConfidence = 0.52f;
-    private const float MediaPipeMinHandPresenceConfidence = 0.50f;
-    private const float MediaPipeMinTrackingConfidence = 0.42f;
-    private const float MinCandidateRawPalmScale = 0.035f;
+    // Parameter Quality Gate, Stabilisasi Dual-Hand, Exclusive Gesture Arbiter, & Confidence Jarak Jauh MediaPipe (Tahap 5.5+)
+    private const float MediaPipeMinHandDetectionConfidence = 0.40f;
+    private const float MediaPipeMinHandPresenceConfidence = 0.38f;
+    private const float MediaPipeMinTrackingConfidence = 0.30f;
+    private const float MinCandidateRawPalmScale = 0.028f;
     private const float HandednessConfidenceThreshold = 0.70f;
     private const float HandAssociationMaxDistNorm = 0.36f;
     private const float HandAssociationMatchedHandednessMaxDistNorm = 0.48f;
     private const float HandFrameDropGraceSeconds = 0.120f;
+    private const float HandCarryFrameDropGraceSeconds = 0.200f;
     private const float CrossGestureNeutralCooldownSeconds = 0.120f;
     private const float CablePinchEnterMaxSpeed = 1.65f;
     private const float GateGrabEnterMaxSpeed = 1.85f;
@@ -153,7 +154,8 @@ public class AirWeavingController : MonoBehaviour
     private const float PinchRatioActivateThreshold = 0.48f;
     private const float PinchRatioReleaseThreshold = 0.62f;
 
-    // Radius akses lega (Fist badan gerbang, sentuh telunjuk sakelar Input A/B dengan dwell 140 ms & exit-to-rearm 1.35x)
+    // Radius akses lega + Screen-Space Minimum Hitbox Floor (Fist badan gerbang, sentuh telunjuk sakelar Input A/B)
+    private const float MinScreenSpaceHitboxScale = 0.82f;
     private const float GateHoverGrabRadius = 0.220f;
     private const float ParkedGateHoverRadius = 0.245f;
     private const float InputAirTapRadius = 0.195f;
@@ -161,7 +163,7 @@ public class AirWeavingController : MonoBehaviour
     private const float InputAirTapDwellSeconds = 0.105f;
     private const float InputAirTapCooldownSeconds = 0.40f;
     private const float InputTouchRippleDuration = 0.34f;
-    private const float ParkReturnThresholdY = 1.12f;
+    private const float ParkReturnThresholdY = 0.86f;
     private const float ParkSlotSnapRadius = 0.38f;
     private const float HandFrameStaleTimeoutSeconds = 0.35f;
 
@@ -187,20 +189,20 @@ public class AirWeavingController : MonoBehaviour
     private const float AirDrawFadeDurationSeconds = 0.35f;
     private const float AirDrawPostSpawnCooldownSeconds = 0.55f;
 
-    // Koordinat meja hologram horizontal XZ 2x lebih luas khusus Mode Udara (skala fisik gerbang/port dipertahankan agar 2x ruang kosong)
+    // Koordinat meja hologram horizontal XZ 1.5x khusus Mode Udara (dipasangkan dengan DefaultZoomScale = 0.74f agar gerbang lega & mudah diraih)
     // (X = kiri-kanan, Y pada konstanta di bawah = kedalaman Z depan-belakang meja)
-    private const float InputTerminalBaseX = -2.52f;
-    private const float InputATerminalY = 0.32f;
-    private const float InputBTerminalY = -1.16f;
-    private const float OutputTerminalBaseX = 2.56f;
-    private const float OutputTerminalY = -0.36f;
-    private const float ParkingRackY = 1.64f;
-    private const float AssemblyMinBaseX = -1.48f;
-    private const float AssemblyMaxBaseX = 1.52f;
-    private const float AssemblyMinY = -1.56f;
-    private const float AssemblyMaxY = 0.92f;
+    private const float InputTerminalBaseX = -1.89f;
+    private const float InputATerminalY = 0.24f;
+    private const float InputBTerminalY = -0.87f;
+    private const float OutputTerminalBaseX = 1.92f;
+    private const float OutputTerminalY = -0.27f;
+    private const float ParkingRackY = 1.23f;
+    private const float AssemblyMinBaseX = -1.11f;
+    private const float AssemblyMaxBaseX = 1.14f;
+    private const float AssemblyMinY = -1.17f;
+    private const float AssemblyMaxY = 0.69f;
 
-    private static readonly float[] ParkingSlotBaseX = { -1.52f, -0.76f, 0.00f, 0.76f, 1.52f };
+    private static readonly float[] ParkingSlotBaseX = { -1.14f, -0.57f, 0.00f, 0.57f, 1.14f };
     private static readonly NodeType[] ParkingSlotOrder =
     {
         NodeType.AND,
@@ -511,6 +513,19 @@ public class AirWeavingController : MonoBehaviour
     private int lastCamWidth = 0;
     private int lastCamHeight = 0;
 
+    // Pre-computed 1D LUT untuk downscaler 2-tap diagonal Zero-GC (hanya dihitung ulang bila resolusi/rotasi/mirror berubah)
+    private int[] downscaleLutX0;
+    private int[] downscaleLutX1;
+    private int[] downscaleLutY0;
+    private int[] downscaleLutY1;
+    private int lutSrcW = 0;
+    private int lutSrcH = 0;
+    private int lutDstW = 0;
+    private int lutDstH = 0;
+    private int lutRotAngle = -1;
+    private bool lutVMirror = false;
+    private bool lutHMirror = false;
+
     private HandLandmarker handLandmarker;
     private HandLandmarkerResult cachedResult;
     private readonly ImageProcessingOptions zeroRotationOptions = new ImageProcessingOptions(rotationDegrees: 0);
@@ -524,7 +539,15 @@ public class AirWeavingController : MonoBehaviour
     private Material videoQuadMaterial;
     private float currentVideoDisplayWidth = 1f;
     private float currentVideoDisplayHeight = 1f;
+    private int lastVideoQuadCamW = -1;
+    private int lastVideoQuadCamH = -1;
+    private int lastVideoQuadRotAngle = -1;
+    private bool lastVideoQuadVMirror = false;
+    private bool lastVideoQuadHMirror = false;
+    private float lastVideoQuadFov = -1f;
+    private float lastVideoQuadAspect = -1f;
 
+    private Mesh sharedJointSphereMesh;
     private GameObject handRigRootObj;
     private GameObject[] jointSphereObjs;
     private LineRenderer[] boneLineRenderers;
@@ -601,6 +624,8 @@ public class AirWeavingController : MonoBehaviour
     private bool lastDebugCircuitComplete = false;
     private int lastEvaluatedCircuitTopologyVersion = -1;
     private bool isLiveCircuitPassedAllFour = false;
+    private bool hasCachedTopologyTruthEval = false;
+    private bool cachedTopologyMatchesTruthTable = false;
     private readonly List<GateNode> truthEvalVisited = new List<GateNode>(10);
     private enum HoverSfxCategory
     {
@@ -802,6 +827,8 @@ public class AirWeavingController : MonoBehaviour
                 WorkbenchDepth);
             SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: true);
             UpdateWorkbenchGuideVisuals(mainCam);
+            RefreshActivePlacedGatesBuffer();
+            SyncCableRouterVisualsAfterPoseUpdate(mainCam);
         }
 
         SetHoverRingVisible(false);
@@ -876,8 +903,8 @@ public class AirWeavingController : MonoBehaviour
             timeSinceLastValidHand += dt;
             if (timeSinceLastValidHand >= HandFrameStaleTimeoutSeconds)
             {
-                ExpirePrimaryHandSlot();
-                ExpireSecondaryHandSlot();
+                ExpirePrimaryHandSlot(HandCarryFrameDropGraceSeconds);
+                ExpireSecondaryHandSlot(HandCarryFrameDropGraceSeconds);
                 ResetTwoHandManipulationState();
             }
         }
@@ -894,11 +921,27 @@ public class AirWeavingController : MonoBehaviour
 
         bool isFistStickyDrag = isTwoHandFistSticky || (isSingleHandFistSticky && activeInteractionHandSlot == 0);
         bool isPinchStickyDrag = isTwoHandPinchSticky || (isSingleHandPinchSticky && activeInteractionHandSlot == 0);
+        bool isPrimaryCableDragSticky = isSingleHandPinchSticky && activeInteractionHandSlot == 0;
         bool isSecFistStickyDrag = isTwoHandFistSticky || (isSingleHandFistSticky && activeInteractionHandSlot == 1);
         bool isSecPinchStickyDrag = isTwoHandPinchSticky || (isSingleHandPinchSticky && activeInteractionHandSlot == 1);
+        bool isSecondaryCableDragSticky = isSingleHandPinchSticky && activeInteractionHandSlot == 1;
         bool twoHandsVisibleForEdgeRelax = isHandDetected && isSecondaryHandDetected;
-        handGestureDetector.TickTemporalState(dt, isHandDetected, isFistStickyDrag, isPinchStickyDrag, twoHandsVisibleForEdgeRelax);
-        secondaryHandGestureDetector.TickTemporalState(dt, isSecondaryHandDetected, isSecFistStickyDrag, isSecPinchStickyDrag, twoHandsVisibleForEdgeRelax);
+        handGestureDetector.TickTemporalState(
+            dt,
+            isHandDetected,
+            isFistStickyDrag,
+            isPinchStickyDrag,
+            twoHandsVisibleForEdgeRelax,
+            isPrimaryCableDragSticky,
+            primaryMissedLastInference);
+        secondaryHandGestureDetector.TickTemporalState(
+            dt,
+            isSecondaryHandDetected,
+            isSecFistStickyDrag,
+            isSecPinchStickyDrag,
+            twoHandsVisibleForEdgeRelax,
+            isSecondaryCableDragSticky,
+            secondaryMissedLastInference);
         UpdateTwoHandStageManipulation(mainCam, dt);
         if (stageController != null)
         {
@@ -1171,6 +1214,7 @@ public class AirWeavingController : MonoBehaviour
                 workbenchDepth: WorkbenchDepth);
         }
 
+        lastVideoQuadCamW = -1;
         UpdateVideoQuadTransform(mainCam);
         SetHandRigVisible(false);
         SetSecondaryHandRigVisible(false);
@@ -1258,6 +1302,8 @@ public class AirWeavingController : MonoBehaviour
 
         SyncAllWorkbenchNodesToCamera(mainCam, snapImmediately: true);
         UpdateWorkbenchGuideVisuals(mainCam);
+        RefreshActivePlacedGatesBuffer();
+        SyncCableRouterVisualsAfterPoseUpdate(mainCam);
 
         OnAirWeavingModeChanged?.Invoke(true);
         gestureGuide?.OnAirWeavingModeEntered();
@@ -2563,16 +2609,16 @@ public class AirWeavingController : MonoBehaviour
         Vector2 outputCenterRayXY;
         if (outputNode != null)
         {
-            zoomScale = ComputeNodeApparentRayScale(mainCam, outputNode.transform.position, 0.55f, 6.0f, out bool outBehind);
+            zoomScale = ComputeNodeApparentRayScale(mainCam, outputNode.transform.position, MinScreenSpaceHitboxScale, 6.0f, out bool outBehind, out float outVisualScale);
             if (outBehind)
             {
                 return false;
             }
-            outputCenterRayXY = ProjectWorldToCameraRayPlane(mainCam, outputNode.transform.position) + new Vector2(0.03f * zoomScale, 0.10f * zoomScale);
+            outputCenterRayXY = ProjectWorldToCameraRayPlane(mainCam, outputNode.transform.position) + new Vector2(0.03f * outVisualScale, 0.10f * outVisualScale);
         }
         else
         {
-            zoomScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, 0.55f, 6.0f) : 1f;
+            zoomScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, MinScreenSpaceHitboxScale, 6.0f) : 1f;
             outputCenterRayXY = new Vector2((OutputTerminalBaseX * aspectScale) + 0.03f, OutputTerminalY + 0.10f);
         }
         Vector2 cursorRayXY = ProjectWorldToCameraRayPlane(mainCam, cursorWorldPos);
@@ -2959,15 +3005,15 @@ public class AirWeavingController : MonoBehaviour
     private bool IsTipInsideInputSwitchZone(Camera mainCam, Vector3 tipWorldPos, float aspectScale)
     {
         Vector2 tipRayXY = ProjectWorldToCameraRayPlane(mainCam, tipWorldPos);
-        float fallbackScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, 0.55f, 6.0f) : 1f;
+        float fallbackScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, MinScreenSpaceHitboxScale, 6.0f) : 1f;
 
         bool insideA = false;
         if (inputANode != null)
         {
-            float scaleA = ComputeNodeApparentRayScale(mainCam, inputANode.transform.position, 0.55f, 6.0f, out bool behindA);
+            float scaleA = ComputeNodeApparentRayScale(mainCam, inputANode.transform.position, MinScreenSpaceHitboxScale, 6.0f, out bool behindA, out float visualScaleA);
             if (!behindA)
             {
-                Vector2 inputARayXY = ProjectWorldToCameraRayPlane(mainCam, inputANode.transform.position) - new Vector2(0.04f * scaleA, 0f);
+                Vector2 inputARayXY = ProjectWorldToCameraRayPlane(mainCam, inputANode.transform.position) - new Vector2(0.04f * visualScaleA, 0f);
                 insideA = Vector2.Distance(tipRayXY, inputARayXY) <= (InputAirTapRearmRadius * scaleA);
             }
         }
@@ -2984,10 +3030,10 @@ public class AirWeavingController : MonoBehaviour
 
         if (inputBNode != null)
         {
-            float scaleB = ComputeNodeApparentRayScale(mainCam, inputBNode.transform.position, 0.55f, 6.0f, out bool behindB);
+            float scaleB = ComputeNodeApparentRayScale(mainCam, inputBNode.transform.position, MinScreenSpaceHitboxScale, 6.0f, out bool behindB, out float visualScaleB);
             if (!behindB)
             {
-                Vector2 inputBRayXY = ProjectWorldToCameraRayPlane(mainCam, inputBNode.transform.position) - new Vector2(0.04f * scaleB, 0f);
+                Vector2 inputBRayXY = ProjectWorldToCameraRayPlane(mainCam, inputBNode.transform.position) - new Vector2(0.04f * visualScaleB, 0f);
                 return Vector2.Distance(tipRayXY, inputBRayXY) <= (InputAirTapRearmRadius * scaleB);
             }
             return false;
@@ -3025,7 +3071,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        float fallbackScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, 0.55f, 6.0f) : 1f;
+        float fallbackScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, MinScreenSpaceHitboxScale, 6.0f) : 1f;
         Vector2 rawTipXY = detector.IndexTipLocalXY;
 
         bool inputABehind = false;
@@ -3033,8 +3079,8 @@ public class AirWeavingController : MonoBehaviour
         Vector2 inputAXY;
         if (inputANode != null)
         {
-            scaleA = ComputeNodeApparentRayScale(mainCam, inputANode.transform.position, 0.55f, 6.0f, out inputABehind);
-            inputAXY = ProjectWorldToCameraRayPlane(mainCam, inputANode.transform.position) - new Vector2(0.04f * scaleA, 0f);
+            scaleA = ComputeNodeApparentRayScale(mainCam, inputANode.transform.position, MinScreenSpaceHitboxScale, 6.0f, out inputABehind, out float visualScaleA);
+            inputAXY = ProjectWorldToCameraRayPlane(mainCam, inputANode.transform.position) - new Vector2(0.04f * visualScaleA, 0f);
         }
         else
         {
@@ -3046,8 +3092,8 @@ public class AirWeavingController : MonoBehaviour
         Vector2 inputBXY;
         if (inputBNode != null)
         {
-            scaleB = ComputeNodeApparentRayScale(mainCam, inputBNode.transform.position, 0.55f, 6.0f, out inputBBehind);
-            inputBXY = ProjectWorldToCameraRayPlane(mainCam, inputBNode.transform.position) - new Vector2(0.04f * scaleB, 0f);
+            scaleB = ComputeNodeApparentRayScale(mainCam, inputBNode.transform.position, MinScreenSpaceHitboxScale, 6.0f, out inputBBehind, out float visualScaleB);
+            inputBXY = ProjectWorldToCameraRayPlane(mainCam, inputBNode.transform.position) - new Vector2(0.04f * visualScaleB, 0f);
         }
         else
         {
@@ -3284,12 +3330,19 @@ public class AirWeavingController : MonoBehaviour
         return -normX * ParkingMaxArcYawDeg;
     }
 
-    private float ComputeNodeApparentRayScale(Camera mainCam, Vector3 nodeWorldPos, float minScale, float maxScale, out bool isBehindCamera)
+    private float ComputeNodeApparentRayScale(
+        Camera mainCam,
+        Vector3 nodeWorldPos,
+        float minScale,
+        float maxScale,
+        out bool isBehindCamera,
+        out float rawVisualScale)
     {
         float stageZoom = stageController != null ? stageController.CurrentZoomScale : AirWeavingStageController.DefaultZoomScale;
         if (mainCam == null)
         {
             isBehindCamera = false;
+            rawVisualScale = Mathf.Clamp(stageZoom, 0.18f, maxScale);
             return Mathf.Clamp(stageZoom, minScale, maxScale);
         }
 
@@ -3297,11 +3350,13 @@ public class AirWeavingController : MonoBehaviour
         if (camZ <= 0.25f)
         {
             isBehindCamera = true;
+            rawVisualScale = 0.55f;
             return minScale;
         }
 
         isBehindCamera = false;
         float apparent = stageZoom * (WorkbenchDepth / camZ);
+        rawVisualScale = Mathf.Clamp(apparent, 0.18f, maxScale);
         return Mathf.Clamp(apparent, minScale, maxScale);
     }
 
@@ -3671,7 +3726,7 @@ public class AirWeavingController : MonoBehaviour
                 continue;
             }
 
-            float apparentScale = ComputeNodeApparentRayScale(mainCam, slot.node.transform.position, 0.55f, 8.0f, out bool isBehindCamera);
+            float apparentScale = ComputeNodeApparentRayScale(mainCam, slot.node.transform.position, MinScreenSpaceHitboxScale, 8.0f, out bool isBehindCamera, out _);
             if (isBehindCamera)
             {
                 continue;
@@ -4078,29 +4133,45 @@ public class AirWeavingController : MonoBehaviour
         }
     }
 
+    private float GetActiveFrameDropGraceSecondsForSlot(int handSlot)
+    {
+        bool isCarryMode = activeInteractionMode == ActiveInteractionMode.GateGrab
+                           || activeInteractionMode == ActiveInteractionMode.CableDrag
+                           || activeInteractionMode == ActiveInteractionMode.OutputHold;
+        return (isCarryMode && activeInteractionHandSlot == handSlot)
+            ? HandCarryFrameDropGraceSeconds
+            : HandFrameDropGraceSeconds;
+    }
+
     private void TickHandSlotFrameDropGrace(float dt)
     {
         if (primarySlotActive && primaryMissedLastInference)
         {
             primaryMissingTimer += dt;
-            if (primaryMissingTimer >= HandFrameDropGraceSeconds)
+            if (primaryMissingTimer >= GetActiveFrameDropGraceSecondsForSlot(0))
             {
-                ExpirePrimaryHandSlot();
+                float waited = primaryMissingTimer;
+                ExpirePrimaryHandSlot(waited);
             }
         }
 
         if (secondarySlotActive && secondaryMissedLastInference)
         {
             secondaryMissingTimer += dt;
-            if (secondaryMissingTimer >= HandFrameDropGraceSeconds)
+            if (secondaryMissingTimer >= GetActiveFrameDropGraceSecondsForSlot(1))
             {
-                ExpireSecondaryHandSlot();
+                float waited = secondaryMissingTimer;
+                ExpireSecondaryHandSlot(waited);
             }
         }
     }
 
-    private void ExpirePrimaryHandSlot()
+    private void ExpirePrimaryHandSlot(float consumedGraceSeconds = 0f)
     {
+        if (consumedGraceSeconds > 0f)
+        {
+            handGestureDetector.ConsumeExternalGraceSeconds(consumedGraceSeconds);
+        }
         primarySlotActive = false;
         primaryMissedLastInference = false;
         primaryMissingTimer = 0f;
@@ -4121,8 +4192,12 @@ public class AirWeavingController : MonoBehaviour
         SetHoverRingVisible(false);
     }
 
-    private void ExpireSecondaryHandSlot()
+    private void ExpireSecondaryHandSlot(float consumedGraceSeconds = 0f)
     {
+        if (consumedGraceSeconds > 0f)
+        {
+            secondaryHandGestureDetector.ConsumeExternalGraceSeconds(consumedGraceSeconds);
+        }
         secondarySlotActive = false;
         secondaryMissedLastInference = false;
         secondaryMissingTimer = 0f;
@@ -4270,9 +4345,123 @@ public class AirWeavingController : MonoBehaviour
         }
     }
 
+    private void EnsureDownscaleLutBuilt(
+        int srcW,
+        int srcH,
+        int dstW,
+        int dstH,
+        int rotAngle,
+        bool vMirror,
+        bool hMirror)
+    {
+        if (lutSrcW == srcW
+            && lutSrcH == srcH
+            && lutDstW == dstW
+            && lutDstH == dstH
+            && lutRotAngle == rotAngle
+            && lutVMirror == vMirror
+            && lutHMirror == hMirror
+            && downscaleLutX0 != null
+            && downscaleLutY0 != null)
+        {
+            return;
+        }
+
+        lutSrcW = srcW;
+        lutSrcH = srcH;
+        lutDstW = dstW;
+        lutDstH = dstH;
+        lutRotAngle = rotAngle;
+        lutVMirror = vMirror;
+        lutHMirror = hMirror;
+
+        bool isRotated90 = (rotAngle == 90 || rotAngle == 270);
+        int xLutLen = isRotated90 ? dstH : dstW;
+        int yLutLen = isRotated90 ? dstW : dstH;
+
+        if (downscaleLutX0 == null || downscaleLutX0.Length != xLutLen)
+        {
+            downscaleLutX0 = new int[xLutLen];
+            downscaleLutX1 = new int[xLutLen];
+        }
+        if (downscaleLutY0 == null || downscaleLutY0.Length != yLutLen)
+        {
+            downscaleLutY0 = new int[yLutLen];
+            downscaleLutY1 = new int[yLutLen];
+        }
+
+        float invDstW = 1f / dstW;
+        float invDstH = 1f / dstH;
+        int maxSrcX = srcW - 1;
+        int maxSrcY = srcH - 1;
+        float halfSpanX = 0.25f * srcW * (isRotated90 ? invDstH : invDstW);
+        float halfSpanY = 0.25f * srcH * (isRotated90 ? invDstW : invDstH);
+
+        if (!isRotated90)
+        {
+            bool flip180 = (rotAngle == 180);
+            for (int dx = 0; dx < dstW; dx++)
+            {
+                float uScreen = (dx + 0.5f) * invDstW;
+                float rx = hMirror ? (0.5f - uScreen) : (uScreen - 0.5f);
+                float lx = flip180 ? -rx : rx;
+                float fx = (lx + 0.5f) * srcW;
+
+                int px0 = (int)(fx - halfSpanX);
+                int px1 = (int)(fx + halfSpanX);
+                downscaleLutX0[dx] = px0 < 0 ? 0 : (px0 > maxSrcX ? maxSrcX : px0);
+                downscaleLutX1[dx] = px1 < 0 ? 0 : (px1 > maxSrcX ? maxSrcX : px1);
+            }
+
+            for (int dy = 0; dy < dstH; dy++)
+            {
+                float ry = 0.5f - ((dy + 0.5f) * invDstH);
+                float ly = flip180 ? -ry : ry;
+                float fy = ((vMirror ? -ly : ly) + 0.5f) * srcH;
+
+                int py0 = (int)(fy - halfSpanY);
+                int py1 = (int)(fy + halfSpanY);
+                int cpy0 = py0 < 0 ? 0 : (py0 > maxSrcY ? maxSrcY : py0);
+                int cpy1 = py1 < 0 ? 0 : (py1 > maxSrcY ? maxSrcY : py1);
+                downscaleLutY0[dy] = cpy0 * srcW;
+                downscaleLutY1[dy] = cpy1 * srcW;
+            }
+        }
+        else
+        {
+            bool rot90 = (rotAngle == 90);
+            for (int dy = 0; dy < dstH; dy++)
+            {
+                float ry = 0.5f - ((dy + 0.5f) * invDstH);
+                float lx = rot90 ? -ry : ry;
+                float fx = (lx + 0.5f) * srcW;
+
+                int px0 = (int)(fx - halfSpanX);
+                int px1 = (int)(fx + halfSpanX);
+                downscaleLutX0[dy] = px0 < 0 ? 0 : (px0 > maxSrcX ? maxSrcX : px0);
+                downscaleLutX1[dy] = px1 < 0 ? 0 : (px1 > maxSrcX ? maxSrcX : px1);
+            }
+
+            for (int dx = 0; dx < dstW; dx++)
+            {
+                float uScreen = (dx + 0.5f) * invDstW;
+                float rx = hMirror ? (0.5f - uScreen) : (uScreen - 0.5f);
+                float ly = rot90 ? rx : -rx;
+                float fy = ((vMirror ? -ly : ly) + 0.5f) * srcH;
+
+                int py0 = (int)(fy - halfSpanY);
+                int py1 = (int)(fy + halfSpanY);
+                int cpy0 = py0 < 0 ? 0 : (py0 > maxSrcY ? maxSrcY : py0);
+                int cpy1 = py1 < 0 ? 0 : (py1 > maxSrcY ? maxSrcY : py1);
+                downscaleLutY0[dx] = cpy0 * srcW;
+                downscaleLutY1[dx] = cpy1 * srcW;
+            }
+        }
+    }
+
     /// <summary>
-    /// Downscale 2x2 box-filter Zero-GC (menggantikan nearest-neighbor) sambil menegakkan rotasi &amp; cermin kamera
-    /// sehingga tepi jari lebih halus &amp; minim jitter pada resolusi inferensi 384px CPU Android.
+    /// Downscale 2-tap diagonal berbasis 1D LUT &amp; tulis 32-bit Zero-GC (tanpa float/switch/clamp di loop terdalam)
+    /// untuk inferensi cepat 288px CPU Android dengan tepi jari tetap anti-aliasing.
     /// </summary>
     private void FillUprightMirroredRgbaBuffer(
         int srcW,
@@ -4283,76 +4472,50 @@ public class AirWeavingController : MonoBehaviour
         bool vMirror,
         bool hMirror)
     {
-        float invDstW = 1f / dstW;
-        float invDstH = 1f / dstH;
-        int maxSrcX = srcW - 1;
-        int maxSrcY = srcH - 1;
-        bool isRotated90 = (rotAngle == 90 || rotAngle == 270);
-        float halfSpanX = 0.25f * srcW * (isRotated90 ? invDstH : invDstW);
-        float halfSpanY = 0.25f * srcH * (isRotated90 ? invDstW : invDstH);
+        EnsureDownscaleLutBuilt(srcW, srcH, dstW, dstH, rotAngle, vMirror, hMirror);
+
+        NativeArray<Color32> dstColors = nativeWorkPixels.Reinterpret<Color32>(1);
+        Color32[] srcPixels = rawWebcamPixels;
+        int[] lutX0 = downscaleLutX0;
+        int[] lutX1 = downscaleLutX1;
+        int[] lutY0 = downscaleLutY0;
+        int[] lutY1 = downscaleLutY1;
         int dstIdx = 0;
 
-        for (int dy = 0; dy < dstH; dy++)
+        if (rotAngle != 90 && rotAngle != 270)
         {
-            float ry = 0.5f - ((dy + 0.5f) * invDstH);
-            for (int dx = 0; dx < dstW; dx++)
+            for (int dy = 0; dy < dstH; dy++)
             {
-                float uScreen = (dx + 0.5f) * invDstW;
-                float rx = hMirror ? (0.5f - uScreen) : (uScreen - 0.5f);
-
-                float lx;
-                float ly;
-                switch (rotAngle)
+                int row0 = lutY0[dy];
+                int row1 = lutY1[dy];
+                for (int dx = 0; dx < dstW; dx++)
                 {
-                    case 90:
-                        lx = -ry;
-                        ly = rx;
-                        break;
-                    case 180:
-                        lx = -rx;
-                        ly = -ry;
-                        break;
-                    case 270:
-                        lx = ry;
-                        ly = -rx;
-                        break;
-                    default:
-                        lx = rx;
-                        ly = ry;
-                        break;
+                    Color32 c00 = srcPixels[row0 + lutX0[dx]];
+                    Color32 c11 = srcPixels[row1 + lutX1[dx]];
+                    dstColors[dstIdx++] = new Color32(
+                        (byte)((c00.r + c11.r + 1) >> 1),
+                        (byte)((c00.g + c11.g + 1) >> 1),
+                        (byte)((c00.b + c11.b + 1) >> 1),
+                        255);
                 }
-
-                float fx = (lx + 0.5f) * srcW;
-                float fy = ((vMirror ? -ly : ly) + 0.5f) * srcH;
-
-                int px0 = (int)(fx - halfSpanX);
-                if (px0 < 0) px0 = 0;
-                else if (px0 > maxSrcX) px0 = maxSrcX;
-
-                int px1 = (int)(fx + halfSpanX);
-                if (px1 < 0) px1 = 0;
-                else if (px1 > maxSrcX) px1 = maxSrcX;
-
-                int py0 = (int)(fy - halfSpanY);
-                if (py0 < 0) py0 = 0;
-                else if (py0 > maxSrcY) py0 = maxSrcY;
-
-                int py1 = (int)(fy + halfSpanY);
-                if (py1 < 0) py1 = 0;
-                else if (py1 > maxSrcY) py1 = maxSrcY;
-
-                int row0 = py0 * srcW;
-                int row1 = py1 * srcW;
-                Color32 c00 = rawWebcamPixels[row0 + px0];
-                Color32 c10 = rawWebcamPixels[row0 + px1];
-                Color32 c01 = rawWebcamPixels[row1 + px0];
-                Color32 c11 = rawWebcamPixels[row1 + px1];
-
-                nativeWorkPixels[dstIdx] = (byte)((c00.r + c10.r + c01.r + c11.r + 2) >> 2);
-                nativeWorkPixels[dstIdx + 1] = (byte)((c00.g + c10.g + c01.g + c11.g + 2) >> 2);
-                nativeWorkPixels[dstIdx + 2] = (byte)((c00.b + c10.b + c01.b + c11.b + 2) >> 2);
-                nativeWorkPixels[dstIdx + 3] = 255;
-                dstIdx += 4;
+            }
+        }
+        else
+        {
+            for (int dy = 0; dy < dstH; dy++)
+            {
+                int col0 = lutX0[dy];
+                int col1 = lutX1[dy];
+                for (int dx = 0; dx < dstW; dx++)
+                {
+                    Color32 c00 = srcPixels[lutY0[dx] + col0];
+                    Color32 c11 = srcPixels[lutY1[dx] + col1];
+                    dstColors[dstIdx++] = new Color32(
+                        (byte)((c00.r + c11.r + 1) >> 1),
+                        (byte)((c00.g + c11.g + 1) >> 1),
+                        (byte)((c00.b + c11.b + 1) >> 1),
+                        255);
+                }
             }
         }
     }
@@ -4550,7 +4713,7 @@ public class AirWeavingController : MonoBehaviour
 
     private void UpdatePinchCursorRing(Transform camTransform, float pinchRatio)
     {
-        if (pinchCursorRingRenderer == null)
+        if (pinchCursorRingRenderer == null || !pinchCursorRingRenderer.enabled)
         {
             return;
         }
@@ -4885,10 +5048,8 @@ public class AirWeavingController : MonoBehaviour
         }
     }
 
-    private void UpdateCableRouterInteraction(Camera mainCam)
+    private void RefreshActivePlacedGatesBuffer()
     {
-        if (cableRouter == null) return;
-
         activePlacedGatesBuffer.Clear();
         for (int i = 0; i < gateSlots.Count; i++)
         {
@@ -4898,6 +5059,13 @@ public class AirWeavingController : MonoBehaviour
                 activePlacedGatesBuffer.Add(slot.node);
             }
         }
+    }
+
+    private void UpdateCableRouterInteraction(Camera mainCam)
+    {
+        if (cableRouter == null) return;
+
+        RefreshActivePlacedGatesBuffer();
 
         Transform stageRoot = stageController != null ? stageController.StageRoot : null;
         float stageZoom = stageController != null ? stageController.CurrentZoomScale : 1f;
@@ -4992,18 +5160,28 @@ public class AirWeavingController : MonoBehaviour
         }
 
         bool hasChosenHand = chosenSlot >= 0 && IsHandSlotDetected(chosenSlot);
+        bool chosenSlotMissing = (chosenSlot == 0 && primaryMissedLastInference)
+                                 || (chosenSlot == 1 && secondaryMissedLastInference);
+        bool isDragOwned = activeInteractionMode == ActiveInteractionMode.CableDrag
+                           && (chosenSlot == 0 || chosenSlot == 1);
         AirWeavingHandGestureDetector cableDet = chosenSlot >= 0 ? GetHandDetector(chosenSlot) : handGestureDetector;
         bool blockedCable = baseBlockedCable || (chosenSlot >= 0 && cableDet.IsFistActive);
         bool allowBeginCableDrag = activeInteractionMode == ActiveInteractionMode.Idle
                                    && neutralCooldownTimer <= 0f
                                    && !isTwoHandConfirming
                                    && hasChosenHand
+                                   && !chosenSlotMissing
                                    && cableDet.IsQualityGatePassing
                                    && cableDet.PinchSpeedUnitsPerSec <= CablePinchEnterMaxSpeed;
         bool hasSecondaryHoverHand = secondaryHoverSlot >= 0 && IsHandSlotDetected(secondaryHoverSlot) && !blockedCable;
         Vector2 secondaryHoverPinchXY = hasSecondaryHoverHand
             ? GetHandDetector(secondaryHoverSlot).PinchPointLocalXY
             : Vector2.zero;
+
+        bool cablePinchActive = isDragOwned ? cableDet.IsPinchActive : (hasChosenHand && cableDet.IsPinchActive);
+        bool cablePinchJustStarted = hasChosenHand && !chosenSlotMissing && cableDet.PinchJustStarted;
+        bool cablePinchJustEnded = isDragOwned ? cableDet.PinchJustEnded : (hasChosenHand && cableDet.PinchJustEnded);
+        bool isHandLiveTracking = hasChosenHand && !chosenSlotMissing;
 
         cableRouter.Tick(
             mainCam,
@@ -5018,9 +5196,9 @@ public class AirWeavingController : MonoBehaviour
             levelManager != null && levelManager.IsVerifying,
             blockedCable,
             hasChosenHand,
-            hasChosenHand && cableDet.IsPinchActive,
-            hasChosenHand && cableDet.PinchJustStarted,
-            hasChosenHand && cableDet.PinchJustEnded,
+            cablePinchActive,
+            cablePinchJustStarted,
+            cablePinchJustEnded,
             hasChosenHand ? cableDet.StabilizedPinchLocalXY : Vector2.zero,
             hasChosenHand ? cableDet.PinchPointLocalXY : Vector2.zero,
             hasChosenHand ? cableDet.PinchPointWorldPosition : Vector3.zero,
@@ -5032,7 +5210,10 @@ public class AirWeavingController : MonoBehaviour
             stageZoom,
             allowBeginCableDrag,
             hasSecondaryHoverHand,
-            secondaryHoverPinchXY);
+            secondaryHoverPinchXY,
+            isHandLiveTracking,
+            cableDet.PinchEndedByTrackingLoss,
+            deferVisualRender: true);
 
         if (activeInteractionMode == ActiveInteractionMode.Idle && cableRouter.IsDraggingCable)
         {
@@ -5091,10 +5272,10 @@ public class AirWeavingController : MonoBehaviour
 
         // Perbarui visual skeleton 21 titik (One-Euro 3D pada laju render dt + fade alpha halus saat occlusion grace)
         float primaryGraceNorm = primaryMissedLastInference
-            ? Mathf.Clamp01(primaryMissingTimer / HandFrameDropGraceSeconds)
+            ? Mathf.Clamp01(primaryMissingTimer / GetActiveFrameDropGraceSecondsForSlot(0))
             : 0f;
         float secondaryGraceNorm = secondaryMissedLastInference
-            ? Mathf.Clamp01(secondaryMissingTimer / HandFrameDropGraceSeconds)
+            ? Mathf.Clamp01(secondaryMissingTimer / GetActiveFrameDropGraceSecondsForSlot(1))
             : 0f;
         bool hideSkeletonsForUi = overlayOpen || isVerifying;
         hologramVisual.UpdateHandSkeletonVisual(
@@ -5694,6 +5875,8 @@ public class AirWeavingController : MonoBehaviour
         lastDebugCircuitComplete = false;
         lastEvaluatedCircuitTopologyVersion = -1;
         isLiveCircuitPassedAllFour = false;
+        hasCachedTopologyTruthEval = false;
+        cachedTopologyMatchesTruthTable = false;
         lastSfxPassedRowMask = 0;
         lastSfxFailedRowMask = 0;
         lastSfxGuidanceState = OutputDebugGuidanceState.ConnectToOutput;
@@ -5722,6 +5905,8 @@ public class AirWeavingController : MonoBehaviour
             debugPassedRowMask = 0;
             debugFailedRowMask = 0;
             isLiveCircuitPassedAllFour = false;
+            hasCachedTopologyTruthEval = false;
+            cachedTopologyMatchesTruthTable = false;
             lastSfxPassedRowMask = 0;
             lastSfxFailedRowMask = 0;
             if (!isComplete || curLevelIdx != lastDebugLevelIndex)
@@ -5788,8 +5973,13 @@ public class AirWeavingController : MonoBehaviour
         }
         passedRowCount = passed;
 
-        // Verifikasi matematis penuh 4 baris graf live (Zero-GC) agar status LULUS 4/4 tidak pernah muncul pada rangkaian salah
-        bool liveCircuitMatchesTruthTable = DoesLiveCircuitMatchExpectedTruthTable(currentLevel.expectedTruthTable);
+        // Verifikasi matematis penuh 4 baris graf live (Zero-GC, di-cache per topologi & level) agar status LULUS 4/4 tidak pernah salah
+        if (topologyOrLevelChanged || !hasCachedTopologyTruthEval)
+        {
+            cachedTopologyMatchesTruthTable = DoesLiveCircuitMatchExpectedTruthTable(currentLevel.expectedTruthTable);
+            hasCachedTopologyTruthEval = true;
+        }
+        bool liveCircuitMatchesTruthTable = cachedTopologyMatchesTruthTable;
 
         OutputDebugGuidanceState resultState;
         if (isOverQuota)
@@ -6047,12 +6237,33 @@ public class AirWeavingController : MonoBehaviour
         int rotAngle = ((webCamTexture.videoRotationAngle % 360) + 360) % 360;
         bool isRotated90 = (rotAngle == 90 || rotAngle == 270);
         bool vMirror = webCamTexture.videoVerticallyMirrored;
+        float camFov = mainCam.fieldOfView;
+        float camAspect = Mathf.Max(0.1f, mainCam.aspect);
 
-        float frustumH = 2f * VideoQuadDepth * Mathf.Tan(mainCam.fieldOfView * 0.5f * Mathf.Deg2Rad);
-        float frustumW = frustumH * Mathf.Max(0.1f, mainCam.aspect);
+        if (lastVideoQuadCamW == camW
+            && lastVideoQuadCamH == camH
+            && lastVideoQuadRotAngle == rotAngle
+            && lastVideoQuadVMirror == vMirror
+            && lastVideoQuadHMirror == mirrorHorizontalDisplay
+            && Mathf.Abs(lastVideoQuadFov - camFov) < 0.01f
+            && Mathf.Abs(lastVideoQuadAspect - camAspect) < 0.001f)
+        {
+            return;
+        }
+
+        lastVideoQuadCamW = camW;
+        lastVideoQuadCamH = camH;
+        lastVideoQuadRotAngle = rotAngle;
+        lastVideoQuadVMirror = vMirror;
+        lastVideoQuadHMirror = mirrorHorizontalDisplay;
+        lastVideoQuadFov = camFov;
+        lastVideoQuadAspect = camAspect;
+
+        float frustumH = 2f * VideoQuadDepth * Mathf.Tan(camFov * 0.5f * Mathf.Deg2Rad);
+        float frustumW = frustumH * camAspect;
         float videoAspect = isRotated90 ? ((float)camH / camW) : ((float)camW / camH);
 
-        if (videoAspect >= mainCam.aspect)
+        if (videoAspect >= camAspect)
         {
             currentVideoDisplayHeight = frustumH;
             currentVideoDisplayWidth = frustumH * videoAspect;
@@ -6286,6 +6497,12 @@ public class AirWeavingController : MonoBehaviour
         trailMat = CreateSafeSpritesMaterial(Color.white, 2996);
         pinchRingMat = CreateSafeSpritesMaterial(PinchIdleColor, 3018);
 
+        // 1 Shared procedural low-poly sphere mesh (6x4 = 48 segitiga vs 760 segitiga PrimitiveType.Sphere -> -93% geometri untuk 42 sendi)
+        if (sharedJointSphereMesh == null)
+        {
+            sharedJointSphereMesh = BuildLowPolyJointSphereMesh(lonSegments: 6, latSegments: 4, radius: 0.5f);
+        }
+
         // Skala sendi & garis tulang dibuat ramping & halus (~65% lebih kecil) agar tidak membebani visual papan kerja
         jointSphereObjs = new GameObject[LandmarkCount];
         for (int i = 0; i < LandmarkCount; i++)
@@ -6294,24 +6511,17 @@ public class AirWeavingController : MonoBehaviour
             bool isWrist = (i == 0);
             float diameter = isTip ? 0.022f : (isWrist ? 0.024f : 0.015f);
 
-            GameObject jointObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            jointObj.name = $"Joint_{i}";
+            GameObject jointObj = new GameObject($"Joint_{i}");
             jointObj.transform.SetParent(handRigRootObj.transform, false);
             jointObj.transform.localScale = Vector3.one * diameter;
 
-            Collider col = jointObj.GetComponent<Collider>();
-            if (col != null)
-            {
-                Destroy(col);
-            }
+            MeshFilter mf = jointObj.AddComponent<MeshFilter>();
+            mf.sharedMesh = sharedJointSphereMesh;
 
-            Renderer rend = jointObj.GetComponent<Renderer>();
-            if (rend != null)
-            {
-                rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                rend.receiveShadows = false;
-                rend.sharedMaterial = isTip ? jointTipMat : jointBaseMat;
-            }
+            MeshRenderer rend = jointObj.AddComponent<MeshRenderer>();
+            rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            rend.receiveShadows = false;
+            rend.sharedMaterial = isTip ? jointTipMat : jointBaseMat;
 
             jointSphereObjs[i] = jointObj;
         }
@@ -6403,24 +6613,17 @@ public class AirWeavingController : MonoBehaviour
             bool isWrist = (i == 0);
             float diameter = isTip ? 0.022f : (isWrist ? 0.024f : 0.015f);
 
-            GameObject jointObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            jointObj.name = $"SecJoint_{i}";
+            GameObject jointObj = new GameObject($"SecJoint_{i}");
             jointObj.transform.SetParent(secondaryHandRigRootObj.transform, false);
             jointObj.transform.localScale = Vector3.one * diameter;
 
-            Collider col = jointObj.GetComponent<Collider>();
-            if (col != null)
-            {
-                Destroy(col);
-            }
+            MeshFilter mf = jointObj.AddComponent<MeshFilter>();
+            mf.sharedMesh = sharedJointSphereMesh;
 
-            Renderer rend = jointObj.GetComponent<Renderer>();
-            if (rend != null)
-            {
-                rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                rend.receiveShadows = false;
-                rend.sharedMaterial = isTip ? secondaryJointTipMat : secondaryJointBaseMat;
-            }
+            MeshRenderer rend = jointObj.AddComponent<MeshRenderer>();
+            rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            rend.receiveShadows = false;
+            rend.sharedMaterial = isTip ? secondaryJointTipMat : secondaryJointBaseMat;
 
             secondaryJointSphereObjs[i] = jointObj;
         }
@@ -6449,6 +6652,59 @@ public class AirWeavingController : MonoBehaviour
         }
 
         secondaryHandRigRootObj.SetActive(false);
+    }
+
+    private static Mesh BuildLowPolyJointSphereMesh(int lonSegments, int latSegments, float radius)
+    {
+        Mesh mesh = new Mesh { name = "Holo_SharedLowPolyJointSphere" };
+        int lonCount = lonSegments + 1;
+        int latCount = latSegments + 1;
+        Vector3[] verts = new Vector3[lonCount * latCount];
+        Vector3[] norms = new Vector3[lonCount * latCount];
+        int[] tris = new int[lonSegments * latSegments * 6];
+
+        int vi = 0;
+        for (int lat = 0; lat < latCount; lat++)
+        {
+            float phi = (lat / (float)latSegments) * Mathf.PI;
+            float sinPhi = Mathf.Sin(phi);
+            float cosPhi = Mathf.Cos(phi);
+            for (int lon = 0; lon < lonCount; lon++)
+            {
+                float theta = (lon % lonSegments) * ((Mathf.PI * 2f) / lonSegments);
+                Vector3 n = new Vector3(sinPhi * Mathf.Cos(theta), cosPhi, sinPhi * Mathf.Sin(theta));
+                verts[vi] = n * radius;
+                norms[vi] = n;
+                vi++;
+            }
+        }
+
+        int ti = 0;
+        for (int lat = 0; lat < latSegments; lat++)
+        {
+            int rowA = lat * lonCount;
+            int rowB = (lat + 1) * lonCount;
+            for (int lon = 0; lon < lonSegments; lon++)
+            {
+                int v00 = rowA + lon;
+                int v01 = rowA + lon + 1;
+                int v10 = rowB + lon;
+                int v11 = rowB + lon + 1;
+
+                tris[ti++] = v00;
+                tris[ti++] = v01;
+                tris[ti++] = v10;
+
+                tris[ti++] = v01;
+                tris[ti++] = v11;
+                tris[ti++] = v10;
+            }
+        }
+
+        mesh.SetVertices(verts);
+        mesh.SetNormals(norms);
+        mesh.SetIndices(tris, MeshTopology.Triangles, 0, calculateBounds: true);
+        return mesh;
     }
 
     private Material CreateSafeSpritesMaterial(Color tint, int renderQueue)
@@ -6604,6 +6860,16 @@ public class AirWeavingController : MonoBehaviour
             nativeWorkPixels.Dispose();
         }
         rawWebcamPixels = null;
+        downscaleLutX0 = null;
+        downscaleLutX1 = null;
+        downscaleLutY0 = null;
+        downscaleLutY1 = null;
+        lutSrcW = 0;
+        lutSrcH = 0;
+        lutDstW = 0;
+        lutDstH = 0;
+        lutRotAngle = -1;
+        lastVideoQuadCamW = -1;
         workWidth = 0;
         workHeight = 0;
         lastCamWidth = 0;
@@ -6670,6 +6936,11 @@ public class AirWeavingController : MonoBehaviour
         {
             Destroy(secondaryHandRigRootObj);
             secondaryHandRigRootObj = null;
+        }
+        if (sharedJointSphereMesh != null)
+        {
+            Destroy(sharedJointSphereMesh);
+            sharedJointSphereMesh = null;
         }
         secondaryJointSphereObjs = null;
         secondaryBoneLineRenderers = null;

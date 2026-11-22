@@ -129,6 +129,12 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private Material secondaryPinchRingMat;
     private Material secondaryPinchCoreMat;
     private readonly Vector3[] pinchRingBuffer = new Vector3[PinchRingSegments];
+    private readonly float[] auraCosTable = new float[AuraSegments];
+    private readonly float[] auraSinTable = new float[AuraSegments];
+    private readonly float[] reticleCosTable = new float[ReticleSegments];
+    private readonly float[] reticleSinTable = new float[ReticleSegments];
+    private readonly float[] pinchCosTable = new float[PinchRingSegments];
+    private readonly float[] pinchSinTable = new float[PinchRingSegments];
 
     // One-Euro Filter 3D Zero-GC untuk 21 titik visual skeleton slot 0 & slot 1 + smooth fade alpha occlusion grace
     private readonly OneEuroFilter3D[] primarySkeletonFilters = new OneEuroFilter3D[SkeletonJointCount];
@@ -137,6 +143,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private readonly Vector3[] secondarySmoothedJoints = new Vector3[SkeletonJointCount];
     private float primarySkeletonAlpha = 0f;
     private float secondarySkeletonAlpha = 0f;
+    private float lastAppliedPrimaryBoneAlpha = -1f;
+    private float lastAppliedSecondaryBoneAlpha = -1f;
     private bool hasPrimarySkeletonPose = false;
     private bool hasSecondarySkeletonPose = false;
     private ReticleFadeState primaryReticleFade;
@@ -165,6 +173,25 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         rootObj = new GameObject("AR_AirWeavingHologramHUD");
         rootObj.transform.SetParent(transform, false);
+
+        for (int i = 0; i < AuraSegments; i++)
+        {
+            float angle = (i / (float)AuraSegments) * Mathf.PI * 2f;
+            auraCosTable[i] = Mathf.Cos(angle);
+            auraSinTable[i] = Mathf.Sin(angle);
+        }
+        for (int i = 0; i < ReticleSegments; i++)
+        {
+            float angle = (i / (float)ReticleSegments) * Mathf.PI * 2f;
+            reticleCosTable[i] = Mathf.Cos(angle);
+            reticleSinTable[i] = Mathf.Sin(angle);
+        }
+        for (int i = 0; i < PinchRingSegments; i++)
+        {
+            float angle = (i / (float)PinchRingSegments) * Mathf.PI * 2f;
+            pinchCosTable[i] = Mathf.Cos(angle);
+            pinchSinTable[i] = Mathf.Sin(angle);
+        }
 
         nodeOuterRings = new LineRenderer[MaxNodeSlots];
         nodeInnerRings = new LineRenderer[MaxNodeSlots];
@@ -288,6 +315,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             if (clearAlphaImmediate)
             {
                 secondarySkeletonAlpha = 0f;
+                lastAppliedSecondaryBoneAlpha = -1f;
                 hasSecondarySkeletonPose = false;
             }
         }
@@ -296,6 +324,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             if (clearAlphaImmediate)
             {
                 primarySkeletonAlpha = 0f;
+                lastAppliedPrimaryBoneAlpha = -1f;
                 hasPrimarySkeletonPose = false;
             }
         }
@@ -382,13 +411,6 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         float curAlpha = isSecondary ? secondarySkeletonAlpha : primarySkeletonAlpha;
 
         float safeDt = Mathf.Clamp(dt, 0.0005f, 0.050f);
-        if (hasPose)
-        {
-            for (int i = 0; i < SkeletonJointCount; i++)
-            {
-                smoothed[i] = filters[i].Tick(safeDt);
-            }
-        }
 
         float targetAlpha;
         if (forceHide || !hasPose || !isHandDetected)
@@ -430,18 +452,36 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             return;
         }
 
-        if (!rigRootObj.activeSelf)
+        if (hasPose)
+        {
+            for (int i = 0; i < SkeletonJointCount; i++)
+            {
+                smoothed[i] = filters[i].Tick(safeDt);
+            }
+        }
+
+        bool justActivated = !rigRootObj.activeSelf;
+        if (justActivated)
         {
             rigRootObj.SetActive(true);
         }
 
-        Color boneCol = new Color(baseBoneColor.r, baseBoneColor.g, baseBoneColor.b, baseBoneColor.a * curAlpha);
-        Color jointCol = new Color(baseJointColor.r, baseJointColor.g, baseJointColor.b, baseJointColor.a * curAlpha);
-        Color tipCol = new Color(baseTipColor.r, baseTipColor.g, baseTipColor.b, baseTipColor.a * curAlpha);
+        float lastAppliedAlpha = isSecondary ? lastAppliedSecondaryBoneAlpha : lastAppliedPrimaryBoneAlpha;
+        bool alphaDirty = justActivated || Mathf.Abs(curAlpha - lastAppliedAlpha) > 0.002f;
+        Color boneCol = default;
+        if (alphaDirty)
+        {
+            boneCol = new Color(baseBoneColor.r, baseBoneColor.g, baseBoneColor.b, baseBoneColor.a * curAlpha);
+            Color jointCol = new Color(baseJointColor.r, baseJointColor.g, baseJointColor.b, baseJointColor.a * curAlpha);
+            Color tipCol = new Color(baseTipColor.r, baseTipColor.g, baseTipColor.b, baseTipColor.a * curAlpha);
 
-        if (boneMat != null) boneMat.color = boneCol;
-        if (jointBaseMat != null) jointBaseMat.color = jointCol;
-        if (jointTipMat != null) jointTipMat.color = tipCol;
+            if (boneMat != null) boneMat.color = boneCol;
+            if (jointBaseMat != null) jointBaseMat.color = jointCol;
+            if (jointTipMat != null) jointTipMat.color = tipCol;
+
+            if (isSecondary) lastAppliedSecondaryBoneAlpha = curAlpha;
+            else lastAppliedPrimaryBoneAlpha = curAlpha;
+        }
 
         if (jointSpheres != null)
         {
@@ -463,8 +503,11 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
                 LineRenderer lr = boneLines[b];
                 if (lr != null)
                 {
-                    lr.startColor = boneCol;
-                    lr.endColor = boneCol;
+                    if (alphaDirty)
+                    {
+                        lr.startColor = boneCol;
+                        lr.endColor = boneCol;
+                    }
                     lr.SetPosition(0, smoothed[boneConnections[b, 0]]);
                     lr.SetPosition(1, smoothed[boneConnections[b, 1]]);
                 }
@@ -1108,8 +1151,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         for (int i = 0; i < AuraSegments; i++)
         {
-            float angle = (i / (float)AuraSegments) * Mathf.PI * 2f;
-            auraBuffer[i] = center + (axisA * (Mathf.Cos(angle) * radius)) + (axisB * (Mathf.Sin(angle) * radius));
+            auraBuffer[i] = center + (axisA * (auraCosTable[i] * radius)) + (axisB * (auraSinTable[i] * radius));
         }
 
         if (mat != null)
@@ -1140,8 +1182,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         for (int i = 0; i < ReticleSegments; i++)
         {
-            float angle = (i / (float)ReticleSegments) * Mathf.PI * 2f;
-            reticleBuffer[i] = center + (axisA * (Mathf.Cos(angle) * radius)) + (axisB * (Mathf.Sin(angle) * radius));
+            reticleBuffer[i] = center + (axisA * (reticleCosTable[i] * radius)) + (axisB * (reticleSinTable[i] * radius));
         }
 
         if (mat != null)
@@ -1172,8 +1213,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         for (int i = 0; i < PinchRingSegments; i++)
         {
-            float angle = (i / (float)PinchRingSegments) * Mathf.PI * 2f;
-            pinchRingBuffer[i] = center + (axisA * (Mathf.Cos(angle) * radius)) + (axisB * (Mathf.Sin(angle) * radius));
+            pinchRingBuffer[i] = center + (axisA * (pinchCosTable[i] * radius)) + (axisB * (pinchSinTable[i] * radius));
         }
 
         if (mat != null)
