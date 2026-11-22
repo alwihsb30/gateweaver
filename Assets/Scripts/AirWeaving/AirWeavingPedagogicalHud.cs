@@ -1694,6 +1694,16 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Menghasilkan snapshot string ekspresi Boolean rangkaian saat ini (dipanggil event-driven
+    /// satu kali saat Modal Verifikasi Menang terbuka, bukan di runtime loop).
+    /// </summary>
+    public string FormatBooleanExpressionSnapshot(GateNode outputNode)
+    {
+        BuildLiveBooleanExpressionZeroGc(outputNode, out _, out _, out _);
+        return textBuilder.ToString();
+    }
+
     private void BuildLiveBooleanExpressionZeroGc(
         GateNode outputNode,
         out bool isConnected,

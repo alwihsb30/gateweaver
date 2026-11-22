@@ -747,6 +747,8 @@ public class AirWeavingController : MonoBehaviour
     private AirWeavingSummonVisual summonVisual;
     private AirWeavingSpatialSfx spatialSfx;
     private AirWeavingGestureGuide gestureGuide;
+    private AirWeavingMenuDrawerOverlay menuDrawerOverlay;
+    private AirWeavingLevelCompleteModal levelCompleteModal;
     private CompactHudMenuController cachedHudMenu;
     private CompactHudMenuController subscribedHudMenu;
     private RectTransform cachedFeedbackTextRect;
@@ -824,7 +826,9 @@ public class AirWeavingController : MonoBehaviour
     private bool IsAnyHandDetected => isHandDetected || isSecondaryHandDetected;
     private bool IsAnyCircleSummonActive => circleSummoners[0].IsActive || circleSummoners[1].IsActive;
     private bool IsAnyUiOverlayOpen => (levelManager != null && levelManager.IsUiOverlayOpen)
-                                       || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen);
+                                       || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen)
+                                       || (menuDrawerOverlay != null && menuDrawerOverlay.IsDrawerVisible)
+                                       || (levelCompleteModal != null && levelCompleteModal.IsModalOpen);
 
     private bool IsHandSlotDetected(int handSlot)
     {
@@ -888,6 +892,14 @@ public class AirWeavingController : MonoBehaviour
         {
             gestureGuide.Configure(cachedHudMenu, spatialSfx, ResolveMainCamera(), txtFeedback != null ? txtFeedback.font : null);
         }
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.Configure(levelManager, cachedHudMenu, txtFeedback != null ? txtFeedback.font : null);
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.Configure(levelManager, circuitManager, cachedHudMenu, pedagogicalHud, spatialSfx, outputNode, txtFeedback != null ? txtFeedback.font : null);
+        }
         if (pedagogicalHud != null)
         {
             pedagogicalHud.BindExternalHudTargets(cachedHudMenu, txtFeedback);
@@ -932,6 +944,60 @@ public class AirWeavingController : MonoBehaviour
             spatialSfx.PlayOutputHoldConfirm(mainCam.transform.position + (mainCam.transform.forward * WorkbenchDepth));
         }
         SetFeedbackImmediate("Tampilan meja dipusatkan.", FeedbackActiveColor, 1.5f);
+    }
+
+    private void HandleDrawerGestureGuideRequested()
+    {
+        if (!isAirWeavingActive || isTransitioning)
+        {
+            return;
+        }
+
+        if (levelManager != null)
+        {
+            levelManager.CloseAllModalsForMenu();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnExternalModalOrMenuOpened();
+        }
+        if (gestureGuide != null)
+        {
+            gestureGuide.OpenGuideOverlay();
+        }
+    }
+
+    private void HandleDrawerResetCircuitRequested()
+    {
+        if (!isAirWeavingActive || isTransitioning)
+        {
+            return;
+        }
+
+        if (levelManager != null)
+        {
+            if (levelManager.IsSandboxMode)
+            {
+                ResetAirWeavingWorkbench();
+                SetFeedbackImmediate("Rangkaian Sandbox dibersihkan.", GwThemeTokens.TextPrimary, 2.0f);
+            }
+            else if (!levelManager.IsVerifying)
+            {
+                levelManager.LoadLevel(levelManager.currentLevelIndex);
+            }
+        }
+        else
+        {
+            ResetAirWeavingWorkbench();
+        }
+    }
+
+    private void HandleGestureGuideOpened()
+    {
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnExternalModalOrMenuOpened();
+        }
     }
 
     public void ToggleAirWeavingMode()
@@ -1037,6 +1103,10 @@ public class AirWeavingController : MonoBehaviour
         {
             pedagogicalHud.NotifyLevelOrWorkbenchReset(levelManager, inputANode, inputBNode, outputNode);
         }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.NotifyLevelOrWorkbenchReset();
+        }
 
         SetHoverRingVisible(false);
     }
@@ -1089,6 +1159,10 @@ public class AirWeavingController : MonoBehaviour
             {
                 gestureGuide.OnExternalModalOrMenuOpened();
             }
+            if (levelCompleteModal != null)
+            {
+                levelCompleteModal.OnExternalModalOrMenuOpened();
+            }
         }
         if (gestureGuide != null)
         {
@@ -1097,6 +1171,13 @@ public class AirWeavingController : MonoBehaviour
                 spatialSfx.StopHumImmediate();
             }
             gestureGuide.Tick(dt, mainCam);
+        }
+        if (levelCompleteModal != null)
+        {
+            bool otherUiOpen = (levelManager != null && levelManager.IsUiOverlayOpen)
+                               || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen)
+                               || (menuDrawerOverlay != null && menuDrawerOverlay.IsDrawerVisible);
+            levelCompleteModal.Tick(dt, isAirWeavingActive, otherUiOpen);
         }
 
         UpdateVideoQuadTransform(mainCam);
@@ -1238,6 +1319,10 @@ public class AirWeavingController : MonoBehaviour
         }
 
         UpdateAirWeavingLabelsAndTruthPodSpatialPose(mainCam);
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.TickLate(isAirWeavingActive);
+        }
         UpdatePedagogicalHudVisuals(mainCam);
     }
 
@@ -1355,6 +1440,14 @@ public class AirWeavingController : MonoBehaviour
 
     private void OnDisable()
     {
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnAirWeavingModeExited();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnAirWeavingModeExited();
+        }
         if (pedagogicalHud != null)
         {
             pedagogicalHud.HideImmediate();
@@ -1391,8 +1484,22 @@ public class AirWeavingController : MonoBehaviour
         }
         if (gestureGuide != null)
         {
+            gestureGuide.OnGuideOverlayOpened -= HandleGestureGuideOpened;
             gestureGuide.CleanupImmediate();
             gestureGuide = null;
+        }
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnRecenterStageRequested -= HandleHudStageRecenterRequested;
+            menuDrawerOverlay.OnGestureGuideRequested -= HandleDrawerGestureGuideRequested;
+            menuDrawerOverlay.OnResetCircuitRequested -= HandleDrawerResetCircuitRequested;
+            menuDrawerOverlay.CleanupImmediate();
+            menuDrawerOverlay = null;
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.CleanupImmediate();
+            levelCompleteModal = null;
         }
         UnbindHudMenuEvents();
         cachedHudMenu = null;
@@ -1737,6 +1844,14 @@ public class AirWeavingController : MonoBehaviour
         }
 
         OnAirWeavingModeChanged?.Invoke(true);
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnAirWeavingModeEntered();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnAirWeavingModeEntered();
+        }
         gestureGuide?.OnAirWeavingModeEntered();
         SyncBottomToastElevationForAirMode(forceResetToDefault: false);
         bool isGuideOpenNow = gestureGuide != null && gestureGuide.IsGuideOverlayOpen;
@@ -1754,6 +1869,14 @@ public class AirWeavingController : MonoBehaviour
     {
         isTransitioning = true;
         isAirWeavingActive = false;
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnAirWeavingModeExited();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnAirWeavingModeExited();
+        }
         gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
@@ -1783,6 +1906,14 @@ public class AirWeavingController : MonoBehaviour
     private IEnumerator RollbackToVuforiaMode(string warningMessage)
     {
         isAirWeavingActive = false;
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnAirWeavingModeExited();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnAirWeavingModeExited();
+        }
         gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
@@ -8244,14 +8375,43 @@ public class AirWeavingController : MonoBehaviour
         spatialSfx.Configure(levelManager, ResolveMainCamera());
         if (gestureGuide == null)
         {
-            gestureGuide = GetComponent<AirWeavingGestureGuide>() ?? gameObject.AddComponent<AirWeavingGestureGuide>();
+            gestureGuide = GetComponent<AirWeavingGestureGuide>();
+            if (gestureGuide == null)
+            {
+                gestureGuide = gameObject.AddComponent<AirWeavingGestureGuide>();
+            }
+            gestureGuide.OnGuideOverlayOpened += HandleGestureGuideOpened;
         }
         if (cachedHudMenu == null && levelManager != null)
         {
             cachedHudMenu = levelManager.GetComponent<CompactHudMenuController>();
         }
         BindHudMenuEvents(cachedHudMenu);
-        gestureGuide.Configure(cachedHudMenu, spatialSfx, ResolveMainCamera(), txtFeedback != null ? txtFeedback.font : null);
+        TMP_FontAsset sharedHudFont = txtFeedback != null ? txtFeedback.font : null;
+        gestureGuide.Configure(cachedHudMenu, spatialSfx, ResolveMainCamera(), sharedHudFont);
+
+        if (menuDrawerOverlay == null)
+        {
+            menuDrawerOverlay = GetComponent<AirWeavingMenuDrawerOverlay>();
+            if (menuDrawerOverlay == null)
+            {
+                menuDrawerOverlay = gameObject.AddComponent<AirWeavingMenuDrawerOverlay>();
+            }
+            menuDrawerOverlay.OnRecenterStageRequested += HandleHudStageRecenterRequested;
+            menuDrawerOverlay.OnGestureGuideRequested += HandleDrawerGestureGuideRequested;
+            menuDrawerOverlay.OnResetCircuitRequested += HandleDrawerResetCircuitRequested;
+        }
+        menuDrawerOverlay.Configure(levelManager, cachedHudMenu, sharedHudFont);
+
+        if (levelCompleteModal == null)
+        {
+            levelCompleteModal = GetComponent<AirWeavingLevelCompleteModal>();
+            if (levelCompleteModal == null)
+            {
+                levelCompleteModal = gameObject.AddComponent<AirWeavingLevelCompleteModal>();
+            }
+        }
+        levelCompleteModal.Configure(levelManager, circuitManager, cachedHudMenu, pedagogicalHud, spatialSfx, outputNode, sharedHudFont);
 
         workbenchVisualRootObj.SetActive(false);
     }
@@ -8689,6 +8849,14 @@ public class AirWeavingController : MonoBehaviour
         if (spatialSfx != null)
         {
             spatialSfx.StopAllImmediate();
+        }
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnAirWeavingModeExited();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnAirWeavingModeExited();
         }
         gestureGuide?.OnAirWeavingModeExited();
         summonVisual?.HideImmediate();
