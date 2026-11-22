@@ -26,8 +26,20 @@ public static class GwThemeTokens
     /// <summary>#12141C alpha 0.94f - Latar kaca gelap sangat pekat khusus overlay/modal pemblokir agar elemen di belakang tidak tembus.</summary>
     public static readonly Color SmokedGlassOverlay = new Color(0x12 / 255f, 0x14 / 255f, 0x1C / 255f, 0.94f);
 
+    /// <summary>#12141C alpha 0.96f - Latar kaca gelap solid terpoles untuk panel utama &amp; header strip Layar Judul.</summary>
+    public static readonly Color TitleSurfaceSolid = new Color(0x12 / 255f, 0x14 / 255f, 0x1C / 255f, 0.96f);
+
+    /// <summary>#12141C alpha 0.98f - Latar kaca gelap ultra-pekat khusus panel Menu Drawer agar ikon Top HUD &amp; label 3D 100% tidak membayang.</summary>
+    public static readonly Color DrawerSurfaceUltra = new Color(0x12 / 255f, 0x14 / 255f, 0x1C / 255f, 0.98f);
+
     /// <summary>#090B10 alpha 0.62f - Scrim peredup layar penuh di belakang modal/drawer pemblokir.</summary>
     public static readonly Color BackdropScrim = new Color(0x09 / 255f, 0x0B / 255f, 0x10 / 255f, 0.62f);
+
+    /// <summary>#0A0C12 alpha 0.94f - Scrim penuh pekat terpoles khusus Layar Judul agar Top HUD Vuforia di belakang tidak bertabrakan.</summary>
+    public static readonly Color TitleBackdropScrim = new Color(0x0A / 255f, 0x0C / 255f, 0x12 / 255f, 0.94f);
+
+    /// <summary>#0B0D14 alpha 0.94f - Backdrop penuh pekat khusus Peta Progresi Sirkuit (05_Level_Selector).</summary>
+    public static readonly Color LevelMapBackdropSolid = new Color(0x0B / 255f, 0x0D / 255f, 0x14 / 255f, 0.94f);
 
     /// <summary>#1E2230 alpha 0.78f - Kartu/sel idle &amp; tombol kontrol titanium datar.</summary>
     public static readonly Color CardIdle = new Color(0x1E / 255f, 0x22 / 255f, 0x30 / 255f, 0.78f);

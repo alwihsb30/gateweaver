@@ -21,7 +21,7 @@ public sealed class AirWeavingMenuDrawerOverlay : MonoBehaviour
     private const float ReferenceCanvasWidth = 1920f;
     private const float ReferenceCanvasHeight = 1080f;
     private const float ReferenceDrawerWidth = 420f;
-    private const float ReferenceContentHeight = 824f;
+    private const float ReferenceContentHeight = 882f;
     private const float ContentPadX = 20f;
     private const float ContentPadTop = 20f;
     private const float ContentPadBottom = 20f;
@@ -79,6 +79,8 @@ public sealed class AirWeavingMenuDrawerOverlay : MonoBehaviour
     public event Action OnRecenterStageRequested;
     public event Action OnGestureGuideRequested;
     public event Action OnResetCircuitRequested;
+    public event Action OnLevelSelectorRequested;
+    public event Action OnTitleScreenRequested;
 
     private LevelAndUIManager levelManager;
     private CompactHudMenuController compactHudMenu;
@@ -99,11 +101,13 @@ public sealed class AirWeavingMenuDrawerOverlay : MonoBehaviour
     private ModeCardUi modeSandboxCard;
 
     private readonly LevelRowUi[] levelRows = new LevelRowUi[CurriculumLevelCount];
+    private Button btnOpenLevelMap;
 
     private Button btnCalibrateStage;
     private Button btnAudioToggle;
     private TMP_Text txtAudioLabel;
     private Button btnOpenGuide;
+    private Button btnTitleScreen;
     private Button btnResetCircuit;
 
     private bool isUiBuilt = false;
@@ -225,9 +229,11 @@ public sealed class AirWeavingMenuDrawerOverlay : MonoBehaviour
             }
         }
 
+        RemoveBtnListener(btnOpenLevelMap, HandleOpenLevelMapClicked);
         RemoveBtnListener(btnCalibrateStage, HandleCalibrateStageClicked);
         RemoveBtnListener(btnAudioToggle, HandleAudioToggleClicked);
         RemoveBtnListener(btnOpenGuide, HandleOpenGuideClicked);
+        RemoveBtnListener(btnTitleScreen, HandleTitleScreenClicked);
         RemoveBtnListener(btnResetCircuit, HandleResetCircuitClicked);
 
         isAirWeavingActive = false;
@@ -246,10 +252,12 @@ public sealed class AirWeavingMenuDrawerOverlay : MonoBehaviour
         modeAirCard = null;
         modeCardCard = null;
         modeSandboxCard = null;
+        btnOpenLevelMap = null;
         btnCalibrateStage = null;
         btnAudioToggle = null;
         txtAudioLabel = null;
         btnOpenGuide = null;
+        btnTitleScreen = null;
         btnResetCircuit = null;
         legacyMenuDrawerObj = null;
         legacyMenuScrimObj = null;
@@ -331,6 +339,18 @@ public sealed class AirWeavingMenuDrawerOverlay : MonoBehaviour
     {
         CloseDrawerAndNotifyMenu();
         OnGestureGuideRequested?.Invoke();
+    }
+
+    private void HandleOpenLevelMapClicked()
+    {
+        CloseDrawerAndNotifyMenu();
+        OnLevelSelectorRequested?.Invoke();
+    }
+
+    private void HandleTitleScreenClicked()
+    {
+        CloseDrawerAndNotifyMenu();
+        OnTitleScreenRequested?.Invoke();
     }
 
     private void HandleResetCircuitClicked()
@@ -599,7 +619,7 @@ public sealed class AirWeavingMenuDrawerOverlay : MonoBehaviour
         scrimCloseButton.transition = Selectable.Transition.None;
         scrimCloseButton.onClick.AddListener(HandleCloseRequested);
 
-        // 2. Panel samping kanan SmokedGlassOverlay (94%) + garis tepi kiri 1px HairlineIdle (tanpa border kanan)
+        // 2. Panel samping kanan DrawerSurfaceUltra (#12141C 98%) + garis tepi kiri 1px HairlineIdle (tanpa border kanan)
         GameObject panelObj = new GameObject("Panel_AirMenuDrawer_V85", typeof(RectTransform), typeof(Image));
         panelObj.transform.SetParent(rootRect, false);
         drawerPanelRect = panelObj.GetComponent<RectTransform>();
@@ -610,7 +630,7 @@ public sealed class AirWeavingMenuDrawerOverlay : MonoBehaviour
         drawerPanelRect.sizeDelta = new Vector2(ReferenceDrawerWidth, 0f);
 
         Image panelBg = panelObj.GetComponent<Image>();
-        panelBg.color = GwThemeTokens.SmokedGlassOverlay;
+        panelBg.color = GwThemeTokens.DrawerSurfaceUltra;
         panelBg.raycastTarget = true;
 
         // Garis tepi kiri 1px HairlineIdle (tanpa border kanan/atas/bawah)
@@ -730,10 +750,28 @@ public sealed class AirWeavingMenuDrawerOverlay : MonoBehaviour
         y -= 14f;
 
         // ---------------------------------------------------------------------
-        // SEKSI 2: DAFTAR LEVEL 01-07
+        // SEKSI 2: DAFTAR LEVEL 01-07 + TOMBOL BUKA PETA -> (05_Level_Selector)
         // ---------------------------------------------------------------------
-        CreateSectionLabel("Sec_LevelList", drawerContentRect, ContentPadX, y, innerWidth, "DAFTAR LEVEL (01-07)");
-        y -= 24f;
+        const float openMapBtnW = 116f;
+        const float openMapBtnH = 24f;
+        CreateSectionLabel("Sec_LevelList", drawerContentRect, ContentPadX, y - 3f, innerWidth - openMapBtnW - 8f, "DAFTAR LEVEL (01-07)");
+
+        btnOpenLevelMap = CreateRoundedFlatButton(
+            "Btn_OpenLevelMap",
+            drawerContentRect,
+            ContentPadX + innerWidth - openMapBtnW,
+            y,
+            openMapBtnW,
+            openMapBtnH,
+            "BUKA PETA ->",
+            GwThemeTokens.CardIdle,
+            GwThemeTokens.SignalHighTeal,
+            GwThemeTokens.SignalHighTeal,
+            10f,
+            11.5f,
+            HandleOpenLevelMapClicked,
+            out _);
+        y -= 30f;
 
         const float levelRowH = 44f;
         const float levelRowGap = 6f;
@@ -814,6 +852,23 @@ public sealed class AirWeavingMenuDrawerOverlay : MonoBehaviour
             HandleOpenGuideClicked,
             out _);
         y -= (ctrlBtnH + ctrlGap);
+
+        btnTitleScreen = CreateRoundedFlatButton(
+            "Btn_OpenTitleScreen",
+            drawerContentRect,
+            ContentPadX,
+            y,
+            innerWidth,
+            38f,
+            "LAYAR UTAMA",
+            GwThemeTokens.CardIdle,
+            GwThemeTokens.HairlineActive,
+            GwThemeTokens.TextPrimary,
+            12.5f,
+            15f,
+            HandleTitleScreenClicked,
+            out _);
+        y -= (38f + ctrlGap);
 
         btnResetCircuit = CreateRoundedFlatButton(
             "Btn_ResetCircuit",

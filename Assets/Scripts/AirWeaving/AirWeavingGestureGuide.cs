@@ -25,6 +25,8 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
     private const float GuideCardHeight = 668f;
     private const float PracticePillWidth = 840f;
     private const float PracticePillHeight = 58f;
+    private const float PracticePillBottomYWhenStripExpanded = 88f;
+    private const float PracticePillBottomYWhenStripCollapsed = 32f;
     private const float StepCompleteBeatSeconds = 0.42f;
     private const float CompletionBannerSeconds = 1.60f;
     private const float AudioReferenceDepth = 3.60f;
@@ -60,6 +62,7 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
     private GameObject practiceRootObj;
     private RectTransform practiceSafeAreaRect;
     private GameObject practicePillObj;
+    private RectTransform practicePillRect;
     private Image practicePillBg;
     private Image practicePillBorderImg;
     private Image practiceBadgeBg;
@@ -85,6 +88,7 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
     private bool isUiBuilt = false;
     private bool isAirWeavingActive = false;
     private bool isGuideOverlayOpen = false;
+    private bool isPedBottomStripExpanded = true;
     private PracticeState practiceState = PracticeState.Inactive;
     private PracticeState pendingNextState = PracticeState.Inactive;
     private float stepCompleteBeatTimer = 0f;
@@ -175,7 +179,40 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         }
     }
 
-    public void Tick(float dt, Camera mainCam)
+    public void SetBottomStripExpandedState(bool expanded)
+    {
+        if (isPedBottomStripExpanded == expanded && practicePillRect != null)
+        {
+            float targetY = expanded ? PracticePillBottomYWhenStripExpanded : PracticePillBottomYWhenStripCollapsed;
+            if (Mathf.Abs(practicePillRect.anchoredPosition.y - targetY) <= 0.5f)
+            {
+                return;
+            }
+        }
+
+        isPedBottomStripExpanded = expanded;
+        ApplyPracticePillVerticalOffset();
+    }
+
+    private void ApplyPracticePillVerticalOffset()
+    {
+        if (practicePillRect == null)
+        {
+            return;
+        }
+
+        float desiredY = isPedBottomStripExpanded
+            ? PracticePillBottomYWhenStripExpanded
+            : PracticePillBottomYWhenStripCollapsed;
+        Vector2 pos = practicePillRect.anchoredPosition;
+        if (Mathf.Abs(pos.y - desiredY) > 0.5f)
+        {
+            pos.y = desiredY;
+            practicePillRect.anchoredPosition = pos;
+        }
+    }
+
+    public void Tick(float dt, Camera mainCam, bool bottomStripExpanded = true)
     {
         if (mainCam != null)
         {
@@ -186,6 +223,8 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         {
             return;
         }
+
+        SetBottomStripExpandedState(bottomStripExpanded);
 
         if (isGuideOverlayOpen || practiceState != PracticeState.Inactive)
         {
@@ -455,6 +494,7 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         btnCloseGuide = null;
         practiceSafeAreaRect = null;
         practicePillObj = null;
+        practicePillRect = null;
         practicePillBg = null;
         practicePillBorderImg = null;
         practiceBadgeBg = null;
@@ -1163,18 +1203,22 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         practiceSafeAreaRect.offsetMin = Vector2.zero;
         practiceSafeAreaRect.offsetMax = Vector2.zero;
 
-        // Pil Latihan Cepat v8.5: SmokedGlassDense + HairlineActive 1px + radius 6px (nol neon glow)
+        // Pil Latihan Cepat v8.5: SmokedGlassOverlay (94% solid) + HairlineActive 1px + radius 6px (nol neon glow)
         practicePillObj = new GameObject("Pill_AirQuickPractice", typeof(RectTransform), typeof(Image));
         practicePillObj.transform.SetParent(practiceSafeAreaRect, false);
         RectTransform pillRect = practicePillObj.GetComponent<RectTransform>();
+        practicePillRect = pillRect;
         pillRect.anchorMin = new Vector2(0.5f, 0f);
         pillRect.anchorMax = new Vector2(0.5f, 0f);
         pillRect.pivot = new Vector2(0.5f, 0f);
-        pillRect.anchoredPosition = new Vector2(0f, 14f);
+        float initialBottomY = isPedBottomStripExpanded
+            ? PracticePillBottomYWhenStripExpanded
+            : PracticePillBottomYWhenStripCollapsed;
+        pillRect.anchoredPosition = new Vector2(0f, initialBottomY);
         pillRect.sizeDelta = new Vector2(PracticePillWidth, PracticePillHeight);
 
         practicePillBg = practicePillObj.GetComponent<Image>();
-        GwThemeTokens.ApplyRoundedRect6(practicePillBg, GwThemeTokens.SmokedGlassDense);
+        GwThemeTokens.ApplyRoundedRect6(practicePillBg, GwThemeTokens.SmokedGlassOverlay);
         practicePillBg.raycastTarget = false;
 
         practicePillBorderImg = GwThemeTokens.AttachHairlineBorder(
@@ -1285,8 +1329,9 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
 
         if (practicePillBg != null)
         {
-            practicePillBg.color = GwThemeTokens.SmokedGlassDense;
+            practicePillBg.color = GwThemeTokens.SmokedGlassOverlay;
         }
+        ApplyPracticePillVerticalOffset();
         if (practicePillBorderImg != null)
         {
             practicePillBorderImg.color = highlightGreen
