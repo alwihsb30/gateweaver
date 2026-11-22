@@ -49,7 +49,7 @@ public class AirWeavingController : MonoBehaviour
     private const float OutputHoverHeight = BaseHoverHeight + 0.032f;
     private const float ParkingRackHoverHeight = 0.340f;
     private const float ArenaArcHeightY = 0.028f;
-    private const float ParkingRackArcDepthZ = 0.075f;
+    private const float ParkingRackArcDepthZ = 0.150f;
     private const float InputATerminalArcYawDeg = 22.0f;
     private const float InputBTerminalArcYawDeg = 13.0f;
     private const float OutputTerminalArcYawDeg = -18.0f;
@@ -59,16 +59,16 @@ public class AirWeavingController : MonoBehaviour
 
     // Parameter True 3D Hand Depth Tracking (Rigid Metacarpal Palm Span) & Mode Meja Catur 3D (Tahap 4.7 v8.0)
     private const float FistGrabDepthGain = 1.24f;
-    private const float MinGrabCameraDepth = 0.85f;
-    private const float MaxGrabCameraDepth = 7.50f;
+    private const float MinGrabCameraDepth = 0.55f;
+    private const float MaxGrabCameraDepth = 14.0f;
     private const float MinGrabTableLocalY = 0.08f;
-    private const float MaxGrabTableLocalY = 1.85f;
+    private const float MaxGrabTableLocalY = 2.40f;
     private const float HandCursorDepthTrackGain = 0.72f;
     private const float MinHandRigCameraDepth = 1.25f;
     private const float MaxHandRigCameraDepth = 5.40f;
     private const float MinNearClipSafeOffsetMeters = 0.28f;
 
-    // Parameter Kontrol 2 Tangan Full Free-View 6-DoF Quaternion Arcball 360° + True Z-Axis Push/Pull terpisah dari Zoom
+    // Parameter Kontrol 2 Tangan Full Free-View 6-DoF Focus-Point Orbit 360° + Ultra-Wide Zoom 0.18x..15x + True Z-Axis Push/Pull
     private const float TwoHandOrbitYawDegPerUnit = 60.0f;
     private const float TwoHandOrbitPitchDegPerUnit = 60.0f;
     private const float TwoHandOrbitMaxAxisDeltaPerFrameDeg = 12.0f;
@@ -82,15 +82,15 @@ public class AirWeavingController : MonoBehaviour
     private const float TwoHandAvgPalmOneEuroBeta = 0.45f;
     private const float TwoHandAvgPalmOneEuroDCutoff = 1.00f;
     private const float TwoHandAvgPalmOneEuroVelScale = 18.0f;
-    private const float TwoHandZoomSensitivity = 0.65f;
+    private const float TwoHandZoomSensitivity = 1.15f;
     private const float TwoHandZoomDistEmaRate = 14.0f;
     private const float TwoHandZoomNormSpanSoftFloor = 1.25f;
     private const float TwoHandZoomNormSpanMinFloor = 0.50f;
     private const float TwoHandZoomNormSpanInitialFloor = 0.85f;
     private const float TwoHandZoomRatioMicroDeadzone = 0.025f;
-    private const float TwoHandZoomMaxStepRatioPerFrame = 0.06f;
+    private const float TwoHandZoomMaxLogStepPerFrame = 0.085f;
     private const float TwoHandFreePanXYGain = 0.96f;
-    private const float TwoHandFreePanMaxDeltaXYPerFrame = 0.20f;
+    private const float TwoHandFreePanMaxDeltaXYPerFrame = 0.26f;
     private const float TwoHandOrbitConfirmHoldSeconds = 0.040f;
     private const float TwoHandOrbitHoldMaxPinchRatio = 0.66f;
     private const float TwoHandFreePanHoldMinFistBendDeg = 78.0f;
@@ -125,7 +125,7 @@ public class AirWeavingController : MonoBehaviour
     private const float GateGrabPopAmplitude = 0.10f;
     private const float GatePlaceBloomPopAmplitude = 0.12f;
     private const float InputTogglePopAmplitude = 0.12f;
-    private const float GateThrowMaxSpeed = 3.20f;
+    private const float GateThrowMaxSpeed = 4.60f;
     private const float GateCoastDamping = 6.5f;
     private const float GateCoastStopSpeed = 0.025f;
     private const float GateCoastEdgeBounceFactor = 0.30f;
@@ -161,8 +161,8 @@ public class AirWeavingController : MonoBehaviour
     private const float InputAirTapDwellSeconds = 0.105f;
     private const float InputAirTapCooldownSeconds = 0.40f;
     private const float InputTouchRippleDuration = 0.34f;
-    private const float ParkReturnThresholdY = 0.56f;
-    private const float ParkSlotSnapRadius = 0.30f;
+    private const float ParkReturnThresholdY = 1.12f;
+    private const float ParkSlotSnapRadius = 0.38f;
     private const float HandFrameStaleTimeoutSeconds = 0.35f;
 
     // Efek melayang 3D nyata (sinusoidal bob ±0.014, gentle gimbal sway ±3.5°, 2-axis velocity banking tilt maks ±24°)
@@ -187,19 +187,20 @@ public class AirWeavingController : MonoBehaviour
     private const float AirDrawFadeDurationSeconds = 0.35f;
     private const float AirDrawPostSpawnCooldownSeconds = 0.55f;
 
-    // Koordinat meja hologram horizontal XZ (X = kiri-kanan, Y pada konstanta di bawah = kedalaman Z depan-belakang meja)
-    private const float InputTerminalBaseX = -1.26f;
-    private const float InputATerminalY = 0.16f;
-    private const float InputBTerminalY = -0.58f;
-    private const float OutputTerminalBaseX = 1.28f;
-    private const float OutputTerminalY = -0.18f;
-    private const float ParkingRackY = 0.82f;
-    private const float AssemblyMinBaseX = -0.74f;
-    private const float AssemblyMaxBaseX = 0.76f;
-    private const float AssemblyMinY = -0.78f;
-    private const float AssemblyMaxY = 0.46f;
+    // Koordinat meja hologram horizontal XZ 2x lebih luas khusus Mode Udara (skala fisik gerbang/port dipertahankan agar 2x ruang kosong)
+    // (X = kiri-kanan, Y pada konstanta di bawah = kedalaman Z depan-belakang meja)
+    private const float InputTerminalBaseX = -2.52f;
+    private const float InputATerminalY = 0.32f;
+    private const float InputBTerminalY = -1.16f;
+    private const float OutputTerminalBaseX = 2.56f;
+    private const float OutputTerminalY = -0.36f;
+    private const float ParkingRackY = 1.64f;
+    private const float AssemblyMinBaseX = -1.48f;
+    private const float AssemblyMaxBaseX = 1.52f;
+    private const float AssemblyMinY = -1.56f;
+    private const float AssemblyMaxY = 0.92f;
 
-    private static readonly float[] ParkingSlotBaseX = { -0.76f, -0.38f, 0.00f, 0.38f, 0.76f };
+    private static readonly float[] ParkingSlotBaseX = { -1.52f, -0.76f, 0.00f, 0.76f, 1.52f };
     private static readonly NodeType[] ParkingSlotOrder =
     {
         NodeType.AND,
@@ -457,7 +458,7 @@ public class AirWeavingController : MonoBehaviour
     private float twoHandFistResetTimer = 0f;
     private float twoHandPinchInitialNormSpan = 10.0f;
     private float twoHandPinchSmoothedNormSpan = 10.0f;
-    private float twoHandPinchInitialZoom = 1.0f;
+    private float twoHandPinchInitialZoom = AirWeavingStageController.DefaultZoomScale;
     private Vector2 twoHandPinchPrevMidpointXY = Vector2.zero;
     private float twoHandPinchSmoothedLineAngleDeg = 0f;
     private bool wasTwoHandOrbitReleaseFrozen = false;
@@ -1951,11 +1952,11 @@ public class AirWeavingController : MonoBehaviour
         {
             twoHandPinchInitialNormSpan = Mathf.Max(TwoHandZoomNormSpanInitialFloor, curNormSpan);
             twoHandPinchSmoothedNormSpan = curNormSpan;
-            twoHandPinchInitialZoom = stageController != null ? stageController.TargetZoomScale : 1f;
+            twoHandPinchInitialZoom = stageController != null ? stageController.TargetZoomScale : AirWeavingStageController.DefaultZoomScale;
             twoHandPinchPrevMidpointXY = curMid;
             twoHandPinchSmoothedLineAngleDeg = curLineAngleDeg;
             wasTwoHandOrbitReleaseFrozen = false;
-            stageController?.BeginTwoHandManipulationAnchor(avgPalmScale);
+            stageController?.BeginTwoHandManipulationAnchor(avgPalmScale, useFocusPointOrbit: true, focalMidpointCameraXY: curMid);
         }
         else
         {
@@ -1980,8 +1981,8 @@ public class AirWeavingController : MonoBehaviour
                 twoHandPinchSmoothedLineAngleDeg = curLineAngleDeg;
                 twoHandPinchInitialNormSpan = Mathf.Max(TwoHandZoomNormSpanInitialFloor, curNormSpan);
                 twoHandPinchSmoothedNormSpan = curNormSpan;
-                twoHandPinchInitialZoom = stageController != null ? stageController.TargetZoomScale : 1f;
-                stageController?.ReanchorTwoHandDepth(avgPalmScale);
+                twoHandPinchInitialZoom = stageController != null ? stageController.TargetZoomScale : AirWeavingStageController.DefaultZoomScale;
+                stageController?.ReanchorTwoHandDepth(avgPalmScale, refreshOrbitFocus: true, focalMidpointCameraXY: curMid);
                 stageController?.SetTwoHandReleaseFreeze(false);
                 return;
             }
@@ -2022,7 +2023,8 @@ public class AirWeavingController : MonoBehaviour
                 twoHandPinchSmoothedLineAngleDeg = curLineAngleDeg;
             }
 
-            // Zoom Skala Murni berbasis normalizedSpan terkompensasi kedalaman (span2D / avgPalmScale) + micro-deadzone logaritmik
+            // Ultra-Wide Zoom multiplikatif/logaritmik (0.18x..15.0x) berbasis normalizedSpan terkompensasi kedalaman (span2D / avgPalmScale):
+            // kecepatan zoom terasa 100% seragam baik di 0.2x maupun di 12.0x (simetris di ruang logaritmik).
             float zoomAlpha = 1f - Mathf.Exp(-TwoHandZoomDistEmaRate * safeDt);
             twoHandPinchSmoothedNormSpan = Mathf.Lerp(twoHandPinchSmoothedNormSpan, curNormSpan, zoomAlpha);
             float rawZoomRatio = (Mathf.Max(TwoHandZoomNormSpanMinFloor, twoHandPinchSmoothedNormSpan) + TwoHandZoomNormSpanSoftFloor)
@@ -2035,11 +2037,12 @@ public class AirWeavingController : MonoBehaviour
             }
 
             float uncappedZoom = twoHandPinchInitialZoom * Mathf.Exp(effectiveLogZoom * TwoHandZoomSensitivity);
-            float prevTargetZoom = stageController != null ? Mathf.Max(0.10f, stageController.TargetZoomScale) : twoHandPinchInitialZoom;
+            float prevTargetZoom = stageController != null ? Mathf.Max(0.05f, stageController.TargetZoomScale) : twoHandPinchInitialZoom;
+            float maxZoomStepFactor = Mathf.Exp(TwoHandZoomMaxLogStepPerFrame);
             float desiredZoom = Mathf.Clamp(
                 uncappedZoom,
-                prevTargetZoom * (1f - TwoHandZoomMaxStepRatioPerFrame),
-                prevTargetZoom * (1f + TwoHandZoomMaxStepRatioPerFrame));
+                prevTargetZoom / maxZoomStepFactor,
+                prevTargetZoom * maxZoomStepFactor);
 
             stageController?.ApplyTwoHandOrbitAndZoom(
                 yawDelta,
@@ -2069,7 +2072,7 @@ public class AirWeavingController : MonoBehaviour
         {
             twoHandPanPrevMidpointXY = curMid;
             wasTwoHandPanReleaseFrozen = false;
-            stageController?.BeginTwoHandManipulationAnchor(avgPalmScale);
+            stageController?.BeginTwoHandManipulationAnchor(avgPalmScale, useFocusPointOrbit: false, focalMidpointCameraXY: curMid);
         }
         else
         {
@@ -2092,19 +2095,19 @@ public class AirWeavingController : MonoBehaviour
             {
                 wasTwoHandPanReleaseFrozen = false;
                 twoHandPanPrevMidpointXY = curMid;
-                stageController?.ReanchorTwoHandDepth(avgPalmScale);
+                stageController?.ReanchorTwoHandDepth(avgPalmScale, refreshOrbitFocus: false, focalMidpointCameraXY: curMid);
                 stageController?.SetTwoHandReleaseFreeze(false);
                 return;
             }
 
             stageController?.SetTwoHandReleaseFreeze(false);
 
-            // Skalakan pan X/Y terhadap kedalaman Z panggung aktual agar geseran 1:1 dengan tangan baik saat dekat (1.55m) maupun jauh (6.20m)
+            // Skalakan pan X/Y terhadap kedalaman Z observasi aktual agar geseran 1:1 dengan tangan baik saat dekat (1.15m) maupun jauh (9.50m)
             float stageDepthRatio = stageController != null
-                ? Mathf.Clamp(stageController.CurrentStageDepthZ / WorkbenchDepth, 0.40f, 1.65f)
+                ? Mathf.Clamp(stageController.CurrentStageDepthZ / WorkbenchDepth, 0.30f, 2.55f)
                 : 1f;
             Vector2 panDeltaXY = (curMid - twoHandPanPrevMidpointXY) * (TwoHandFreePanXYGain * stageDepthRatio);
-            float maxDeltaXY = TwoHandFreePanMaxDeltaXYPerFrame * Mathf.Clamp(stageDepthRatio, 0.60f, 1.65f);
+            float maxDeltaXY = TwoHandFreePanMaxDeltaXYPerFrame * Mathf.Clamp(stageDepthRatio, 0.50f, 2.55f);
             float panDeltaMag = panDeltaXY.magnitude;
             if (panDeltaMag > maxDeltaXY)
             {
@@ -2556,11 +2559,23 @@ public class AirWeavingController : MonoBehaviour
             return false;
         }
 
-        float zoomScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, 0.55f, 2.05f) : 1f;
+        float zoomScale;
+        Vector2 outputCenterRayXY;
+        if (outputNode != null)
+        {
+            zoomScale = ComputeNodeApparentRayScale(mainCam, outputNode.transform.position, 0.55f, 6.0f, out bool outBehind);
+            if (outBehind)
+            {
+                return false;
+            }
+            outputCenterRayXY = ProjectWorldToCameraRayPlane(mainCam, outputNode.transform.position) + new Vector2(0.03f * zoomScale, 0.10f * zoomScale);
+        }
+        else
+        {
+            zoomScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, 0.55f, 6.0f) : 1f;
+            outputCenterRayXY = new Vector2((OutputTerminalBaseX * aspectScale) + 0.03f, OutputTerminalY + 0.10f);
+        }
         Vector2 cursorRayXY = ProjectWorldToCameraRayPlane(mainCam, cursorWorldPos);
-        Vector2 outputCenterRayXY = outputNode != null
-            ? (ProjectWorldToCameraRayPlane(mainCam, outputNode.transform.position) + new Vector2(0.03f * zoomScale, 0.10f * zoomScale))
-            : new Vector2((OutputTerminalBaseX * aspectScale) + 0.03f, OutputTerminalY + 0.10f);
         return Vector2.Distance(cursorRayXY, outputCenterRayXY) <= (OutputZonePriorityRadius * zoomScale);
     }
 
@@ -2943,17 +2958,43 @@ public class AirWeavingController : MonoBehaviour
 
     private bool IsTipInsideInputSwitchZone(Camera mainCam, Vector3 tipWorldPos, float aspectScale)
     {
-        float zoomScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, 0.55f, 2.05f) : 1f;
         Vector2 tipRayXY = ProjectWorldToCameraRayPlane(mainCam, tipWorldPos);
-        Vector2 inputARayXY = inputANode != null
-            ? (ProjectWorldToCameraRayPlane(mainCam, inputANode.transform.position) - new Vector2(0.04f * zoomScale, 0f))
-            : new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputATerminalY);
-        Vector2 inputBRayXY = inputBNode != null
-            ? (ProjectWorldToCameraRayPlane(mainCam, inputBNode.transform.position) - new Vector2(0.04f * zoomScale, 0f))
-            : new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputBTerminalY);
-        float rearmRadius = InputAirTapRearmRadius * zoomScale;
-        return Vector2.Distance(tipRayXY, inputARayXY) <= rearmRadius
-               || Vector2.Distance(tipRayXY, inputBRayXY) <= rearmRadius;
+        float fallbackScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, 0.55f, 6.0f) : 1f;
+
+        bool insideA = false;
+        if (inputANode != null)
+        {
+            float scaleA = ComputeNodeApparentRayScale(mainCam, inputANode.transform.position, 0.55f, 6.0f, out bool behindA);
+            if (!behindA)
+            {
+                Vector2 inputARayXY = ProjectWorldToCameraRayPlane(mainCam, inputANode.transform.position) - new Vector2(0.04f * scaleA, 0f);
+                insideA = Vector2.Distance(tipRayXY, inputARayXY) <= (InputAirTapRearmRadius * scaleA);
+            }
+        }
+        else
+        {
+            Vector2 inputARayXY = new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputATerminalY);
+            insideA = Vector2.Distance(tipRayXY, inputARayXY) <= (InputAirTapRearmRadius * fallbackScale);
+        }
+
+        if (insideA)
+        {
+            return true;
+        }
+
+        if (inputBNode != null)
+        {
+            float scaleB = ComputeNodeApparentRayScale(mainCam, inputBNode.transform.position, 0.55f, 6.0f, out bool behindB);
+            if (!behindB)
+            {
+                Vector2 inputBRayXY = ProjectWorldToCameraRayPlane(mainCam, inputBNode.transform.position) - new Vector2(0.04f * scaleB, 0f);
+                return Vector2.Distance(tipRayXY, inputBRayXY) <= (InputAirTapRearmRadius * scaleB);
+            }
+            return false;
+        }
+
+        Vector2 fallbackInputBXY = new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputBTerminalY);
+        return Vector2.Distance(tipRayXY, fallbackInputBXY) <= (InputAirTapRearmRadius * fallbackScale);
     }
 
     /// <summary>
@@ -2984,27 +3025,50 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        float zoomScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, 0.55f, 2.05f) : 1f;
+        float fallbackScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, 0.55f, 6.0f) : 1f;
         Vector2 rawTipXY = detector.IndexTipLocalXY;
-        Vector2 inputAXY = inputANode != null
-            ? (ProjectWorldToCameraRayPlane(mainCam, inputANode.transform.position) - new Vector2(0.04f * zoomScale, 0f))
-            : new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputATerminalY);
-        Vector2 inputBXY = inputBNode != null
-            ? (ProjectWorldToCameraRayPlane(mainCam, inputBNode.transform.position) - new Vector2(0.04f * zoomScale, 0f))
-            : new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputBTerminalY);
 
-        float rawDistA = Vector2.Distance(rawTipXY, inputAXY);
-        float rawDistB = Vector2.Distance(rawTipXY, inputBXY);
-        float scaledRearmRadius = InputAirTapRearmRadius * zoomScale;
-        float scaledMagnetRadius = InputSwitchMagnetRadius * zoomScale;
-        float scaledTapRadius = InputAirTapRadius * zoomScale;
+        bool inputABehind = false;
+        float scaleA = fallbackScale;
+        Vector2 inputAXY;
+        if (inputANode != null)
+        {
+            scaleA = ComputeNodeApparentRayScale(mainCam, inputANode.transform.position, 0.55f, 6.0f, out inputABehind);
+            inputAXY = ProjectWorldToCameraRayPlane(mainCam, inputANode.transform.position) - new Vector2(0.04f * scaleA, 0f);
+        }
+        else
+        {
+            inputAXY = new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputATerminalY);
+        }
+
+        bool inputBBehind = false;
+        float scaleB = fallbackScale;
+        Vector2 inputBXY;
+        if (inputBNode != null)
+        {
+            scaleB = ComputeNodeApparentRayScale(mainCam, inputBNode.transform.position, 0.55f, 6.0f, out inputBBehind);
+            inputBXY = ProjectWorldToCameraRayPlane(mainCam, inputBNode.transform.position) - new Vector2(0.04f * scaleB, 0f);
+        }
+        else
+        {
+            inputBXY = new Vector2((InputTerminalBaseX * aspectScale) - 0.04f, InputBTerminalY);
+        }
+
+        float rawDistA = inputABehind ? float.MaxValue : Vector2.Distance(rawTipXY, inputAXY);
+        float rawDistB = inputBBehind ? float.MaxValue : Vector2.Distance(rawTipXY, inputBXY);
+        float scaledRearmRadiusA = InputAirTapRearmRadius * scaleA;
+        float scaledRearmRadiusB = InputAirTapRearmRadius * scaleB;
+        float scaledMagnetRadiusA = InputSwitchMagnetRadius * scaleA;
+        float scaledMagnetRadiusB = InputSwitchMagnetRadius * scaleB;
+        float scaledTapRadiusA = InputAirTapRadius * scaleA;
+        float scaledTapRadiusB = InputAirTapRadius * scaleB;
 
         // Logika Exit-to-Rearm WAJIB memakai posisi ujung jari mentah (rawDistA/rawDistB) agar tidak pernah nyangkut oleh magnet
-        if (inputARequiresExitRearmBySlot[handSlot] && rawDistA > scaledRearmRadius)
+        if (inputARequiresExitRearmBySlot[handSlot] && rawDistA > scaledRearmRadiusA)
         {
             inputARequiresExitRearmBySlot[handSlot] = false;
         }
-        if (inputBRequiresExitRearmBySlot[handSlot] && rawDistB > scaledRearmRadius)
+        if (inputBRequiresExitRearmBySlot[handSlot] && rawDistB > scaledRearmRadiusB)
         {
             inputBRequiresExitRearmBySlot[handSlot] = false;
         }
@@ -3031,17 +3095,18 @@ public class AirWeavingController : MonoBehaviour
 
         // Soft Magnetic Aim-Assist kalem menuju sakelar Input A/B terdekat
         Vector2 desiredMagnetOffset = Vector2.zero;
-        if (speedAllowed && tipSpeed < SoftMagnetMaxHandSpeed && scaledMagnetRadius > 0.0001f)
+        if (speedAllowed && tipSpeed < SoftMagnetMaxHandSpeed)
         {
-            bool canPullA = inputANode != null && rawDistA < scaledMagnetRadius;
-            bool canPullB = inputBNode != null && rawDistB < scaledMagnetRadius;
+            bool canPullA = inputANode != null && !inputABehind && rawDistA < scaledMagnetRadiusA;
+            bool canPullB = inputBNode != null && !inputBBehind && rawDistB < scaledMagnetRadiusB;
             if (canPullA || canPullB)
             {
-                bool pickA = canPullA && (!canPullB || rawDistA <= rawDistB);
+                bool pickA = canPullA && (!canPullB || (rawDistA / scaledMagnetRadiusA) <= (rawDistB / scaledMagnetRadiusB));
                 Vector2 targetXY = pickA ? inputAXY : inputBXY;
                 float d = pickA ? rawDistA : rawDistB;
+                float targetMagnetRadius = pickA ? scaledMagnetRadiusA : scaledMagnetRadiusB;
                 float slowFactor = Mathf.Clamp01(1f - (tipSpeed / SoftMagnetMaxHandSpeed));
-                float pull = InputSwitchMagnetMaxPull * slowFactor * (1f - (d / scaledMagnetRadius));
+                float pull = InputSwitchMagnetMaxPull * slowFactor * (1f - (d / Mathf.Max(0.0001f, targetMagnetRadius)));
                 desiredMagnetOffset = (targetXY - rawTipXY) * pull;
             }
         }
@@ -3050,11 +3115,11 @@ public class AirWeavingController : MonoBehaviour
         inputSwitchMagnetOffsetBySlot[handSlot] = Vector2.Lerp(inputSwitchMagnetOffsetBySlot[handSlot], desiredMagnetOffset, blendAlpha);
 
         Vector2 assistedTipXY = rawTipXY + inputSwitchMagnetOffsetBySlot[handSlot];
-        float distA = Vector2.Distance(assistedTipXY, inputAXY);
-        float distB = Vector2.Distance(assistedTipXY, inputBXY);
+        float distA = inputABehind ? float.MaxValue : Vector2.Distance(assistedTipXY, inputAXY);
+        float distB = inputBBehind ? float.MaxValue : Vector2.Distance(assistedTipXY, inputBXY);
 
-        bool inA = distA <= scaledTapRadius && inputANode != null;
-        bool inB = distB <= scaledTapRadius && inputBNode != null;
+        bool inA = !inputABehind && distA <= scaledTapRadiusA && inputANode != null;
+        bool inB = !inputBBehind && distB <= scaledTapRadiusB && inputBNode != null;
 
         if (inA && (!inB || distA <= distB))
         {
@@ -3219,18 +3284,41 @@ public class AirWeavingController : MonoBehaviour
         return -normX * ParkingMaxArcYawDeg;
     }
 
+    private float ComputeNodeApparentRayScale(Camera mainCam, Vector3 nodeWorldPos, float minScale, float maxScale, out bool isBehindCamera)
+    {
+        float stageZoom = stageController != null ? stageController.CurrentZoomScale : AirWeavingStageController.DefaultZoomScale;
+        if (mainCam == null)
+        {
+            isBehindCamera = false;
+            return Mathf.Clamp(stageZoom, minScale, maxScale);
+        }
+
+        float camZ = mainCam.transform.InverseTransformPoint(nodeWorldPos).z;
+        if (camZ <= 0.25f)
+        {
+            isBehindCamera = true;
+            return minScale;
+        }
+
+        isBehindCamera = false;
+        float apparent = stageZoom * (WorkbenchDepth / camZ);
+        return Mathf.Clamp(apparent, minScale, maxScale);
+    }
+
     private static float ComputeArenaBaseHoverHeightY(Vector2 stageLocalXZ, float aspectScale, int slotIndex = 2)
     {
-        float halfSpanX = Mathf.Max(0.35f, 0.76f * aspectScale);
+        float halfSpanX = Mathf.Max(0.35f, AssemblyMaxBaseX * aspectScale);
         float normX = Mathf.Clamp(stageLocalXZ.x / halfSpanX, -1.25f, 1.25f);
-        float normZ = Mathf.Clamp((stageLocalXZ.y + 0.16f) / 0.65f, -1.2f, 1.2f);
+        float centerZ = (AssemblyMinY + AssemblyMaxY) * 0.5f;
+        float halfSpanZ = Mathf.Max(0.35f, (AssemblyMaxY - AssemblyMinY) * 0.5f);
+        float normZ = Mathf.Clamp((stageLocalXZ.y - centerZ) / halfSpanZ, -1.2f, 1.2f);
         float slotStagger = (Mathf.Clamp(slotIndex, 0, 4) - 2) * 0.011f;
         return BaseHoverHeight + (ArenaArcHeightY * normX * normX) + (0.016f * normZ) + slotStagger;
     }
 
     private static float ComputeArenaArcYawDeg(float stageLocalX, float aspectScale)
     {
-        float halfSpanX = Mathf.Max(0.35f, 0.76f * aspectScale);
+        float halfSpanX = Mathf.Max(0.35f, AssemblyMaxBaseX * aspectScale);
         float normX = Mathf.Clamp(stageLocalX / halfSpanX, -1.25f, 1.25f);
         return -normX * ArenaMaxArcYawDeg;
     }
@@ -3287,13 +3375,15 @@ public class AirWeavingController : MonoBehaviour
                        * Quaternion.Euler(pitch, yaw, roll);
         }
 
-        // Pengaman nearClipPlane: cegah mesh terpotong lensa kamera saat deep zoom (2.85x) atau gerbang ditarik sangat dekat
+        // Pengaman nearClipPlane: hanya tahan node yang benar-benar menyerempet lensa di depan pandangan,
+        // agar node yang sah berada jauh di belakang kamera saat Focus-Point Orbit makro (10x–15x) tidak ditarik ke depan lensa.
         if (camT != null)
         {
-            Vector3 camToNode = worldPos - camT.position;
-            float forwardDepth = Vector3.Dot(camToNode, camT.forward);
+            Vector3 camLocal = camT.InverseTransformPoint(worldPos);
+            float forwardDepth = camLocal.z;
             float minSafeDepth = (cachedMainCamera != null ? cachedMainCamera.nearClipPlane : 0.15f) + MinNearClipSafeOffsetMeters;
-            if (forwardDepth < minSafeDepth)
+            float lateralSqr = (camLocal.x * camLocal.x) + (camLocal.y * camLocal.y);
+            if (forwardDepth > -0.35f && forwardDepth < minSafeDepth && lateralSqr < 2.25f)
             {
                 worldPos += camT.forward * (minSafeDepth - forwardDepth);
             }
@@ -3570,8 +3660,7 @@ public class AirWeavingController : MonoBehaviour
     private int FindNearestGateSlotIndex(Camera mainCam, Vector3 cursorWorldPos, float placedMaxRadius, float parkedMaxRadius)
     {
         int bestIdx = -1;
-        float bestDist = float.MaxValue;
-        float zoomScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, 0.55f, 2.05f) : 1f;
+        float bestNormDist = 1.0001f;
         Vector2 cursorRayXY = ProjectWorldToCameraRayPlane(mainCam, cursorWorldPos);
 
         for (int i = 0; i < gateSlots.Count; i++)
@@ -3582,13 +3671,23 @@ public class AirWeavingController : MonoBehaviour
                 continue;
             }
 
-            float limit = (slot.isPlacedOnWorkbench ? placedMaxRadius : parkedMaxRadius) * zoomScale;
+            float apparentScale = ComputeNodeApparentRayScale(mainCam, slot.node.transform.position, 0.55f, 8.0f, out bool isBehindCamera);
+            if (isBehindCamera)
+            {
+                continue;
+            }
+
+            float limit = (slot.isPlacedOnWorkbench ? placedMaxRadius : parkedMaxRadius) * apparentScale;
             Vector2 gateRayXY = ProjectWorldToCameraRayPlane(mainCam, slot.node.transform.position);
             float dist = Vector2.Distance(cursorRayXY, gateRayXY);
-            if (dist < limit && dist < bestDist)
+            if (dist < limit)
             {
-                bestDist = dist;
-                bestIdx = i;
+                float normDist = dist / Mathf.Max(0.001f, limit);
+                if (normDist < bestNormDist)
+                {
+                    bestNormDist = normDist;
+                    bestIdx = i;
+                }
             }
         }
 
@@ -3611,23 +3710,23 @@ public class AirWeavingController : MonoBehaviour
 
     private static Vector2 ClampDraggedGateLocalXY(Vector2 rawXY, float aspectScale)
     {
-        float minX = (InputTerminalBaseX - 0.18f) * aspectScale;
-        float maxX = (OutputTerminalBaseX + 0.18f) * aspectScale;
+        float minX = (InputTerminalBaseX - 0.36f) * aspectScale;
+        float maxX = (OutputTerminalBaseX + 0.36f) * aspectScale;
         return new Vector2(
             Mathf.Clamp(rawXY.x, minX, maxX),
-            Mathf.Clamp(rawXY.y, AssemblyMinY - 0.65f, ParkingRackY + 0.45f));
+            Mathf.Clamp(rawXY.y, AssemblyMinY - 0.90f, ParkingRackY + 0.65f));
     }
 
     /// <summary>
-    /// Mengecek apakah posisi gerbang yang dipegang sudah keluar dari batas visual kotak AssemblyZone
+    /// Mengecek apakah posisi gerbang yang dipegang sudah keluar dari batas visual kotak AssemblyZone 2x
     /// (sisi atas, bawah, kiri, maupun kanan).
     /// </summary>
     private static bool IsOutsideAssemblyZone(Vector2 localXY, float aspectScale)
     {
-        float leftX = (AssemblyMinBaseX - 0.08f) * aspectScale;
-        float rightX = (AssemblyMaxBaseX + 0.08f) * aspectScale;
-        float botY = AssemblyMinY - 0.06f;
-        float topY = AssemblyMaxY + 0.06f;
+        float leftX = (AssemblyMinBaseX - 0.16f) * aspectScale;
+        float rightX = (AssemblyMaxBaseX + 0.16f) * aspectScale;
+        float botY = AssemblyMinY - 0.14f;
+        float topY = AssemblyMaxY + 0.14f;
         return localXY.x < leftX || localXY.x > rightX || localXY.y < botY || localXY.y > topY;
     }
 
@@ -6705,10 +6804,10 @@ public class AirWeavingController : MonoBehaviour
         Vector3 camForward = camT.forward;
         Vector3 camUp = camT.up;
         Quaternion camRot = camT.rotation;
-        float stageZoom = stageController != null ? stageController.CurrentZoomScale : 1f;
-        float gentleZoom = Mathf.Lerp(1f, stageZoom, 0.22f);
+        float stageZoom = stageController != null ? stageController.CurrentZoomScale : AirWeavingStageController.DefaultZoomScale;
+        float gentleZoom = Mathf.Clamp(Mathf.Lerp(1f, Mathf.Clamp(stageZoom, 0.35f, 3.50f), 0.22f), 0.72f, 1.55f);
 
-        // 1. Distance-Compensated Scale Clamping untuk semua label 3D (KARTU, LAB, AND/OR/XOR/NAND/NOT) di seluruh rentang zoom 0.42x..2.85x
+        // 1. Distance-Compensated Scale Clamping untuk semua label 3D (KARTU, LAB, AND/OR/XOR/NAND/NOT) di seluruh rentang zoom 0.18x..15.0x
         for (int i = 0; i < savedNodeLabelStyles.Count; i++)
         {
             SavedNodeLabelStyle s = savedNodeLabelStyles[i];
@@ -6720,16 +6819,16 @@ public class AirWeavingController : MonoBehaviour
             Transform labelT = s.node.statusLabel.transform;
             labelT.rotation = camRot;
 
-            float camDepth = Mathf.Max(0.75f, Vector3.Dot(labelT.position - camPos, camForward));
-            float distRatio = Mathf.Clamp(camDepth / WorkbenchDepth, 0.22f, 1.48f);
+            float camDepth = Mathf.Max(0.65f, Vector3.Dot(labelT.position - camPos, camForward));
+            float distRatio = Mathf.Clamp(camDepth / WorkbenchDepth, 0.18f, 2.10f);
 
             bool isLogicGate = s.node.nodeType != NodeType.InputSource && s.node.nodeType != NodeType.OutputActuator;
             bool isParkedGate = isLogicGate && !s.node.isTracked;
             float baseWorldLabelScale = isParkedGate ? 0.29f : (isLogicGate ? 0.39f : 0.41f);
             float desiredWorldLabelScale = baseWorldLabelScale * distRatio * gentleZoom;
 
-            float parentScale = Mathf.Max(0.14f, s.node.transform.localScale.x);
-            float clampedLocalScale = Mathf.Clamp(desiredWorldLabelScale / parentScale, 0.13f, 1.08f);
+            float parentScale = Mathf.Max(0.08f, s.node.transform.localScale.x);
+            float clampedLocalScale = Mathf.Clamp(desiredWorldLabelScale / parentScale, 0.025f, 1.35f);
             labelT.localScale = Vector3.one * clampedLocalScale;
         }
 
@@ -6751,16 +6850,16 @@ public class AirWeavingController : MonoBehaviour
                     ? stageRoot.TransformPoint(new Vector3((OutputTerminalBaseX + 0.14f) * aspectScale, 0.075f, OutputTerminalY - 0.15f))
                     : outputNode.transform.position;
 
-                float podCamDepth = Mathf.Max(0.85f, Vector3.Dot(basePodWorld - camPos, camForward));
-                float podDistRatio = Mathf.Clamp(podCamDepth / WorkbenchDepth, 0.24f, 1.42f);
+                float podCamDepth = Mathf.Max(0.75f, Vector3.Dot(basePodWorld - camPos, camForward));
+                float podDistRatio = Mathf.Clamp(podCamDepth / WorkbenchDepth, 0.20f, 1.95f);
 
                 Vector3 finalPodWorld = basePodWorld - (camUp * (0.100f * podDistRatio)) - (camForward * 0.24f);
                 cachedOutputTruthPodRootTransform.position = finalPodWorld;
                 cachedOutputTruthPodRootTransform.rotation = Quaternion.LookRotation(camUp, -camForward);
 
                 float desiredPodWorldScale = 0.52f * podDistRatio * gentleZoom;
-                float outParentScale = Mathf.Max(0.16f, outputNode.transform.localScale.x);
-                float clampedPodLocalScale = Mathf.Clamp(desiredPodWorldScale / outParentScale, 0.22f, 1.05f);
+                float outParentScale = Mathf.Max(0.08f, outputNode.transform.localScale.x);
+                float clampedPodLocalScale = Mathf.Clamp(desiredPodWorldScale / outParentScale, 0.035f, 1.35f);
                 cachedOutputTruthPodRootTransform.localScale = Vector3.one * clampedPodLocalScale;
 
                 lastTruthPodWorldAnchor = finalPodWorld;

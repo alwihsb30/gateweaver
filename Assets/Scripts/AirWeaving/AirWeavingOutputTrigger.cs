@@ -232,8 +232,12 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             visualRootObj.SetActive(true);
         }
 
-        float zoomClamp = Mathf.Clamp(stageZoomScale, 0.45f, 2.50f);
-        float hitRadiusScale = Mathf.Clamp(zoomClamp, 0.55f, 2.05f);
+        float zoomClamp = Mathf.Clamp(stageZoomScale, AirWeavingStageController.MinZoomScale, AirWeavingStageController.MaxZoomScale);
+        float outputCamZ = mainCam.transform.InverseTransformPoint(outputWorldPos).z;
+        bool outputBehindCamera = outputCamZ <= 0.25f;
+        float hitRadiusScale = outputBehindCamera
+            ? 0.55f
+            : Mathf.Clamp(zoomClamp * (ReferenceCameraDepth / Mathf.Max(0.35f, outputCamZ)), 0.55f, 6.0f);
 
         // Edge detection pasca-Auto-Win: hanya aktif jika rangkaian live benar-benar lulus 4/4 (0 sel merah & kuota valid)
         bool effectiveReadyForNext = isReadyForNextLevel
@@ -270,7 +274,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
 
         // 2. Nonaktifkan jalan pintas hold-to-verify: tahan-kepal hanya aktif bila level sudah LULUS (untuk lanjut level Zero-Touch)
         bool allowHoldAction = effectiveReadyForNext || (EnableHoldToVerifyShortcut && isCircuitComplete);
-        bool insideZone = allowHoldAction && isHandDetected && !blockedByMutualExclusion && distToOutput <= (OutputInteractRadius * hitRadiusScale);
+        bool insideZone = allowHoldAction && !outputBehindCamera && isHandDetected && !blockedByMutualExclusion && distToOutput <= (OutputInteractRadius * hitRadiusScale);
 
         if (insideZone && isFistActive && !requiresRearm)
         {
@@ -354,10 +358,11 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         Vector3 camUp = camT.up;
         Vector3 camForward = camT.forward;
 
-        // Distance-compensated scale clamping agar cincin & lencana Output tidak membengkak saat Output di-orbit ke sisi depan
-        float camDepth = Mathf.Max(1.40f, Vector3.Dot(outputWorldPos - camT.position, camForward));
-        float distFactor = Mathf.Clamp(camDepth / ReferenceCameraDepth, 0.54f, 1.12f);
-        float effectiveHaloScale = Mathf.Clamp(zoomScale * Mathf.Lerp(1f, distFactor, 0.72f), 0.56f, 1.08f);
+        // Halo 3D sejajar skala fisik Output (0.18x..15.0x) agar cincin selalu pas mengitari dudukan Output tanpa mengecil/membengkak
+        float camDepth = Mathf.Max(0.85f, Vector3.Dot(outputWorldPos - camT.position, camForward));
+        float distFactor = Mathf.Clamp(camDepth / ReferenceCameraDepth, 0.32f, 1.65f);
+        float effectiveHaloScale = Mathf.Clamp(zoomScale, 0.22f, AirWeavingStageController.MaxZoomScale);
+        float haloWidthScale = Mathf.Clamp(effectiveHaloScale, 0.72f, 2.60f);
         float scaledHaloRadius = HaloRadius * effectiveHaloScale;
 
         // Halo 3D sejajar bidang meja XZ mengitari dudukan Output secara spasial (bukan stiker 2D di layar)
@@ -372,25 +377,25 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 5.0f));
             float innerR = scaledHaloRadius + (0.010f * pulse * effectiveHaloScale);
             float outerR = scaledHaloRadius + ((0.024f + (0.010f * pulse)) * effectiveHaloScale);
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, innerR, WinHaloGreenColor, 0.0080f);
-            DrawFullCircle(winOuterRingRenderer, winOuterRingPoints, haloCenter, ringAxisA, ringAxisB, outerR, WinHaloOuterColor, 0.0052f);
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, innerR, WinHaloGreenColor, 0.0080f * haloWidthScale);
+            DrawFullCircle(winOuterRingRenderer, winOuterRingPoints, haloCenter, ringAxisA, ringAxisB, outerR, WinHaloOuterColor, 0.0052f * haloWidthScale);
         }
         else if (guidanceState == OutputDebugGuidanceState.ReduceGates)
         {
             float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 6.5f));
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.008f * pulse * effectiveHaloScale), OverQuotaHaloRedColor, 0.0080f);
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.008f * pulse * effectiveHaloScale), OverQuotaHaloRedColor, 0.0080f * haloWidthScale);
             SetRingEnabled(winOuterRingRenderer, false);
         }
         else if (guidanceState == OutputDebugGuidanceState.CheckRedCells)
         {
             float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 5.5f));
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.007f * pulse * effectiveHaloScale), CheckRedHaloOrangeColor, 0.0072f);
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.007f * pulse * effectiveHaloScale), CheckRedHaloOrangeColor, 0.0072f * haloWidthScale);
             SetRingEnabled(winOuterRingRenderer, false);
         }
         else if (guidanceState == OutputDebugGuidanceState.TestSwitches)
         {
             float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 2.6f));
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.005f * pulse * effectiveHaloScale), TestHaloCyanColor, 0.0062f);
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.005f * pulse * effectiveHaloScale), TestHaloCyanColor, 0.0062f * haloWidthScale);
             SetRingEnabled(winOuterRingRenderer, false);
         }
         else
@@ -440,9 +445,10 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             Vector3 podAnchor = truthPodWorldAnchor.sqrMagnitude > 0.001f
                 ? truthPodWorldAnchor
                 : (outputWorldPos - (camUp * (0.20f * distFactor)) - (camForward * 0.24f));
-            float podDepth = Mathf.Max(1.30f, Vector3.Dot(podAnchor - camT.position, camForward));
-            float badgeDistScale = Mathf.Clamp(podDepth / ReferenceCameraDepth, 0.52f, 1.08f) * Mathf.Lerp(1f, zoomScale, 0.25f);
-            badgeDistScale = Mathf.Clamp(badgeDistScale, 0.52f, 0.94f);
+            float podDepth = Mathf.Max(0.85f, Vector3.Dot(podAnchor - camT.position, camForward));
+            float gentleBadgeZoom = Mathf.Lerp(1f, Mathf.Clamp(zoomScale, 0.35f, 3.50f), 0.22f);
+            float badgeDistScale = Mathf.Clamp(podDepth / ReferenceCameraDepth, 0.24f, 1.50f) * gentleBadgeZoom;
+            badgeDistScale = Mathf.Clamp(badgeDistScale, 0.44f, 1.08f);
 
             Vector3 badgePos = podAnchor + (camUp * (BadgeBelowPodOffset * badgeDistScale)) - (camForward * 0.015f);
             badgeRootObj.transform.position = badgePos;

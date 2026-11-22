@@ -136,6 +136,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         public Vector3 handleWorldPos;
         public Vector3 physicalWorldPos;
         public Vector3 socketAxisWorld;
+        public float apparentScale;
+        public bool isInteractable;
         public bool isConnected;
         public bool connectedSignalHigh;
     }
@@ -252,6 +254,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private GateNode latchedTargetNode = null;
     private int latchedTargetSlot = 0;
     private Vector2 latchedTargetLocalXY = Vector2.zero;
+    private float latchedTargetApparentScale = 1f;
     private float lastSnapUnscaledTime = -10f;
     private GateNode lockedSnapNode = null;
     private bool lockedSnapIsOutput = false;
@@ -285,6 +288,31 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         aimAssistPullStrength = 0f;
     }
 
+    private static float ComputeEffectiveStageZoom(float stageZoomScale)
+    {
+        return Mathf.Clamp(stageZoomScale, AirWeavingStageController.MinZoomScale, AirWeavingStageController.MaxZoomScale);
+    }
+
+    private static float ComputeSocketVisualScale(float effectiveZoom)
+    {
+        if (effectiveZoom >= 1.0f)
+        {
+            return effectiveZoom;
+        }
+        float t = Mathf.Clamp01((effectiveZoom - AirWeavingStageController.MinZoomScale) / (1.0f - AirWeavingStageController.MinZoomScale));
+        return Mathf.Lerp(0.26f, 1.0f, t);
+    }
+
+    private static float ComputeTubeVisualScale(float effectiveZoom)
+    {
+        if (effectiveZoom >= 1.0f)
+        {
+            return effectiveZoom;
+        }
+        float t = Mathf.Clamp01((effectiveZoom - AirWeavingStageController.MinZoomScale) / (1.0f - AirWeavingStageController.MinZoomScale));
+        return Mathf.Lerp(0.32f, 1.0f, t);
+    }
+
     /// <summary>
     /// Mengembalikan jarak ternormalisasi (0..1 di dalam hit radius port, &lt;1.6 dalam zona magnet, atau float.MaxValue)
     /// terhadap port aktif terdekat untuk arbitrer ambidextrous 2 tangan. Zero-GC.
@@ -296,15 +324,20 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             return float.MaxValue;
         }
 
-        float zoomClamp = Mathf.Clamp(stageZoomScale, 0.45f, 2.50f);
-        float hitRadiusScale = Mathf.Clamp(zoomClamp, 0.55f, 2.05f);
-        float magnetLimit = HoverMagnetRadius * hitRadiusScale;
+        float fallbackScale = Mathf.Clamp(stageZoomScale, 0.55f, 6.0f);
         float bestNorm = float.MaxValue;
 
         for (int i = 0; i < activePorts.Count; i++)
         {
-            float hitRadius = (activePorts[i].isOutput ? PortOutHitRadius : PortInHitRadius) * hitRadiusScale;
-            float dist = Vector2.Distance(cursorLocalXY, activePorts[i].handleLocalXY);
+            ActivePortEntry p = activePorts[i];
+            if (!p.isInteractable)
+            {
+                continue;
+            }
+            float portScale = p.apparentScale > 0.01f ? p.apparentScale : fallbackScale;
+            float hitRadius = (p.isOutput ? PortOutHitRadius : PortInHitRadius) * portScale;
+            float magnetLimit = HoverMagnetRadius * portScale;
+            float dist = Vector2.Distance(cursorLocalXY, p.handleLocalXY);
             if (dist <= Mathf.Max(hitRadius, magnetLimit))
             {
                 float norm = dist / Mathf.Max(0.001f, hitRadius);
@@ -624,22 +657,22 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
 
         Transform camT = mainCam.transform;
-        float zoomClamp = Mathf.Clamp(stageZoomScale, 0.45f, 2.50f);
-        float hitRadiusScale = Mathf.Clamp(zoomClamp, 0.55f, 2.05f);
+        float effectiveZoom = ComputeEffectiveStageZoom(stageZoomScale);
+        float fallbackHitRadiusScale = Mathf.Clamp(effectiveZoom, 0.55f, 6.0f);
 
         // 1. Bersihkan edge yang node-nya sudah tidak aktif (defensif)
         PruneUntrackedWires(circuitManager);
 
         // 2. Bangun daftar soket port 3D proyektif mengikuti transform HologramStageRoot
         activePorts.Clear();
-        RegisterNodePorts(camT, stageRoot, inputANode, workbenchDepth);
-        RegisterNodePorts(camT, stageRoot, inputBNode, workbenchDepth);
-        RegisterNodePorts(camT, stageRoot, outputNode, workbenchDepth);
+        RegisterNodePorts(camT, stageRoot, inputANode, workbenchDepth, effectiveZoom);
+        RegisterNodePorts(camT, stageRoot, inputBNode, workbenchDepth, effectiveZoom);
+        RegisterNodePorts(camT, stageRoot, outputNode, workbenchDepth, effectiveZoom);
         if (activePlacedGates != null)
         {
             for (int i = 0; i < activePlacedGates.Count; i++)
             {
-                RegisterNodePorts(camT, stageRoot, activePlacedGates[i], workbenchDepth);
+                RegisterNodePorts(camT, stageRoot, activePlacedGates[i], workbenchDepth, effectiveZoom);
             }
         }
 
@@ -658,7 +691,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             pinchSpeedUnitsPerSec,
             isHandDetected && !hardBlocked,
             circuitManager,
-            hitRadiusScale,
+            fallbackHitRadiusScale,
             dt);
 
         Vector2 assistedLivePinchXY = projectedLivePinchXY + currentMagnetOffsetLocalXY;
@@ -691,7 +724,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         {
             hoveredPortIndex = -1;
             int prevLockedIdx = FindActivePortIndex(lockedSnapNode, lockedSnapIsOutput, lockedSnapSlot);
-            if (prevLockedIdx >= 0 && !IsCompatibleDragTarget(activePorts[prevLockedIdx], circuitManager))
+            if (prevLockedIdx >= 0 && (!activePorts[prevLockedIdx].isInteractable || !IsCompatibleDragTarget(activePorts[prevLockedIdx], circuitManager)))
             {
                 prevLockedIdx = -1;
             }
@@ -708,11 +741,12 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 latchedTargetNode = frozen.node;
                 latchedTargetSlot = frozen.slotIndex;
                 latchedTargetLocalXY = frozen.handleLocalXY;
+                latchedTargetApparentScale = frozen.apparentScale > 0.01f ? frozen.apparentScale : fallbackHitRadiusScale;
                 lastSnapUnscaledTime = Time.unscaledTime;
             }
             else if (isHandDetected)
             {
-                snappedTargetPortIndex = FindNearestCompatibleTargetPort(assistedLivePinchXY, prevLockedIdx, circuitManager, hitRadiusScale);
+                snappedTargetPortIndex = FindNearestCompatibleTargetPort(assistedLivePinchXY, prevLockedIdx, circuitManager, fallbackHitRadiusScale);
                 if (snappedTargetPortIndex >= 0 && snappedTargetPortIndex < activePorts.Count)
                 {
                     ActivePortEntry snapped = activePorts[snappedTargetPortIndex];
@@ -722,6 +756,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                     latchedTargetNode = snapped.node;
                     latchedTargetSlot = snapped.slotIndex;
                     latchedTargetLocalXY = snapped.handleLocalXY;
+                    latchedTargetApparentScale = snapped.apparentScale > 0.01f ? snapped.apparentScale : fallbackHitRadiusScale;
                     lastSnapUnscaledTime = Time.unscaledTime;
                 }
                 else
@@ -743,7 +778,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             isHoveringInvalidTargetDuringDrag = EvaluateDragInvalidVisualState(
                 isHandDetected,
                 assistedLivePinchXY,
-                hitRadiusScale,
+                fallbackHitRadiusScale,
                 circuitManager);
 
             bool endingDragThisFrame = pinchJustEnded || !isPinchActive;
@@ -779,7 +814,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
             else
             {
-                CompleteOrCancelCableDrag(circuitManager, isHandDetected, assistedLivePinchXY, hitRadiusScale);
+                CompleteOrCancelCableDrag(circuitManager, isHandDetected, assistedLivePinchXY, fallbackHitRadiusScale);
             }
         }
         else if (!isHandDetected)
@@ -792,7 +827,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         {
             isHoveringInvalidTargetDuringDrag = false;
             Vector2 queryXY = (pinchJustStarted && allowBeginDrag) ? assistedStabilizedPinchXY : assistedLivePinchXY;
-            hoveredPortIndex = FindNearestPortIndex(queryXY, hitRadiusScale);
+            hoveredPortIndex = FindNearestPortIndex(queryXY, fallbackHitRadiusScale);
 
             if (pinchJustStarted && allowBeginDrag && hoveredPortIndex >= 0 && hoveredPortIndex < activePorts.Count)
             {
@@ -800,7 +835,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
             else if (hasSecondaryHoverHand)
             {
-                secondaryHoveredPortIndex = FindNearestPortIndex(secondaryPinchLocalXY, hitRadiusScale);
+                secondaryHoveredPortIndex = FindNearestPortIndex(secondaryPinchLocalXY, fallbackHitRadiusScale);
             }
         }
 
@@ -839,9 +874,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         Vector3 dragRenderTipWorld = hasSmoothedLiveDragTip
             ? smoothedLiveDragTipWorld
             : (hasLastValidPinchWorld ? lastValidPinchWorldPos : assistedPinchWorldPos);
-        RenderPortSockets(camT, stageRoot, circuitManager, (isHandDetected || hasSecondaryHoverHand) && !hardBlocked, zoomClamp);
-        RenderLiveDragTube(camT, stageRoot, zoomClamp, dragRenderTipWorld);
-        RenderAllUniformTubeCables(camT, stageRoot, zoomClamp);
+        RenderPortSockets(camT, stageRoot, circuitManager, (isHandDetected || hasSecondaryHoverHand) && !hardBlocked, effectiveZoom);
+        RenderLiveDragTube(camT, stageRoot, effectiveZoom, dragRenderTipWorld);
+        RenderAllUniformTubeCables(camT, stageRoot, effectiveZoom);
     }
 
     /// <summary>
@@ -868,25 +903,25 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
 
         Transform camT = mainCam.transform;
-        float zoomClamp = Mathf.Clamp(stageZoomScale, 0.45f, 2.50f);
+        float effectiveZoom = ComputeEffectiveStageZoom(stageZoomScale);
         activePorts.Clear();
-        RegisterNodePorts(camT, stageRoot, inputANode, workbenchDepth);
-        RegisterNodePorts(camT, stageRoot, inputBNode, workbenchDepth);
-        RegisterNodePorts(camT, stageRoot, outputNode, workbenchDepth);
+        RegisterNodePorts(camT, stageRoot, inputANode, workbenchDepth, effectiveZoom);
+        RegisterNodePorts(camT, stageRoot, inputBNode, workbenchDepth, effectiveZoom);
+        RegisterNodePorts(camT, stageRoot, outputNode, workbenchDepth, effectiveZoom);
         if (activePlacedGates != null)
         {
             for (int i = 0; i < activePlacedGates.Count; i++)
             {
-                RegisterNodePorts(camT, stageRoot, activePlacedGates[i], workbenchDepth);
+                RegisterNodePorts(camT, stageRoot, activePlacedGates[i], workbenchDepth, effectiveZoom);
             }
         }
 
         Vector3 dragRenderTipWorld = hasSmoothedLiveDragTip
             ? smoothedLiveDragTipWorld
             : (hasLastValidPinchWorld ? lastValidPinchWorldPos : pinchWorldPos);
-        RenderPortSockets(camT, stageRoot, circuitManager, allowHoverHighlight, zoomClamp);
-        RenderLiveDragTube(camT, stageRoot, zoomClamp, dragRenderTipWorld);
-        RenderAllUniformTubeCables(camT, stageRoot, zoomClamp);
+        RenderPortSockets(camT, stageRoot, circuitManager, allowHoverHighlight, effectiveZoom);
+        RenderLiveDragTube(camT, stageRoot, effectiveZoom, dragRenderTipWorld);
+        RenderAllUniformTubeCables(camT, stageRoot, effectiveZoom);
     }
 
     private void BeginCableDragFromPort(ActivePortEntry port, CircuitManager circuitManager)
@@ -978,7 +1013,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
         else if (latchedTargetNode != null
                  && (Time.unscaledTime - lastSnapUnscaledTime) <= SnapReleaseLatchSeconds
-                 && (!isHandDetected || Vector2.Distance(releaseCursorLocalXY, latchedTargetLocalXY) <= (SnapReleaseMaxEscapeDist * hitRadiusScale)))
+                 && (!isHandDetected || Vector2.Distance(releaseCursorLocalXY, latchedTargetLocalXY) <= (SnapReleaseMaxEscapeDist * Mathf.Max(0.55f, latchedTargetApparentScale))))
         {
             resolvedTargetNode = latchedTargetNode;
             resolvedTargetSlot = latchedTargetSlot;
@@ -1117,7 +1152,24 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         return new Vector2(camLocal.x * scale, camLocal.y * scale);
     }
 
-    private void RegisterNodePorts(Transform camT, Transform stageRoot, GateNode node, float workbenchDepth)
+    private static float ComputePortApparentScale(
+        Transform camT,
+        Vector3 handleWorld,
+        float workbenchDepth,
+        float stageZoomScale,
+        out bool isInteractable)
+    {
+        float handleCamZ = camT.InverseTransformPoint(handleWorld).z;
+        if (handleCamZ <= 0.25f)
+        {
+            isInteractable = false;
+            return 0.55f;
+        }
+        isInteractable = true;
+        return Mathf.Clamp(stageZoomScale * (workbenchDepth / handleCamZ), 0.55f, 6.0f);
+    }
+
+    private void RegisterNodePorts(Transform camT, Transform stageRoot, GateNode node, float workbenchDepth, float stageZoomScale)
     {
         if (node == null || !node.isTracked || activePorts.Count >= MaxPortVisuals)
         {
@@ -1145,6 +1197,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 ? stageRoot.TransformPoint(handleLocal3D)
                 : camT.TransformPoint(handleLocal3D);
             Vector2 handleRayXY = ProjectWorldToCameraRayPlane(camT, handleWorld, workbenchDepth);
+            float apparentOutScale = ComputePortApparentScale(camT, handleWorld, workbenchDepth, stageZoomScale, out bool outInteractable);
 
             activePorts.Add(new ActivePortEntry
             {
@@ -1156,6 +1209,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 handleWorldPos = handleWorld,
                 physicalWorldPos = node.GetOutputPortWorldPosition(),
                 socketAxisWorld = stageRight,
+                apparentScale = apparentOutScale,
+                isInteractable = outInteractable,
                 isConnected = HasOutgoingWire(node),
                 connectedSignalHigh = node.currentOutputValue
             });
@@ -1175,6 +1230,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 ? stageRoot.TransformPoint(handleLocal3D)
                 : camT.TransformPoint(handleLocal3D);
             Vector2 handleRayXY = ProjectWorldToCameraRayPlane(camT, handleWorld, workbenchDepth);
+            float apparentIn0Scale = ComputePortApparentScale(camT, handleWorld, workbenchDepth, stageZoomScale, out bool in0Interactable);
             int wireIdx0 = FindWireByTargetSlot(node, 0);
             bool conn0 = wireIdx0 >= 0;
             bool sig0 = conn0 && wires[wireIdx0].source != null && wires[wireIdx0].source.currentOutputValue;
@@ -1189,6 +1245,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 handleWorldPos = handleWorld,
                 physicalWorldPos = node.GetInputPortWorldPosition(0),
                 socketAxisWorld = -stageRight,
+                apparentScale = apparentIn0Scale,
+                isInteractable = in0Interactable,
                 isConnected = conn0,
                 connectedSignalHigh = sig0
             });
@@ -1206,6 +1264,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 ? stageRoot.TransformPoint(handleLocal3D)
                 : camT.TransformPoint(handleLocal3D);
             Vector2 handleRayXY = ProjectWorldToCameraRayPlane(camT, handleWorld, workbenchDepth);
+            float apparentIn1Scale = ComputePortApparentScale(camT, handleWorld, workbenchDepth, stageZoomScale, out bool in1Interactable);
             int wireIdx1 = FindWireByTargetSlot(node, 1);
             bool conn1 = wireIdx1 >= 0;
             bool sig1 = conn1 && wires[wireIdx1].source != null && wires[wireIdx1].source.currentOutputValue;
@@ -1220,6 +1279,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 handleWorldPos = handleWorld,
                 physicalWorldPos = node.GetInputPortWorldPosition(1),
                 socketAxisWorld = -stageRight,
+                apparentScale = apparentIn1Scale,
+                isInteractable = in1Interactable,
                 isConnected = conn1,
                 connectedSignalHigh = sig1
             });
@@ -1294,31 +1355,41 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         if (canPull && cursorSpeedUnitsPerSec < MagnetMaxHandSpeed && activePorts.Count > 0)
         {
             float slowFactor = Mathf.Clamp01(1f - (cursorSpeedUnitsPerSec / MagnetMaxHandSpeed));
-            float radius = (isDraggingCable ? DragTargetMagnetRadius : HoverMagnetRadius) * hitRadiusScale;
-            float bestDist = radius;
+            float baseRadius = isDraggingCable ? DragTargetMagnetRadius : HoverMagnetRadius;
+            float bestNormDist = 1.0f;
             Vector2 bestTargetXY = Vector2.zero;
             int bestTargetIdx = -1;
 
             for (int i = 0; i < activePorts.Count; i++)
             {
                 ActivePortEntry candidate = activePorts[i];
+                if (!candidate.isInteractable)
+                {
+                    continue;
+                }
                 if (isDraggingCable && !IsCompatibleDragTarget(candidate, circuitManager))
                 {
                     continue;
                 }
 
+                float portScale = candidate.apparentScale > 0.01f ? candidate.apparentScale : hitRadiusScale;
+                float radius = baseRadius * portScale;
                 float d = Vector2.Distance(rawCursorXY, candidate.handleLocalXY);
-                if (d < bestDist)
+                if (radius > 0.0001f && d < radius)
                 {
-                    bestDist = d;
-                    bestTargetXY = candidate.handleLocalXY;
-                    bestTargetIdx = i;
+                    float normDist = d / radius;
+                    if (normDist < bestNormDist)
+                    {
+                        bestNormDist = normDist;
+                        bestTargetXY = candidate.handleLocalXY;
+                        bestTargetIdx = i;
+                    }
                 }
             }
 
-            if (bestTargetIdx >= 0 && radius > 0.0001f)
+            if (bestTargetIdx >= 0)
             {
-                float prox = 1f - (bestDist / radius);
+                float prox = 1f - bestNormDist;
                 float pull = MagnetMaxPull * slowFactor * prox;
                 desiredOffset = (bestTargetXY - rawCursorXY) * pull;
                 aimAssistTargetPortIndex = bestTargetIdx;
@@ -1355,8 +1426,14 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
 
         for (int i = 0; i < activePorts.Count; i++)
         {
-            float radius = (activePorts[i].isOutput ? PortOutHitRadius : PortInHitRadius) * hitRadiusScale;
-            float dist = Vector2.Distance(cursorXY, activePorts[i].handleLocalXY);
+            ActivePortEntry p = activePorts[i];
+            if (!p.isInteractable)
+            {
+                continue;
+            }
+            float portScale = p.apparentScale > 0.01f ? p.apparentScale : hitRadiusScale;
+            float radius = (p.isOutput ? PortOutHitRadius : PortInHitRadius) * portScale;
+            float dist = Vector2.Distance(cursorXY, p.handleLocalXY);
             if (dist <= radius)
             {
                 float normDist = dist / radius;
@@ -1376,19 +1453,18 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         bool hasValidLocked = false;
         float lockedEffDist = float.MaxValue;
         float lockedHandleDist = float.MaxValue;
-        float snapRadius = SnapMagnetRadius * hitRadiusScale;
-        float gateAutoRadius = GateAutoSnapRadius * hitRadiusScale;
-        float unlockRadius = SnapHysteresisUnlockRadius * hitRadiusScale;
 
         if (currentLockedPortIdx >= 0 && currentLockedPortIdx < activePorts.Count)
         {
             ActivePortEntry lockedEntry = activePorts[currentLockedPortIdx];
-            if (IsCompatibleDragTarget(lockedEntry, circuitManager))
+            if (lockedEntry.isInteractable && IsCompatibleDragTarget(lockedEntry, circuitManager))
             {
+                float lockedScale = lockedEntry.apparentScale > 0.01f ? lockedEntry.apparentScale : hitRadiusScale;
+                float unlockRadius = SnapHysteresisUnlockRadius * lockedScale;
                 lockedHandleDist = Vector2.Distance(cursorXY, lockedEntry.handleLocalXY);
                 if (dragFromOutput)
                 {
-                    Vector2 lockedSmartCenter = new Vector2(lockedEntry.nodeLocalXY.x - (0.08f * hitRadiusScale), lockedEntry.nodeLocalXY.y + (0.02f * hitRadiusScale));
+                    Vector2 lockedSmartCenter = new Vector2(lockedEntry.nodeLocalXY.x - (0.08f * lockedScale), lockedEntry.nodeLocalXY.y + (0.02f * lockedScale));
                     float lockedGateDist = Vector2.Distance(cursorXY, lockedSmartCenter);
                     lockedEffDist = Mathf.Min(lockedHandleDist, lockedGateDist);
                 }
@@ -1415,15 +1491,19 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
 
             ActivePortEntry candidate = activePorts[i];
-            if (!IsCompatibleDragTarget(candidate, circuitManager))
+            if (!candidate.isInteractable || !IsCompatibleDragTarget(candidate, circuitManager))
             {
                 continue;
             }
 
+            float portScale = candidate.apparentScale > 0.01f ? candidate.apparentScale : hitRadiusScale;
+            float snapRadius = SnapMagnetRadius * portScale;
+            float gateAutoRadius = GateAutoSnapRadius * portScale;
+
             if (dragFromOutput)
             {
                 float distToHandle = Vector2.Distance(cursorXY, candidate.handleLocalXY);
-                Vector2 gateSmartCenter = new Vector2(candidate.nodeLocalXY.x - (0.08f * hitRadiusScale), candidate.nodeLocalXY.y + (0.02f * hitRadiusScale));
+                Vector2 gateSmartCenter = new Vector2(candidate.nodeLocalXY.x - (0.08f * portScale), candidate.nodeLocalXY.y + (0.02f * portScale));
                 float distToGateZone = Vector2.Distance(cursorXY, gateSmartCenter);
 
                 bool withinHandle = distToHandle <= snapRadius;
@@ -1594,7 +1674,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         Vector3 tableUp = stageRoot != null ? stageRoot.up : camT.up;
         float timeNow = Time.unscaledTime;
         float pulse = 0.5f + (0.5f * Mathf.Sin(timeNow * 7.2f));
-        float socketVisualScale = Mathf.Lerp(1f, stageZoomScale, 0.72f);
+        float socketVisualScale = ComputeSocketVisualScale(stageZoomScale);
 
         bool advanceSmoothThisCall = Time.frameCount != lastSocketAnimFrame;
         float smoothDt = advanceSmoothThisCall ? Mathf.Min(Time.unscaledDeltaTime, 0.05f) : 0f;
@@ -1894,9 +1974,9 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             return;
         }
 
-        float tubeVisualScale = Mathf.Lerp(1f, stageZoomScale, 0.78f);
-        float tangentLen = Mathf.Clamp(dist * 0.28f, 0.055f * stageZoomScale, 0.32f * stageZoomScale);
-        float archHeight = Mathf.Lerp(0.095f, 0.205f, Mathf.Clamp01((dist - 0.15f) / 1.50f)) * stageZoomScale;
+        float tubeVisualScale = ComputeTubeVisualScale(stageZoomScale);
+        float tangentLen = Mathf.Clamp(dist * 0.28f, 0.055f * stageZoomScale, 0.42f * stageZoomScale);
+        float archHeight = Mathf.Lerp(0.095f, 0.260f, Mathf.Clamp01((dist - (0.15f * stageZoomScale)) / Mathf.Max(0.10f, 2.40f * stageZoomScale))) * stageZoomScale;
 
         Vector3 c1 = startWorld + (startOutDir * tangentLen) + (tableUp * (archHeight * 0.90f));
         Vector3 c2;
@@ -1981,7 +2061,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         Vector3 stageRight = stageRoot != null ? stageRoot.right : camT.right;
         Vector3 tableUp = stageRoot != null ? stageRoot.up : camT.up;
         Vector3 tableDepth = stageRoot != null ? stageRoot.forward : camT.forward;
-        float tubeVisualScale = Mathf.Lerp(1f, stageZoomScale, 0.78f);
+        float tubeVisualScale = ComputeTubeVisualScale(stageZoomScale);
         float timeNow = Time.unscaledTime;
         float highPulse = 1f + (0.07f * Mathf.Sin(timeNow * 8.0f));
         float highEmissionPulse = 1f + (0.14f * Mathf.Sin(timeNow * 8.0f));
@@ -2016,11 +2096,11 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             }
 
             // Lengkungan 3D Kubik Bezier di atas bidang meja XZ (+tableUp) dengan pemisahan jalur kedalaman (laneWaveZ)
-            // keluar mulus sejajar sumbu soket Port_Out dan masuk mulus sejajar sumbu soket Port_In
-            float spanT = Mathf.Clamp01((dist - 0.25f) / 1.65f);
-            float archHeightY = Mathf.Lerp(0.095f, 0.235f, spanT) * stageZoomScale;
-            float laneWaveZ = ((i % 3) - 1) * 0.045f * stageZoomScale;
-            float tangentLen = Mathf.Clamp(dist * 0.28f, 0.065f * stageZoomScale, 0.34f * stageZoomScale);
+            // keluar mulus sejajar sumbu soket Port_Out dan masuk mulus sejajar sumbu soket Port_In (proporsional lapangan 2x & zoom 0.18x..15x)
+            float spanT = Mathf.Clamp01((dist - (0.25f * stageZoomScale)) / Mathf.Max(0.10f, 2.60f * stageZoomScale));
+            float archHeightY = Mathf.Lerp(0.095f, 0.285f, spanT) * stageZoomScale;
+            float laneWaveZ = ((i % 3) - 1) * 0.048f * stageZoomScale;
+            float tangentLen = Mathf.Clamp(dist * 0.28f, 0.065f * stageZoomScale, 0.45f * stageZoomScale);
 
             Vector3 c1 = p0 + (outAxis * tangentLen) + (tableUp * archHeightY) + (tableDepth * laneWaveZ);
             Vector3 c2 = p3 + (inAxis * tangentLen) + (tableUp * archHeightY) + (tableDepth * laneWaveZ);
@@ -2336,7 +2416,8 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         slot.mesh.SetVertices(verts);
         slot.mesh.SetNormals(norms);
         Vector3 boundsCenter = (minBounds + maxBounds) * 0.5f;
-        Vector3 boundsSize = (maxBounds - minBounds) + new Vector3(0.04f, 0.04f, 0.04f);
+        float boundsPad = Mathf.Max(0.04f, radius * 2.5f);
+        Vector3 boundsSize = (maxBounds - minBounds) + new Vector3(boundsPad, boundsPad, boundsPad);
         slot.mesh.bounds = new Bounds(boundsCenter, boundsSize);
 
         slot.lastP0 = p0;

@@ -531,6 +531,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         // Cincin ekuator 3D kedua mengikuti orientasi 3D bodi gerbang (ikut miring saat velocity banking tilt)
         Vector3 equatorCenter = nodeT.position + (nodeT.up * (0.165f * nodeScale));
         float pulse = 0.5f + (0.5f * Mathf.Sin((Time.unscaledTime * 5.2f) + slotIndex));
+        float scaleRatio = Mathf.Clamp(nodeScale / 0.68f, 0.22f, 15.0f);
+        float widthScale = Mathf.Clamp(scaleRatio, 0.72f, 2.80f);
 
         Color auraColor;
         float outerRadius;
@@ -540,34 +542,34 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         if (isInputA)
         {
             auraColor = InputACyanHoverColor;
-            outerRadius = (0.310f * nodeScale) + (0.012f * pulse);
-            outerWidth = 0.0085f;
+            outerRadius = (0.310f * nodeScale) + (0.012f * scaleRatio * pulse);
+            outerWidth = 0.0085f * widthScale;
         }
         else if (isInputB)
         {
             auraColor = InputBGoldHoverColor;
-            outerRadius = (0.310f * nodeScale) + (0.012f * pulse);
-            outerWidth = 0.0085f;
+            outerRadius = (0.310f * nodeScale) + (0.012f * scaleRatio * pulse);
+            outerWidth = 0.0085f * widthScale;
         }
         else if (state == NodeHoloState.ReturningToRack)
         {
             // Tint cincin 3D merah terang saat gerbang dipegang keluar dari kotak AssemblyZone
             auraColor = GateOutsideDeleteRedColor;
-            outerRadius = (0.340f * nodeScale) + (0.018f * pulse);
-            outerWidth = 0.0110f;
+            outerRadius = (0.340f * nodeScale) + (0.018f * scaleRatio * pulse);
+            outerWidth = 0.0110f * widthScale;
         }
         else if (state == NodeHoloState.Grabbed)
         {
             auraColor = GateGrabbedColor;
-            outerRadius = (0.320f * nodeScale) + (0.014f * pulse);
-            outerWidth = 0.0092f;
+            outerRadius = (0.320f * nodeScale) + (0.014f * scaleRatio * pulse);
+            outerWidth = 0.0092f * widthScale;
         }
         else
         {
             // BodyHovered pada gerbang
             auraColor = GateBodyHoverColor;
-            outerRadius = (0.295f * nodeScale) + (0.010f * pulse);
-            outerWidth = 0.0075f;
+            outerRadius = (0.295f * nodeScale) + (0.010f * scaleRatio * pulse);
+            outerWidth = 0.0075f * widthScale;
         }
 
         DrawAuraCircle(outer, nodeOuterMats[slotIndex], waistCenter, tableRight, tableForward, outerRadius, auraColor, outerWidth);
@@ -576,7 +578,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         {
             float innerAlpha = state == NodeHoloState.ReturningToRack ? 0.68f : 0.48f;
             Color innerColor = new Color(auraColor.r, auraColor.g, auraColor.b, auraColor.a * innerAlpha);
-            float innerWidth = state == NodeHoloState.ReturningToRack ? 0.0062f : 0.0044f;
+            float innerWidth = (state == NodeHoloState.ReturningToRack ? 0.0062f : 0.0044f) * widthScale;
             DrawAuraCircle(inner, nodeInnerMats[slotIndex], equatorCenter, nodeT.right, nodeT.forward, outerRadius * 0.84f, innerColor, innerWidth);
         }
         else if (inner != null && inner.enabled)
@@ -616,7 +618,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         float eased = 1f - ((1f - normalizedProgress) * (1f - normalizedProgress));
         Transform nodeT = node.transform;
         float scale = nodeT.localScale.x;
-        float zoomRatio = Mathf.Clamp(scale / 0.68f, 0.72f, 1.38f);
+        float zoomRatio = Mathf.Clamp(scale / 0.68f, 0.22f, 15.0f);
+        float widthScale = Mathf.Clamp(zoomRatio, 0.72f, 2.60f);
         Vector3 axisA = stageRoot != null ? stageRoot.right : nodeT.right;
         Vector3 axisB = stageRoot != null ? stageRoot.forward : nodeT.forward;
         Vector3 tableUp = stageRoot != null ? stageRoot.up : nodeT.up;
@@ -624,7 +627,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         float radius = Mathf.Lerp(0.16f, 0.38f, eased) * zoomRatio;
         Color baseCol = isInputB ? InputBGoldHoverColor : InputACyanHoverColor;
         Color faded = new Color(baseCol.r, baseCol.g, baseCol.b, (1f - normalizedProgress) * 0.95f);
-        float width = Mathf.Lerp(0.014f, 0.003f, normalizedProgress);
+        float width = Mathf.Lerp(0.014f, 0.003f, normalizedProgress) * widthScale;
 
         DrawAuraCircle(lr, inputRippleMats[inputIndex], center, axisA, axisB, radius, faded, width);
     }
