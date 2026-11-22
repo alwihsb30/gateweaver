@@ -78,6 +78,7 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
     private static Shader cachedHardwareShader;
 
     private readonly List<GateNode> trackedNodes = new List<GateNode>(12);
+    private AirWeavingFloatingPropRig floatingPropRig;
     private bool isRigActive = false;
 
     // Snapshot pencahayaan scene Mode Kartu v5 (dipulihkan 100% saat keluar Mode Udara / OnDisable / OnDestroy)
@@ -98,6 +99,15 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
     private bool savedRimFillLightEnabled = true;
 
     public bool IsRigActive => isRigActive;
+
+    /// <summary>
+    /// Menghubungkan rig prop melayang Mode Udara (Tahap 7) agar warna Linear Fresnel Rim Glow
+    /// diteruskan satu pintu secara Zero-GC tanpa menduplikasi palet maupun mencampur kepemilikan material GateNode.
+    /// </summary>
+    public void SetFloatingPropRig(AirWeavingFloatingPropRig propRig)
+    {
+        floatingPropRig = propRig;
+    }
 
     /// <summary>
     /// Konversi eksak sRGB -> Linear (IEC 61966-2-1, pure managed math aman untuk static readonly &amp; Zero-GC).
@@ -394,6 +404,10 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
         }
 
         node.SetExternalRimHighlight(rimColor, rimPower, rimIntensity);
+        if (floatingPropRig != null && floatingPropRig.IsRigActive)
+        {
+            floatingPropRig.UpdateNodeFresnelHighlight(node, rimColor, rimPower, rimIntensity);
+        }
     }
 
     /// <summary>
@@ -533,6 +547,7 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
     private void OnDestroy()
     {
         DeactivateAndRestoreForCardMode();
+        floatingPropRig = null;
         primaryDirectionalLight = null;
         arRimFillLight = null;
     }

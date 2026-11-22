@@ -363,6 +363,13 @@ public class GateNode : MonoBehaviour
     private static readonly Color InputBIdentityGoldColor = new Color(1.00f, 0.84f, 0.22f, 1f);
 
     public OutputTruthPodVisual OutputTruthPod => outputTruthPod;
+    public int ActiveDioramaVariantIndex => activeDioramaVariantIndex;
+    public bool IsDefaultBodyVisualSuppressed => suppressDefaultBodyVisual;
+
+    public const string ExternalFloatingPropRootName = "AR_AirFloatingPropRoot";
+    private bool suppressDefaultBodyVisual = false;
+    private Transform externalBounceTargetTransform = null;
+    private Transform externalFloatingPropRootTransform = null;
 
     private static int activeGateNodeCount = 0;
     private static Mesh sharedTorusMesh;
@@ -482,10 +489,18 @@ public class GateNode : MonoBehaviour
             SetTouchHitboxEnabled(true);
             SetGroundingAndPortsActive(true, showPorts: true);
             UpdateLabelBillboard();
-            AnimateTotemVisual();
-            AnimateOutputDioramaVisual();
-            AnimateV5NodeMechanisms();
-            AnimateV5OutputDioramaRig();
+            if (!suppressDefaultBodyVisual)
+            {
+                AnimateTotemVisual();
+                AnimateOutputDioramaVisual();
+                AnimateV5NodeMechanisms();
+                AnimateV5OutputDioramaRig();
+            }
+            else
+            {
+                SetTotemActive(false);
+                SetOutputDioramaActive(false);
+            }
             if (mechanismVisual != null)
             {
                 mechanismVisual.UpdateMechanism(isInputAConnected, inputAValue, isInputBConnected, inputBValue, currentOutputValue, isParkedPreview: false, deltaTime: Time.deltaTime);
@@ -597,6 +612,9 @@ public class GateNode : MonoBehaviour
         mechanismVisual = null;
         outputTruthPod = null;
         touchHitboxCollider = null;
+        suppressDefaultBodyVisual = false;
+        externalBounceTargetTransform = null;
+        externalFloatingPropRootTransform = null;
 
         activeGateNodeCount = Mathf.Max(0, activeGateNodeCount - 1);
         if (activeGateNodeCount == 0)
@@ -909,7 +927,10 @@ public class GateNode : MonoBehaviour
         }
 
         ApplyActiveDioramaVariantVisibility();
-        UpdateStatusLabelPlacement();
+        if (!useExternalSpatialPose)
+        {
+            UpdateStatusLabelPlacement();
+        }
 
         if (isTracked)
         {
@@ -978,7 +999,10 @@ public class GateNode : MonoBehaviour
         }
 
         ApplyActiveDioramaVariantVisibility();
-        UpdateStatusLabelPlacement();
+        if (!useExternalSpatialPose)
+        {
+            UpdateStatusLabelPlacement();
+        }
         UpdateOutputDioramaColors();
         UpdateReactiveAccentMaterials();
         outputDioramaRootObj.SetActive(false);
@@ -1245,9 +1269,10 @@ public class GateNode : MonoBehaviour
 
     private void SetOutputDioramaActive(bool active)
     {
-        if (outputDioramaRootObj != null && outputDioramaRootObj.activeSelf != active)
+        bool effectiveActive = active && !suppressDefaultBodyVisual;
+        if (outputDioramaRootObj != null && outputDioramaRootObj.activeSelf != effectiveActive)
         {
-            outputDioramaRootObj.SetActive(active);
+            outputDioramaRootObj.SetActive(effectiveActive);
         }
     }
 
@@ -1844,9 +1869,10 @@ public class GateNode : MonoBehaviour
 
     private void SetTotemActive(bool active)
     {
-        if (totemRootObj != null && totemRootObj.activeSelf != active)
+        bool effectiveActive = active && !suppressDefaultBodyVisual;
+        if (totemRootObj != null && totemRootObj.activeSelf != effectiveActive)
         {
-            totemRootObj.SetActive(active);
+            totemRootObj.SetActive(effectiveActive);
         }
     }
 
@@ -2524,6 +2550,10 @@ public class GateNode : MonoBehaviour
             {
                 continue;
             }
+            if (IsUnderExternalFloatingPropRoot(rend.transform))
+            {
+                continue;
+            }
             if (useExternalSpatialPose && IsGroundHideRenderer(rend))
             {
                 if (rend.enabled)
@@ -2549,6 +2579,72 @@ public class GateNode : MonoBehaviour
     {
         cachedExternalVisualRenderers = null;
         cachedGroundHideRenderers = null;
+    }
+
+    /// <summary>
+    /// Mendaftarkan root kontainer prop visual eksternal (mis. AR_AirFloatingPropRoot) agar seluruh renderer/material
+    /// miliknya 100% terisolasi dari snapshot shader maupun recovery renderer internal GateNode (tracking-agnostic).
+    /// </summary>
+    public void RegisterExternalFloatingPropRoot(Transform floatingPropRoot)
+    {
+        externalFloatingPropRootTransform = floatingPropRoot;
+        InvalidateExternalRendererCache();
+    }
+
+    /// <summary>
+    /// Menyupresi atau memulihkan kontainer bodi bawaan v5 (OutputDiorama3D / ReactorTotem3D) via SetActive(false/true)
+    /// saat sistem visual spasial eksternal menggantikan bodi node, sekaligus mengarahkan target tap-bounce. Zero-GC.
+    /// </summary>
+    public void SetExternalBodyVisualSuppressed(
+        bool suppressed,
+        Transform externalBounceTarget = null,
+        Transform floatingPropRoot = null)
+    {
+        suppressDefaultBodyVisual = suppressed;
+        externalBounceTargetTransform = suppressed ? externalBounceTarget : null;
+        if (floatingPropRoot != null)
+        {
+            externalFloatingPropRootTransform = floatingPropRoot;
+        }
+        else if (!suppressed)
+        {
+            externalFloatingPropRootTransform = null;
+        }
+
+        if (suppressed)
+        {
+            SetTotemActive(false);
+            SetOutputDioramaActive(false);
+        }
+        else
+        {
+            bool showModel = isTracked || (useExternalSpatialPose && externalParkedPreview);
+            SetTotemActive(showModel);
+            SetOutputDioramaActive(isTracked);
+        }
+
+        InvalidateExternalRendererCache();
+    }
+
+    private bool IsUnderExternalFloatingPropRoot(Transform candidate)
+    {
+        if (candidate == null)
+        {
+            return false;
+        }
+
+        Transform cur = candidate;
+        while (cur != null && cur != transform)
+        {
+            if (cur == externalFloatingPropRootTransform
+                || string.Equals(cur.name, ExternalFloatingPropRootName, StringComparison.Ordinal))
+            {
+                return true;
+            }
+            cur = cur.parent;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -2644,14 +2740,15 @@ public class GateNode : MonoBehaviour
         savedHardwareMaterials.Clear();
         hardwareRimRenderers.Clear();
 
-        // 5 gerbang logika berbasis GateMechanismVisual sudah ditangani langsung oleh mechanismVisual di atas
+        // 5 gerbang logika berbasis GateMechanismVisual sudah ditangani langsung oleh mechanismVisual di atas;
+        // bila bodi bawaan v5 sedang disupresi oleh prop melayang eksternal, biarkan material Mode Kartu 100% tak tersentuh.
         bool skipTotemBecauseMechanismOwnsIt = mechanismVisual != null && mechanismVisual.IsBuilt;
-        if (totemRootObj != null && !skipTotemBecauseMechanismOwnsIt)
+        if (totemRootObj != null && !skipTotemBecauseMechanismOwnsIt && !suppressDefaultBodyVisual)
         {
             CollectAndSwitchOpaqueHardwareRenderers(totemRootObj, customShader);
         }
 
-        if (outputDioramaRootObj != null)
+        if (outputDioramaRootObj != null && !suppressDefaultBodyVisual)
         {
             CollectAndSwitchOpaqueHardwareRenderers(outputDioramaRootObj, customShader);
         }
@@ -2743,7 +2840,7 @@ public class GateNode : MonoBehaviour
         for (int r = 0; r < renderers.Length; r++)
         {
             Renderer rend = renderers[r];
-            if (rend == null || rend is LineRenderer || rend is ParticleSystemRenderer)
+            if (rend == null || rend is LineRenderer || rend is ParticleSystemRenderer || IsUnderExternalFloatingPropRoot(rend.transform))
             {
                 continue;
             }
@@ -2944,10 +3041,15 @@ public class GateNode : MonoBehaviour
     public void ClearExternalSpatialOverride()
     {
         RestoreDefaultHardwareShaders();
+        suppressDefaultBodyVisual = false;
+        externalBounceTargetTransform = null;
+        externalFloatingPropRootTransform = null;
         externalParkedPreview = false;
         useExternalSpatialPose = false;
+        InvalidateExternalRendererCache();
         SetGroundRenderersEnabled(true);
         transform.localScale = Vector3.one;
+        UpdateStatusLabelPlacement();
         if (statusLabel != null)
         {
             statusLabel.transform.localScale = Vector3.one * LabelCompactScale;
@@ -3604,6 +3706,11 @@ public class GateNode : MonoBehaviour
 
     private Transform GetTapBounceTargetTransform()
     {
+        if (suppressDefaultBodyVisual && externalBounceTargetTransform != null)
+        {
+            return externalBounceTargetTransform;
+        }
+
         if (nodeType == NodeType.OutputActuator)
         {
             return outputDioramaRootObj != null ? outputDioramaRootObj.transform : null;

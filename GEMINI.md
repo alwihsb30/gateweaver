@@ -18,7 +18,13 @@ Dokumen ini adalah panduan wajib bagi AI Agent (Antigravity) dalam mengembangkan
 Upgrade v8.0 berfokus penuh pada **UX spasial 3D modern, interaksi tangan responsif, dan pemangkasan fitur non-esensial**:
 - **Fitur yang Sudah Dipangkas (Tahap 1 — Selesai):** `PedagogyMasteryHud.cs` (`Live Boolean Chip` & `Rapor Penguasaan`) dihapus permanen; `Rapor CP` dan `Petunjuk (Hint)` dihapus dari laci `≡`; auto-popup `Rapor CP` pasca Level 7 Mode Kartu dinonaktifkan.
 - **Standar UI Diet v8.0:** Fokus murni pada misi 1 baris, kuota gerbang, Truth Pod `00–11`, Panduan Gestur (`?`) + Latihan 4 Langkah, serta laci `≡` minimalis (**maks 5 item** di Mode Udara: `Mode`, `Pilih Level / Sandbox`, `Reset Level`, `Audio`, `Panduan Gestur`; **4 item** di Mode Kartu tanpa `Panduan Gestur`). Jangan menambahkan kembali rapor, chip rumus, atau menu sekunder.
-- **Target Visual & 3D v8.0 (Bertahap):** HUD *Floating Glass* bertipografi besar → Kalibrasi sensitivitas tangan anti-kaku (pangkas tumpukan *smoothing*) → Panggung 3D miring (`HologramStageRoot`) + Orbit 360°/Zoom + *Parallax* → Kabel Tabung 3D PBR (`MeshRenderer`) menggantikan `LineRenderer` datar → Custom Built-in `.shader` OpenGLES3 (*Fresnel*, *dimming/vignette* kamera, *Point Light*) → Prop sci-fi melayang `.fbx` menggantikan diorama darat di Mode Udara.
+- **Status Visual & 3D v8.0 (Tahap 1–7 Selesai):**
+  - **Tahap 1–2:** UI Diet & HUD *Floating Glass* bertipografi besar + kartu 9-slice.
+  - **Tahap 3:** Single One-Euro filter, *soft aim-assist*, *sticky snap*, & fisika *spring-damper*.
+  - **Tahap 4:** Panggung meja hologram 3D (`HologramStageRoot`) + Orbit 360°/Zoom/Pan + *Parallax* & *Inertial Coasting*.
+  - **Tahap 5 & 5.5:** Kabel Tabung 3D PBR (`MeshRenderer`), 3D Port Sockets, *tangent-aligned signal capsules*, *Symmetric Log Z Carry-Pan*, dek 2x (`0.58x`, grid `17x13`), & *Auto Edge-Pan*.
+  - **Tahap 6:** Custom Built-in `.shader` OpenGLES3 (`ARBackdropDimming` + 1-pass `HologramFresnelHardware` + 3-Point & Hemisphere Lighting Rig).
+  - **Tahap 7:** 7 Prop sci-fi melayang 360° native (`.obj` + `.mtl`, *drop-in replaceable* `.fbx`) di `Assets/Resources/Models/V8_AirProps/` menggantikan diorama darat di Mode Udara (Input A/B Beacon Sian/Emas, 5 Varian Output kinetik, & Gate Underside Hover-Cradle) dengan **0% regresi Mode Kartu v5**.
 
 ## 3. Batas Arsitektur, Peta Komponen, & Prinsip Kode
 - **Code-First (Lindungi Scene):** Dilarang mengedit YAML `Assets/Scenes/SampleScene.unity` atau `.prefab` secara manual kecuali diminta eksplisit. Gunakan *runtime auto-bootstrap* atau skrip C# di `Assets/Editor/`.
@@ -38,6 +44,9 @@ Upgrade v8.0 berfokus penuh pada **UX spasial 3D modern, interaksi tangan respon
   - `CompactHudMenuController.cs` — Bilah Atas (+ tombol `?` khusus Mode Udara), Laci Menu Kompak (5 item Mode Udara / 4 item Mode Kartu), kontrol bawah adaptif per mode, & `Txt_Feedback` *Toast-Only*.
 - **`Assets/Scripts/AirWeaving/`** *(Terisolasi Khusus Mode Udara)*
   - `AirWeavingController.cs` — Orkestrator Camera Handover, proyeksi tangan MediaPipe, tata letak node Mode Udara, sakelar Input A/B sentuh telunjuk `#8`, & sinkronisasi evaluasi rangkaian instan anti-*false-win*.
+  - `AirWeavingStageController.cs` — Pengendali meja hologram 3D `HologramStageRoot` (dek 2x, grid `17x13`, *Grounded Contact Rings*, Focus-Point Orbit 360°, Ultra-Wide Zoom `0.18x–15x`, *Carry-Pan* Log-Z, & *Inertial Coasting*).
+  - `AirWeavingLightingAndShaderRig.cs` — Pengendali shader OpenGLES3 (`ARBackdropDimming`, 1-pass `HologramFresnelHardware`), 3-Point + Hemisphere Lighting Rig analitik, & penerus Fresnel Rim Glow Zero-GC.
+  - `AirWeavingFloatingPropRig.cs` — Pengendali 7 prop sci-fi melayang 360° Mode Udara (`Assets/Resources/Models/V8_AirProps/`), animasi kinetik `0/1`, *underside repulsor glow* (`Sprites/Default`), & supresi/restorasi `SetActive` dua arah.
   - `AirWeavingHandGestureDetector.cs` — Detektor dual-kanal skala-invarian (`Fist`, `Pinch`, & `SummonHandPose`).
   - `AirWeavingHologramVisual.cs` — Visual hologram Mode Udara, aura hover/grab/buang, efek *ripple* Input A/B, & *reticle*.
   - `AirWeavingCableRouter.cs` — Manajemen kabel manual *Pinch* port-ke-port (`Port_Out` fan-out, `Port_In` cabut/ganti), renderer kabel Mode Udara, & *Pulsing Signal Packets* Zero-GC.
@@ -60,7 +69,7 @@ Upgrade v8.0 berfokus penuh pada **UX spasial 3D modern, interaksi tangan respon
 
 ## 5. Alur Kerja, Verifikasi, & Disiplin Git
 1. **Planning Mode First:** Untuk perubahan yang menyentuh > 2 skrip atau mengubah arsitektur 3D/shader, lakukan audit *read-only* dan presentasikan rencana singkat sebelum mengedit kode.
-2. **Verifikasi Wajib Roslyn C#:** Setelah setiap perubahan C#, jalankan kompilasi verifikasi Roslyn (`/warnaserror+` + Unity Roslyn Analyzers) untuk 3 target (`UNITY_EDITOR`, `UNITY_ANDROID`, dan `Assets/Editor/AndroidLibcppCopier.cs`) hingga **`0 error, 0 warning`**. Hapus skrip verifikasi sementara bila dibuat di luar `%TEMP%`.
+2. **Verifikasi Wajib Roslyn C#:** Setelah setiap perubahan C#, jalankan kompilasi verifikasi Roslyn (`/warnaserror+` + Unity Roslyn Analyzers) untuk 3 target (`UNITY_EDITOR`, `UNITY_ANDROID`, dan seluruh skrip Editor: `Assets/Editor/AndroidLibcppCopier.cs`, `Assets/Editor/GateWeaverShaderManifestEnsurer.cs`, `Assets/Editor/GateWeaverAirPropValidator.cs`) hingga **`0 error, 0 warning`**. Hapus skrip verifikasi sementara bila dibuat di luar `%TEMP%`.
 3. **Aturan Git:**
    - Kerjakan setiap tahap di branch terpisah (`feat/<nama-fitur>`), jangan langsung di `main`.
    - **Dilarang keras** menjalankan `git commit`, `git merge`, `git tag`, atau `git push` secara otomatis tanpa perintah eksplisit dari pengguna.

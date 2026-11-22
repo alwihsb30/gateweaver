@@ -1,0 +1,33 @@
+# GateWeaver AR v8.0 Floating Prop Material Library - AirProp_InputBeacon
+
+newmtl Accent
+Kd 0.1600 0.9400 0.7800
+Ks 0.3500 0.4500 0.4500
+Ke 0.0800 0.4800 0.4000
+Ns 64.0
+d 1.000
+illum 2
+
+newmtl DarkAccent
+Kd 0.1400 0.2300 0.3800
+Ks 0.2400 0.2800 0.3600
+Ke 0.0000 0.0000 0.0000
+Ns 36.0
+d 1.000
+illum 2
+
+newmtl DarkGrey
+Kd 0.2200 0.2600 0.3400
+Ks 0.2000 0.2200 0.2600
+Ke 0.0000 0.0000 0.0000
+Ns 32.0
+d 1.000
+illum 2
+
+newmtl Main
+Kd 0.7200 0.7800 0.8600
+Ks 0.2800 0.3000 0.3400
+Ke 0.0000 0.0000 0.0000
+Ns 42.0
+d 1.000
+illum 2

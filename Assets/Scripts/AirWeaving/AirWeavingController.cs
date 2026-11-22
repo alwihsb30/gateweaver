@@ -631,6 +631,7 @@ public class AirWeavingController : MonoBehaviour
 
     private AirWeavingStageController stageController;
     private AirWeavingLightingAndShaderRig lightingAndShaderRig;
+    private AirWeavingFloatingPropRig floatingPropRig;
     private AirWeavingOutputTrigger outputTrigger;
     private AirWeavingHologramVisual hologramVisual;
     private AirWeavingCableRouter cableRouter;
@@ -848,6 +849,7 @@ public class AirWeavingController : MonoBehaviour
         }
 
         stageController?.ResetStageView(immediate: false);
+        floatingPropRig?.SyncLevelVariantImmediate();
 
         if (mainCam != null)
         {
@@ -1030,6 +1032,12 @@ public class AirWeavingController : MonoBehaviour
         UpdateHoverSfxFeedback(dt);
         UpdateContinuousHumFeedback(mainCam, dt);
         UpdateWorkbenchGuideVisuals(mainCam);
+        GateNode activeGrabbedGate = (grabbedGateSlotIndex >= 0
+                                      && grabbedGateSlotIndex < gateSlots.Count
+                                      && gateSlots[grabbedGateSlotIndex] != null)
+            ? gateSlots[grabbedGateSlotIndex].node
+            : null;
+        floatingPropRig?.TickProps(dt, activeGrabbedGate, wasGrabbedGateInDeleteZone);
         UpdateHologramVisuals(mainCam, dt);
         UpdateCircleSummonVisuals(mainCam, dt);
         UpdateOutputSpatialTrigger(mainCam, dt);
@@ -1054,6 +1062,7 @@ public class AirWeavingController : MonoBehaviour
 
     private void OnDisable()
     {
+        floatingPropRig?.DeactivateAndRestoreForCardMode();
         lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         ShutdownNativeAndCameraImmediate();
     }
@@ -1087,6 +1096,7 @@ public class AirWeavingController : MonoBehaviour
         }
         cachedHudMenu = null;
         circuitManager?.SetManualRoutingMode(false);
+        floatingPropRig?.DeactivateAndRestoreForCardMode();
         lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         RestoreAirWeavingLabelReadabilityStyles();
         ShutdownNativeAndCameraImmediate();
@@ -1274,6 +1284,8 @@ public class AirWeavingController : MonoBehaviour
         // 8. Tata seluruh 8 GateNode (Input A, Input B, Output terkunci di papan roti; 5 gerbang di Rak Parkir Atas)
         InitializeWorkbenchSlots(mainCam);
         ApplyAirWeavingLabelReadabilityStyles();
+        floatingPropRig?.ActivateForAirWeaving(inputANode, inputBNode, outputNode, cachedGateNodes);
+        lightingAndShaderRig?.SetFloatingPropRig(floatingPropRig);
         lightingAndShaderRig?.ActivateForAirWeaving(
             mainCam,
             stageController != null ? stageController.StageRoot : null,
@@ -1379,6 +1391,7 @@ public class AirWeavingController : MonoBehaviour
         SetFeedbackImmediate("[Air-Weaving v6] Mengembalikan kamera ke Mode Kartu (v5)...", FeedbackWaitingColor);
 
         ShutdownNativeAndCameraImmediate();
+        floatingPropRig?.DeactivateAndRestoreForCardMode();
         HideAllAirWeavingVisuals();
 
         yield return new WaitForSecondsRealtime(WebCamReleaseDelaySeconds);
@@ -1404,6 +1417,7 @@ public class AirWeavingController : MonoBehaviour
         activeCableHoverHandSlot = -1;
         cableRouter?.ClearAllWires(circuitManager);
         circuitManager?.SetManualRoutingMode(false);
+        floatingPropRig?.DeactivateAndRestoreForCardMode();
         lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         RestoreAirWeavingLabelReadabilityStyles();
         ShutdownNativeAndCameraImmediate();
@@ -1430,6 +1444,7 @@ public class AirWeavingController : MonoBehaviour
         }
 
         RestoreAirWeavingLabelReadabilityStyles();
+        floatingPropRig?.DeactivateAndRestoreForCardMode();
         lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         RefreshGateNodesList();
         for (int i = 0; i < cachedGateNodes.Count; i++)
@@ -6862,6 +6877,12 @@ public class AirWeavingController : MonoBehaviour
         {
             lightingAndShaderRig = GetComponent<AirWeavingLightingAndShaderRig>() ?? gameObject.AddComponent<AirWeavingLightingAndShaderRig>();
         }
+
+        if (floatingPropRig == null)
+        {
+            floatingPropRig = GetComponent<AirWeavingFloatingPropRig>() ?? gameObject.AddComponent<AirWeavingFloatingPropRig>();
+        }
+        lightingAndShaderRig.SetFloatingPropRig(floatingPropRig);
 
         // 2. Cincin Hover / Grab Highlight ramping di sekitar alas target gerbang atau terminal Input
         GameObject hoverObj = new GameObject("AR_HoverHighlightRing");
