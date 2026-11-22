@@ -35,7 +35,10 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     private const float HaloCenterUpOffset = 0.065f;
     private const float HaloRadius = 0.235f;
     private const float ReferenceCameraDepth = 3.82f;
-    private const float BadgeBelowPodOffset = -0.115f;
+    private const float BadgeBelowPodOffset = -0.105f;
+    private const float BadgeHeightLocal = 0.068f;
+    private const float BadgeSpriteScale = 0.22f;
+    private const float BadgeFontSize = 0.32f;
 
     // Jalan pintas tahan-kepal untuk verifikasi dinonaktifkan 100% di Mode Udara demi debugging mandiri
     private static readonly bool EnableHoldToVerifyShortcut = false;
@@ -52,18 +55,11 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         "UJI SAKELAR (3/4)"
     };
 
-    private static readonly Color TestHaloCyanColor = new Color(0.24f, 0.94f, 1.00f, 0.72f);
-    private static readonly Color OverQuotaHaloRedColor = new Color(1.00f, 0.24f, 0.24f, 0.88f);
-    private static readonly Color CheckRedHaloOrangeColor = new Color(1.00f, 0.46f, 0.18f, 0.86f);
-    private static readonly Color WinHaloGreenColor = new Color(0.18f, 1.00f, 0.56f, 0.92f);
-    private static readonly Color WinHaloOuterColor = new Color(0.32f, 1.00f, 0.76f, 0.52f);
-    private static readonly Color BadgeBackdropColor = new Color(0.03f, 0.06f, 0.12f, 0.88f);
-
-    private static readonly Color TextConnectColor = new Color(0.76f, 0.88f, 0.96f, 1f);
-    private static readonly Color TextOverQuotaRedColor = new Color(1.00f, 0.34f, 0.32f, 1f);
-    private static readonly Color TextCheckRedOrangeColor = new Color(1.00f, 0.54f, 0.24f, 1f);
-    private static readonly Color TextTestCyanColor = new Color(0.42f, 0.96f, 1.00f, 1f);
-    private static readonly Color TextWinGreenColor = new Color(0.36f, 1.00f, 0.68f, 1f);
+    private static readonly Color TestHaloCyanColor = new Color(GwThemeTokens.SignalHighTeal.r, GwThemeTokens.SignalHighTeal.g, GwThemeTokens.SignalHighTeal.b, 0.72f);
+    private static readonly Color OverQuotaHaloRedColor = new Color(GwThemeTokens.StatusErrorRed.r, GwThemeTokens.StatusErrorRed.g, GwThemeTokens.StatusErrorRed.b, 0.88f);
+    private static readonly Color CheckRedHaloErrorColor = new Color(GwThemeTokens.StatusErrorRed.r, GwThemeTokens.StatusErrorRed.g, GwThemeTokens.StatusErrorRed.b, 0.84f);
+    private static readonly Color WinHaloGreenColor = new Color(GwThemeTokens.StatusPassEmerald.r, GwThemeTokens.StatusPassEmerald.g, GwThemeTokens.StatusPassEmerald.b, 0.92f);
+    private static readonly Color WinHaloOuterColor = new Color(GwThemeTokens.StatusPassText.r, GwThemeTokens.StatusPassText.g, GwThemeTokens.StatusPassText.b, 0.50f);
 
     public event Action OnVerifyRequested;
     public event Action OnNextLevelRequested;
@@ -74,12 +70,14 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     private LineRenderer progressArcRenderer;
     private GameObject badgeRootObj;
     private TextMeshPro badgeText;
-    private Transform badgeBackdropTransform;
+    private SpriteRenderer badgeBackdropRenderer;
+    private SpriteRenderer badgeBorderRenderer;
 
     private Material invitationMat;
     private Material winOuterMat;
     private Material progressMat;
     private Material badgeBackdropMat;
+    private Material badgeBorderMat;
 
     private readonly Vector3[] invitationRingPoints = new Vector3[RingSegments];
     private readonly Vector3[] winOuterRingPoints = new Vector3[RingSegments];
@@ -109,50 +107,49 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         invitationMat = CreateSafeSpritesMaterial(TestHaloCyanColor, 2983);
         winOuterMat = CreateSafeSpritesMaterial(WinHaloOuterColor, 2982);
         progressMat = CreateSafeSpritesMaterial(WinHaloGreenColor, 2984);
-        badgeBackdropMat = CreateSafeSpritesMaterial(BadgeBackdropColor, 2998);
+        badgeBackdropMat = CreateSafeSpritesMaterial(Color.white, 2998);
+        badgeBorderMat = CreateSafeSpritesMaterial(Color.white, 2999);
 
         invitationRingRenderer = CreateRingRenderer("Output_InvitationHalo", visualRootObj.transform, RingSegments, loop: true, width: 0.008f, invitationMat);
         winOuterRingRenderer = CreateRingRenderer("Output_WinOuterHalo", visualRootObj.transform, RingSegments, loop: true, width: 0.006f, winOuterMat);
         progressArcRenderer = CreateRingRenderer("Output_ProgressArc", visualRootObj.transform, 0, loop: false, width: 0.015f, progressMat);
 
-        // Lencana pemandu debugging live tepat di bawah Pod LED 2x2
+        // Lencana pemandu debugging live tepat di bawah Pod LED 2x2 (v8.5: SmokedGlassDense 82% + hairline 1px + radius 6px)
         badgeRootObj = new GameObject("Output_AffordanceBadge");
         badgeRootObj.transform.SetParent(visualRootObj.transform, false);
 
         badgeText = badgeRootObj.AddComponent<TextMeshPro>();
-        badgeText.fontSize = 0.42f;
+        badgeText.fontSize = BadgeFontSize;
         badgeText.fontStyle = FontStyles.Bold;
         badgeText.alignment = TextAlignmentOptions.Center;
         badgeText.textWrappingMode = TextWrappingModes.NoWrap;
-        badgeText.color = TextConnectColor;
+        badgeText.color = GwThemeTokens.TextSecondary;
         badgeText.sortingOrder = 22;
         RectTransform txtRect = badgeText.rectTransform;
         if (txtRect != null)
         {
-            txtRect.sizeDelta = new Vector2(2.4f, 0.45f);
+            txtRect.sizeDelta = new Vector2(1.6f, 0.30f);
         }
 
-        GameObject bgQuad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        bgQuad.name = "Badge_Backdrop";
-        bgQuad.transform.SetParent(badgeRootObj.transform, false);
-        bgQuad.transform.localPosition = new Vector3(0f, 0f, 0.010f);
-        bgQuad.transform.localScale = new Vector3(0.66f, 0.088f, 1f);
-        Collider col = bgQuad.GetComponent<Collider>();
-        if (col != null)
-        {
-            Destroy(col);
-        }
-        Renderer bgRend = bgQuad.GetComponent<Renderer>();
-        if (bgRend != null)
-        {
-            bgRend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            bgRend.receiveShadows = false;
-            if (badgeBackdropMat != null)
-            {
-                bgRend.sharedMaterial = badgeBackdropMat;
-            }
-        }
-        badgeBackdropTransform = bgQuad.transform;
+        badgeBackdropRenderer = CreateSlicedBadgeLayer(
+            "Badge_Backdrop",
+            badgeRootObj.transform,
+            GwThemeTokens.GetRoundedRect6Sprite(),
+            GwThemeTokens.SmokedGlassDense,
+            badgeBackdropMat,
+            localZ: 0.010f,
+            sortingOrder: 20,
+            initialWidth: 0.45f);
+
+        badgeBorderRenderer = CreateSlicedBadgeLayer(
+            "Badge_Border",
+            badgeRootObj.transform,
+            GwThemeTokens.GetHairlineBorder6Sprite(),
+            GwThemeTokens.HairlineIdle,
+            badgeBorderMat,
+            localZ: 0.008f,
+            sortingOrder: 21,
+            initialWidth: 0.45f);
 
         isVisualInitialized = true;
         HideImmediate();
@@ -307,7 +304,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
 
         // 3. Perbarui visual Halo 3D & Lencana Pemandu Debugging Mandiri dengan Distance-Compensated Scale Clamping
         UpdateVisuals(
-            mainCam.transform,
+            mainCam,
             outputWorldPos,
             guidanceState,
             passedRowCount,
@@ -328,16 +325,18 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         DestroyMat(ref winOuterMat);
         DestroyMat(ref progressMat);
         DestroyMat(ref badgeBackdropMat);
+        DestroyMat(ref badgeBorderMat);
         invitationRingRenderer = null;
         winOuterRingRenderer = null;
         progressArcRenderer = null;
         badgeRootObj = null;
         badgeText = null;
-        badgeBackdropTransform = null;
+        badgeBackdropRenderer = null;
+        badgeBorderRenderer = null;
     }
 
     private void UpdateVisuals(
-        Transform camT,
+        Camera mainCam,
         Vector3 outputWorldPos,
         OutputDebugGuidanceState guidanceState,
         int passedRowCount,
@@ -346,7 +345,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         Transform stageRoot,
         Vector3 truthPodWorldAnchor)
     {
-        if (isUiOverlayOpen)
+        if (isUiOverlayOpen || mainCam == null)
         {
             SetRingEnabled(invitationRingRenderer, false);
             SetRingEnabled(winOuterRingRenderer, false);
@@ -357,6 +356,8 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             }
             return;
         }
+
+        Transform camT = mainCam.transform;
 
         Vector3 camRight = camT.right;
         Vector3 camUp = camT.up;
@@ -393,7 +394,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         else if (guidanceState == OutputDebugGuidanceState.CheckRedCells)
         {
             float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 5.5f));
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.007f * pulse * effectiveHaloScale), CheckRedHaloOrangeColor, 0.0072f * haloWidthScale);
+            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.007f * pulse * effectiveHaloScale), CheckRedHaloErrorColor, 0.0072f * haloWidthScale);
             SetRingEnabled(winOuterRingRenderer, false);
         }
         else if (guidanceState == OutputDebugGuidanceState.TestSwitches)
@@ -438,7 +439,7 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             SetRingEnabled(progressArcRenderer, false);
         }
 
-        // C. Lencana Pemandu Debugging Mandiri tepat di bawah Pod LED 2x2 dengan Distance-Compensated Scale Clamping
+        // C. Lencana Pemandu Debugging Mandiri tepat di bawah Pod LED 2x2 (v8.5: SmokedGlassDense 82% + hairline 1px)
         if (badgeRootObj != null)
         {
             if (!badgeRootObj.activeSelf)
@@ -450,33 +451,68 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
                 ? truthPodWorldAnchor
                 : (outputWorldPos - (camUp * (0.20f * distFactor)) - (camForward * 0.24f));
             float podDepth = Mathf.Max(0.75f, Vector3.Dot(podAnchor - camT.position, camForward));
-            float podDistRatio = Mathf.Clamp(podDepth / ReferenceCameraDepth, 0.16f, 2.25f);
+            float podDistRatio = Mathf.Clamp(podDepth / ReferenceCameraDepth, 0.16f, 1.85f);
             float zoomRatio = Mathf.Max(0.20f, zoomScale / AirWeavingStageController.DefaultZoomScale);
-            float depthProximityGain = Mathf.Clamp(ReferenceCameraDepth / podDepth, 0.50f, 2.75f);
-            float naturalBadgeZoom = Mathf.Clamp(zoomRatio * Mathf.Lerp(1f, depthProximityGain, 0.72f), 0.55f, 2.70f);
-            float badgeDistScale = 1.32f * podDistRatio * naturalBadgeZoom;
+            float depthProximityGain = Mathf.Clamp(ReferenceCameraDepth / podDepth, 0.50f, 2.20f);
+            float naturalBadgeZoom = Mathf.Clamp(zoomRatio * Mathf.Lerp(1f, depthProximityGain, 0.60f), 0.55f, 1.85f);
+            float badgeDistScale = Mathf.Clamp(0.92f * podDistRatio * naturalBadgeZoom, 0.42f, 1.65f);
+
+            // Lencana selalu mengikuti status debugging live agar tidak pernah menimpa CEK SEL MERAH / KURANGI GERBANG
+            string desiredText = ResolveGuidanceText(
+                guidanceState,
+                passedRowCount,
+                out Color desiredTextColor,
+                out Color desiredBorderColor,
+                out float desiredWidth);
 
             Vector3 badgePos = podAnchor + (camUp * (BadgeBelowPodOffset * badgeDistScale)) - (camForward * 0.015f);
+
+            // Clamp horizontal terhadap frustum kamera agar lencana tidak pernah terpotong di tepi kanan/kiri layar
+            float badgeDepth = Mathf.Max(0.75f, Vector3.Dot(badgePos - camT.position, camForward));
+            float halfViewH = badgeDepth * Mathf.Tan(mainCam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            float halfViewW = halfViewH * mainCam.aspect;
+            float badgeHalfW = desiredWidth * 0.5f * badgeDistScale;
+            float maxCenterX = Mathf.Max(0f, (halfViewW * 0.96f) - badgeHalfW);
+            float curRightX = Vector3.Dot(badgePos - camT.position, camRight);
+            if (curRightX > maxCenterX)
+            {
+                badgePos -= camRight * (curRightX - maxCenterX);
+            }
+            else if (curRightX < -maxCenterX)
+            {
+                badgePos += camRight * (-maxCenterX - curRightX);
+            }
+
             badgeRootObj.transform.position = badgePos;
             badgeRootObj.transform.localScale = Vector3.one * badgeDistScale;
             badgeRootObj.transform.rotation = camT.rotation;
-
-            // Lencana selalu mengikuti status debugging live agar tidak pernah menimpa CEK SEL MERAH / KURANGI GERBANG
-            string desiredText = ResolveGuidanceText(guidanceState, passedRowCount, out Color desiredColor, out float desiredWidth);
 
             if (!string.Equals(desiredText, lastBadgeText, StringComparison.Ordinal) && badgeText != null)
             {
                 lastBadgeText = desiredText;
                 badgeText.text = desiredText;
-                if (badgeBackdropTransform != null)
+                Vector2 slicedSize = new Vector2(desiredWidth / BadgeSpriteScale, BadgeHeightLocal / BadgeSpriteScale);
+                if (badgeBackdropRenderer != null)
                 {
-                    badgeBackdropTransform.localScale = new Vector3(desiredWidth, 0.088f, 1f);
+                    badgeBackdropRenderer.size = slicedSize;
+                }
+                if (badgeBorderRenderer != null)
+                {
+                    badgeBorderRenderer.size = slicedSize;
                 }
             }
 
-            if (badgeText != null)
+            if (badgeText != null && badgeText.color != desiredTextColor)
             {
-                badgeText.color = desiredColor;
+                badgeText.color = desiredTextColor;
+            }
+            if (badgeBackdropRenderer != null && badgeBackdropRenderer.color != GwThemeTokens.SmokedGlassDense)
+            {
+                badgeBackdropRenderer.color = GwThemeTokens.SmokedGlassDense;
+            }
+            if (badgeBorderRenderer != null && badgeBorderRenderer.color != desiredBorderColor)
+            {
+                badgeBorderRenderer.color = desiredBorderColor;
             }
         }
     }
@@ -485,36 +521,73 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         OutputDebugGuidanceState state,
         int passedRowCount,
         out Color textColor,
+        out Color borderColor,
         out float backdropWidth)
     {
         switch (state)
         {
             case OutputDebugGuidanceState.ReduceGates:
-                textColor = TextOverQuotaRedColor;
-                backdropWidth = 0.62f;
+                textColor = GwThemeTokens.StatusErrorText;
+                borderColor = GwThemeTokens.StatusErrorRed;
+                backdropWidth = 0.42f;
                 return BadgeReduceGates;
 
             case OutputDebugGuidanceState.CheckRedCells:
-                textColor = TextCheckRedOrangeColor;
-                backdropWidth = 0.56f;
+                textColor = GwThemeTokens.StatusErrorText;
+                borderColor = GwThemeTokens.StatusErrorRed;
+                backdropWidth = 0.37f;
                 return BadgeCheckRedCells;
 
             case OutputDebugGuidanceState.TestSwitches:
-                textColor = TextTestCyanColor;
-                backdropWidth = 0.64f;
+                textColor = GwThemeTokens.SignalHighTeal;
+                borderColor = GwThemeTokens.SignalHighTeal;
+                backdropWidth = 0.44f;
                 int clampedPassed = Mathf.Clamp(passedRowCount, 0, BadgeTestSwitchesCache.Length - 1);
                 return BadgeTestSwitchesCache[clampedPassed];
 
             case OutputDebugGuidanceState.PassedAllFour:
-                textColor = TextWinGreenColor;
-                backdropWidth = 0.46f;
+                textColor = GwThemeTokens.StatusPassText;
+                borderColor = GwThemeTokens.StatusPassEmerald;
+                backdropWidth = 0.28f;
                 return BadgePassedAllFour;
 
             default:
-                textColor = TextConnectColor;
-                backdropWidth = 0.68f;
+                textColor = GwThemeTokens.TextSecondary;
+                borderColor = GwThemeTokens.HairlineIdle;
+                backdropWidth = 0.45f;
                 return BadgeConnectToOutput;
         }
+    }
+
+    private static SpriteRenderer CreateSlicedBadgeLayer(
+        string name,
+        Transform parent,
+        Sprite sprite,
+        Color color,
+        Material mat,
+        float localZ,
+        int sortingOrder,
+        float initialWidth)
+    {
+        GameObject obj = new GameObject(name);
+        obj.transform.SetParent(parent, false);
+        obj.transform.localPosition = new Vector3(0f, 0f, localZ);
+        obj.transform.localRotation = Quaternion.identity;
+        obj.transform.localScale = Vector3.one * BadgeSpriteScale;
+
+        SpriteRenderer sr = obj.AddComponent<SpriteRenderer>();
+        sr.sprite = sprite;
+        sr.drawMode = SpriteDrawMode.Sliced;
+        sr.size = new Vector2(initialWidth / BadgeSpriteScale, BadgeHeightLocal / BadgeSpriteScale);
+        sr.color = color;
+        sr.sortingOrder = sortingOrder;
+        sr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        sr.receiveShadows = false;
+        if (mat != null)
+        {
+            sr.sharedMaterial = mat;
+        }
+        return sr;
     }
 
     private static void DrawFullCircle(

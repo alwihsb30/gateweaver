@@ -26,7 +26,7 @@ using Stopwatch = System.Diagnostics.Stopwatch;
 ///   * Input A, Input B, dan Output terkunci rapi sebagai terminal papan roti virtual.
 ///   * 5 Gerbang Logika (AND, OR, XOR, NAND, NOT) diparkir aman di Rak Parkir Atas (pratinjau 3D tanpa kabel/kuota)
 ///     dan dapat dicubit-seret (Air-Pinch & Drag) ke Zona Rakit tengah atau dikembalikan ke Rak Parkir.
-///   * Air-Tap / Pinch singkat pada Input A & Input B menjungkit tuas sakelar fisik 3D (-38° <-> +38°) dengan cooldown 0.55s.
+///   * Air-Tap / Pinch singkat pada Input A & Input B menjungkit tuas sakelar fisik 3D (-38 deg <-> +38 deg) dengan cooldown 0.55s.
 /// </summary>
 public class AirWeavingController : MonoBehaviour
 {
@@ -43,7 +43,7 @@ public class AirWeavingController : MonoBehaviour
     private const float WebCamReleaseDelaySeconds = 0.40f;
     private const float WebCamStartTimeoutSeconds = 4.0f;
 
-    // Geometri Meja Hologram 3D Horizontal (bidang XZ lokal HologramStageRoot, +Y = tinggi melayang di atas meja) — Tahap 4.6 v8.0
+    // Geometri Meja Hologram 3D Horizontal (bidang XZ lokal HologramStageRoot, +Y = tinggi melayang di atas meja) - Tahap 4.6 v8.0
     private const float VideoQuadDepth = 8.0f;
     private const float WorkbenchDepth = 3.82f;
     private const float DepthParallaxScale = 0.38f;
@@ -76,7 +76,7 @@ public class AirWeavingController : MonoBehaviour
     private const float HandMaxBehindVideoQuadMarginMeters = 0.25f;
     private const float MinNearClipSafeOffsetMeters = 0.28f;
 
-    // Parameter Kontrol 2 Tangan Full Free-View 6-DoF Focus-Point Orbit 360° + Ultra-Wide Zoom 0.18x..15x + True Z-Axis Push/Pull
+    // Parameter Kontrol 2 Tangan Full Free-View 6-DoF Focus-Point Orbit 360 deg + Ultra-Wide Zoom 0.18x..15x + True Z-Axis Push/Pull
     private const float TwoHandOrbitYawDegPerUnit = 98.0f;
     private const float TwoHandOrbitPitchDegPerUnit = 98.0f;
     private const float TwoHandOrbitMaxAxisDeltaPerFrameDeg = 16.0f;
@@ -185,7 +185,7 @@ public class AirWeavingController : MonoBehaviour
     private const float OneEuroMaxDtSeconds = 0.200f;
     private const float TwoPi = 6.283185307f;
 
-    // Skala hologram melayang Mode Udara Tahap 4.6 (ramping & anti-fish-eye saat meja di-orbit 360°)
+    // Skala hologram melayang Mode Udara Tahap 4.6 (ramping & anti-fish-eye saat meja di-orbit 360 deg)
     private const float TerminalScale = 0.68f;
     private const float OutputTerminalScale = 0.70f;
     private const float ActiveGateScale = 0.68f;
@@ -208,7 +208,7 @@ public class AirWeavingController : MonoBehaviour
     private const float ParkSlotSnapRadius = 0.38f;
     private const float HandFrameStaleTimeoutSeconds = 0.35f;
 
-    // Efek melayang 3D nyata (sinusoidal bob ±0.014, gentle gimbal sway ±3.5°, 2-axis velocity banking tilt maks ±24°)
+    // Efek melayang 3D nyata (sinusoidal bob +/-0.014, gentle gimbal sway +/-3.5 deg, 2-axis velocity banking tilt maks +/-24 deg)
     private const float FloatBobAmplitude = 0.014f;
     private const float FloatBobSpeed = 1.85f;
     private const float GimbalSwayPitchDeg = 2.6f;
@@ -253,7 +253,7 @@ public class AirWeavingController : MonoBehaviour
         NodeType.NOT
     };
 
-    // Kemiringan dasar GateNode di atas meja horizontal XZ (sejajar bidang meja XZ + sedikit bias ergonomis -4° ke kamera)
+    // Kemiringan dasar GateNode di atas meja horizontal XZ (sejajar bidang meja XZ + sedikit bias ergonomis -4 deg ke kamera)
     private static readonly Quaternion WorkbenchTiltRotation = Quaternion.Euler(-38f, 0f, 0f);
     private static readonly Quaternion NodeBaseTableRotation = Quaternion.Euler(NodeTableErgonomicPitchBiasDeg, 0f, 0f);
 
@@ -751,7 +751,7 @@ public class AirWeavingController : MonoBehaviour
     private CompactHudMenuController subscribedHudMenu;
     private RectTransform cachedFeedbackTextRect;
     private RectTransform cachedFeedbackBackdropRect;
-    private const float ToastBottomStripElevatedY = 94f;
+    private const float ToastBottomStripElevatedY = GwThemeTokens.ToastBottomStripElevatedY;
     private const float ToastPracticeElevatedY = 88f;
     private const float ToastDefaultBottomY = 16f;
     private readonly AirWeavingHandGestureDetector handGestureDetector = new AirWeavingHandGestureDetector();
@@ -887,6 +887,10 @@ public class AirWeavingController : MonoBehaviour
         if (gestureGuide != null)
         {
             gestureGuide.Configure(cachedHudMenu, spatialSfx, ResolveMainCamera(), txtFeedback != null ? txtFeedback.font : null);
+        }
+        if (pedagogicalHud != null)
+        {
+            pedagogicalHud.BindExternalHudTargets(cachedHudMenu, txtFeedback);
         }
     }
 
@@ -1244,6 +1248,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
+        bool isGuideOpen = gestureGuide != null && gestureGuide.IsGuideOverlayOpen;
         Transform stageRoot = stageController != null ? stageController.StageRoot : null;
         float stageZoom = stageController != null ? stageController.CurrentZoomScale : AirWeavingStageController.DefaultZoomScale;
         pedagogicalHud.TickLateVisuals(
@@ -1260,19 +1265,29 @@ public class AirWeavingController : MonoBehaviour
             outputNode,
             activePlacedGatesBuffer,
             debugPassedRowMask,
-            debugFailedRowMask);
+            debugFailedRowMask,
+            isGuideOpen);
 
         SyncBottomToastElevationForAirMode(forceResetToDefault: false);
+        if (isAirWeavingActive)
+        {
+            pedagogicalHud.SyncExternalTopHudAndToastTheme(levelManager, circuitManager, isGuideOpen);
+        }
     }
 
     private void HandlePedagogicalBottomStripChanged(bool isExpanded)
     {
         _ = isExpanded;
         SyncBottomToastElevationForAirMode(forceResetToDefault: !isAirWeavingActive);
+        if (isAirWeavingActive && pedagogicalHud != null)
+        {
+            bool isGuideOpen = gestureGuide != null && gestureGuide.IsGuideOverlayOpen;
+            pedagogicalHud.SyncExternalTopHudAndToastTheme(levelManager, circuitManager, isGuideOpen);
+        }
     }
 
     /// <summary>
-    /// Mengangkat posisi toast/banner bawah ("Arahkan tangan ke kamera" &amp; feedback) tepat di atas Pita Bawah (y = 94px)
+    /// Mengangkat posisi toast/banner bawah ("Arahkan tangan ke kamera" &amp; feedback) tepat di atas Pita Bawah (y = 82px)
     /// saat Pita Bawah Mode Udara terbuka, dan otomatis mengembalikan ke 16px saat dilipat atau kembali ke Mode Kartu v5. Zero-GC.
     /// </summary>
     private void SyncBottomToastElevationForAirMode(bool forceResetToDefault)
@@ -1710,6 +1725,7 @@ public class AirWeavingController : MonoBehaviour
         SyncCableRouterVisualsAfterPoseUpdate(mainCam);
         if (pedagogicalHud != null)
         {
+            pedagogicalHud.BindExternalHudTargets(cachedHudMenu, txtFeedback);
             pedagogicalHud.ActivateForAirWeaving(
                 stageController != null ? stageController.StageRoot : null,
                 mainCam,
@@ -1723,9 +1739,14 @@ public class AirWeavingController : MonoBehaviour
         OnAirWeavingModeChanged?.Invoke(true);
         gestureGuide?.OnAirWeavingModeEntered();
         SyncBottomToastElevationForAirMode(forceResetToDefault: false);
-        if (gestureGuide == null || !gestureGuide.IsGuideOverlayOpen)
+        bool isGuideOpenNow = gestureGuide != null && gestureGuide.IsGuideOverlayOpen;
+        if (!isGuideOpenNow)
         {
-            SetFeedbackImmediate("Mode Udara aktif — Kepal: sakelar Input & pegang gerbang, Cubit: tarik kabel.", FeedbackActiveColor, 2.8f);
+            SetFeedbackImmediate("Mode Udara aktif - Kepal: sakelar Input & pegang gerbang, Cubit: tarik kabel.", GwThemeTokens.TextPrimary, 2.8f);
+        }
+        if (pedagogicalHud != null)
+        {
+            pedagogicalHud.SyncExternalTopHudAndToastTheme(levelManager, circuitManager, isGuideOpenNow);
         }
     }
 
@@ -2163,7 +2184,7 @@ public class AirWeavingController : MonoBehaviour
     ///   dari aksi 1-tangan yang baru mulai &lt;= 190 ms; setelah &gt; 190 ms aksi 1-tangan tetap terkunci aman oleh Arbiter
     ///   dan membuka sub-mode simetris Carry-Pan Tangan Kedua (CableDrag+Fist / GateGrab+Pinch).
     /// - Tidak pernah membatalkan mode 2 tangan yang sudah aktif hanya karena salah satu tangan mendekati tepi layar.
-    /// - Both Hands Pinch: Orbit 360° Quaternion Arcball + Roll + Zoom.
+    /// - Both Hands Pinch: Orbit 360 deg Quaternion Arcball + Roll + Zoom.
     /// - Free Air-Pan 3D: 1 Pinch + 1 Fist (dengan hold hysteresis &amp; Anti-Kick Release Gate).
     /// - Both Hands Fist: tahan 550 ms untuk reset panggung.
     /// </summary>
@@ -2218,7 +2239,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // Predikat anatomi murni (nol lokasi pembatas — berlaku global di seluruh layar kamera)
+        // Predikat anatomi murni (nol lokasi pembatas - berlaku global di seluruh layar kamera)
         bool primaryPurePinch = handGestureDetector.IsPinchActive && !handGestureDetector.IsFistActive;
         bool secondaryPurePinch = secondaryHandGestureDetector.IsPinchActive && !secondaryHandGestureDetector.IsFistActive;
         bool primaryPureFist = handGestureDetector.IsFistActive && !handGestureDetector.IsPinchActive;
@@ -2380,7 +2401,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // 2A. Masuk Both Pinch (Orbit 360° Diagonal Bebas & Focal-Zoom global): stabil >= 40 ms
+        // 2A. Masuk Both Pinch (Orbit 360 deg Diagonal Bebas & Focal-Zoom global): stabil >= 40 ms
         if (bothPurePinch)
         {
             twoHandFreePanConfirmTimer = 0f;
@@ -2559,7 +2580,7 @@ public class AirWeavingController : MonoBehaviour
             Vector2 midDelta = curMid - twoHandPinchPrevMidpointXY;
             twoHandPinchPrevMidpointXY = curMid;
 
-            // Quaternion Arcball 360° langsung pada sumbu layar kamera (camT.up, camT.right, camT.forward) secara pre-multiply:
+            // Quaternion Arcball 360 deg langsung pada sumbu layar kamera (camT.up, camT.right, camT.forward) secara pre-multiply:
             // bobot presisi 60 deg/unit & clamp maksimum per frame agar terasa berat, halus, dan anti-lonjakan.
             float yawDelta = Mathf.Clamp(
                 -midDelta.x * TwoHandOrbitYawDegPerUnit,
@@ -2826,7 +2847,7 @@ public class AirWeavingController : MonoBehaviour
         }
 
         // 2. Anti-Kick Release Gate murni (hanya saat Tangan 2 benar-benar mulai membuka gestur):
-        //    Untuk Fist di Carry-Pan, gunakan ambang longgar (< 76° atau <= 1 jari) agar kepalan yang mengecil saat mundur tidak palsu ter-freeze.
+        //    Untuk Fist di Carry-Pan, gunakan ambang longgar (< 76 deg atau <= 1 jari) agar kepalan yang mengecil saat mundur tidak palsu ter-freeze.
         bool releaseIntentFreeze;
         if (usesFist)
         {
@@ -3664,7 +3685,7 @@ public class AirWeavingController : MonoBehaviour
             airDrawFadeTimer = AirDrawFadeDurationSeconds;
             airDrawPostSpawnCooldown = 0.25f;
             SetFeedbackImmediate(
-                "[Air-Draw] Pola belum dikenali — gambar tegas ^ (AND), O (OR), Z (XOR), V (NAND), atau | (NOT).",
+                "[Air-Draw] Pola belum dikenali - gambar tegas ^ (AND), O (OR), Z (XOR), V (NAND), atau | (NOT).",
                 FeedbackWaitingColor,
                 1.05f);
         }
@@ -4412,7 +4433,7 @@ public class AirWeavingController : MonoBehaviour
         }
 
         // Pengaman nearClipPlane: hanya tahan node yang benar-benar menyerempet lensa di depan pandangan,
-        // agar node yang sah berada jauh di belakang kamera saat Focus-Point Orbit makro (10x–15x) tidak ditarik ke depan lensa.
+        // agar node yang sah berada jauh di belakang kamera saat Focus-Point Orbit makro (10x-15x) tidak ditarik ke depan lensa.
         if (camT != null)
         {
             Vector3 camLocal = camT.InverseTransformPoint(worldPos);
@@ -5589,7 +5610,7 @@ public class AirWeavingController : MonoBehaviour
         }
         else
         {
-            // Hanya 1 tangan terdeteksi: cocokkan ke slot asalnya — DILARANG mempromosikan tangan sekunder ke slot primer 0!
+            // Hanya 1 tangan terdeteksi: cocokkan ke slot asalnya - DILARANG mempromosikan tangan sekunder ke slot primer 0!
             WorkerHandRecord rec0 = snap.hands[0];
             Vector2 palm0 = ComputeNormalizedPalmCenter(rec0.landmarks);
             TrackedHandedness handed0 = rec0.handedness;
