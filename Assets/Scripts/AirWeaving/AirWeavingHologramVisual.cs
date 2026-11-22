@@ -24,13 +24,18 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private const int AuraSegments = 24;
     private const int ReticleSegments = 20;
     private const int PinchRingSegments = 16;
+    private const int DropRingSegments = 16;
     private const int MaxNodeSlots = 8; // InputA, InputB, Output, + 5 Gerbang Logika
     private const int SkeletonJointCount = 21;
 
-    // One-Euro Filter 3D Zero-GC untuk 21 titik visual skeleton tangan (minCutoff 1.35 Hz bunuh jitter, beta 0.06 nol-lag, dCutoff = 1.0 Hz)
-    private const float SkeletonOneEuroMinCutoff = 1.35f;
-    private const float SkeletonOneEuroBeta = 0.060f;
-    private const float SkeletonOneEuroDCutoff = 1.00f;
+    private const float DropDeckMarginX = 4.35f;
+    private const float DropDeckMarginZMin = -2.85f;
+    private const float DropDeckMarginZMax = 3.05f;
+
+    // One-Euro Filter 3D Zero-GC untuk 21 titik visual skeleton tangan Tahap 8 (selaras 1:1 kursor, responsif & bebas jitter webcam)
+    private const float SkeletonOneEuroMinCutoff = 1.70f;
+    private const float SkeletonOneEuroBeta = 0.12f;
+    private const float SkeletonOneEuroDCutoff = 1.75f;
     private const float SkeletonOneEuroWorldSpeedScale = 22.0f;
     private const float SkeletonFadeInRate = 15.0f;
     private const float SkeletonFadeOutRate = 10.0f;
@@ -163,7 +168,20 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private Material twoHandAnchorMat;
     private Material twoHandCenterMat;
 
-    private readonly List<Material> ownedMaterials = new List<Material>(36);
+    // Proyeksi Kedalaman 3D Kursor (Drop-Line vertikal tipis + Cincin Bayangan di lantai grid XZ per slot tangan, Zero-GC)
+    private LineRenderer[] cursorDropLines;
+    private LineRenderer[] cursorShadowRings;
+    private Material[] cursorDropLineMats;
+    private Material[] cursorShadowRingMats;
+    private readonly Vector3[] dropRingBuffer = new Vector3[DropRingSegments];
+    private readonly float[] dropRingCosTable = new float[DropRingSegments];
+    private readonly float[] dropRingSinTable = new float[DropRingSegments];
+
+    private static readonly Color DropLinePrimaryColor = new Color(0.30f, 0.96f, 1.00f, 1.00f);
+    private static readonly Color DropLineSecondaryColor = new Color(0.46f, 0.90f, 1.00f, 1.00f);
+    private static readonly Color DropLineContactColor = new Color(0.84f, 1.00f, 0.34f, 1.00f);
+
+    private readonly List<Material> ownedMaterials = new List<Material>(44);
     private bool isInitialized = false;
 
     public void EnsureVisualsCreated()
@@ -193,6 +211,12 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             float angle = (i / (float)PinchRingSegments) * Mathf.PI * 2f;
             pinchCosTable[i] = Mathf.Cos(angle);
             pinchSinTable[i] = Mathf.Sin(angle);
+        }
+        for (int i = 0; i < DropRingSegments; i++)
+        {
+            float angle = (i / (float)DropRingSegments) * Mathf.PI * 2f;
+            dropRingCosTable[i] = Mathf.Cos(angle);
+            dropRingSinTable[i] = Mathf.Sin(angle);
         }
 
         nodeOuterRings = new LineRenderer[MaxNodeSlots];
@@ -249,6 +273,19 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         twoHandAnchorBRenderer = CreateLoopLine("Holo_TwoHandAnchorB", PinchRingSegments, 0.0095f, twoHandAnchorMat);
         twoHandCenterRingRenderer = CreateLoopLine("Holo_TwoHandCenterCompass", ReticleSegments, 0.0085f, twoHandCenterMat);
 
+        cursorDropLines = new LineRenderer[2];
+        cursorShadowRings = new LineRenderer[2];
+        cursorDropLineMats = new Material[2];
+        cursorShadowRingMats = new Material[2];
+        for (int s = 0; s < 2; s++)
+        {
+            Color initCol = s == 0 ? DropLinePrimaryColor : DropLineSecondaryColor;
+            cursorDropLineMats[s] = CreateSafeSpritesMat(initCol, 2988);
+            cursorShadowRingMats[s] = CreateSafeSpritesMat(initCol, 2989);
+            cursorDropLines[s] = CreateSegmentLine($"Holo_CursorDropLine_{s}", 0.0036f, cursorDropLineMats[s]);
+            cursorShadowRings[s] = CreateLoopLine($"Holo_CursorDeckShadow_{s}", DropRingSegments, 0.0052f, cursorShadowRingMats[s]);
+        }
+
         isInitialized = true;
         HideImmediate();
     }
@@ -299,6 +336,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         SetPinchIndicatorVisible(false);
         SetSecondaryPinchIndicatorVisible(false);
         SetTwoHandLinkVisible(false);
+        SetCursorDepthProjectionVisible(0, false);
+        SetCursorDepthProjectionVisible(1, false);
     }
 
     /// <summary>
@@ -542,7 +581,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         bool isInputB,
         bool isOutput,
         NodeHoloState state,
-        Transform stageRoot = null)
+        Transform stageRoot = null,
+        float inputPushProgress = 0f)
     {
         if (!isInitialized || slotIndex < 0 || slotIndex >= MaxNodeSlots)
         {
@@ -578,6 +618,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         float pulse = 0.5f + (0.5f * Mathf.Sin((Time.unscaledTime * 5.2f) + slotIndex));
         float scaleRatio = Mathf.Clamp(nodeScale / 0.68f, 0.22f, 15.0f);
         float widthScale = Mathf.Clamp(scaleRatio, 0.72f, 2.80f);
+        float pushT = Mathf.Clamp01(inputPushProgress);
 
         Color auraColor;
         float outerRadius;
@@ -586,15 +627,15 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         if (isInputA)
         {
-            auraColor = InputACyanHoverColor;
-            outerRadius = (0.310f * nodeScale) + (0.012f * scaleRatio * pulse);
-            outerWidth = 0.0085f * widthScale;
+            auraColor = Color.Lerp(InputACyanHoverColor, ReticleCoreWhiteColor, pushT * 0.48f);
+            outerRadius = (Mathf.Lerp(0.310f, 0.215f, pushT) * nodeScale) + (0.012f * scaleRatio * pulse * (1f - (0.65f * pushT)));
+            outerWidth = Mathf.Lerp(0.0085f, 0.0145f, pushT) * widthScale;
         }
         else if (isInputB)
         {
-            auraColor = InputBGoldHoverColor;
-            outerRadius = (0.310f * nodeScale) + (0.012f * scaleRatio * pulse);
-            outerWidth = 0.0085f * widthScale;
+            auraColor = Color.Lerp(InputBGoldHoverColor, ReticleCoreWhiteColor, pushT * 0.45f);
+            outerRadius = (Mathf.Lerp(0.310f, 0.215f, pushT) * nodeScale) + (0.012f * scaleRatio * pulse * (1f - (0.65f * pushT)));
+            outerWidth = Mathf.Lerp(0.0085f, 0.0145f, pushT) * widthScale;
         }
         else if (state == NodeHoloState.ReturningToRack)
         {
@@ -621,10 +662,16 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         if (showInnerEquatorialRing && inner != null)
         {
-            float innerAlpha = state == NodeHoloState.ReturningToRack ? 0.68f : 0.48f;
+            bool isInputSwitchHover = (isInputA || isInputB) && state == NodeHoloState.BodyHovered;
+            float innerAlpha = state == NodeHoloState.ReturningToRack
+                ? 0.68f
+                : (isInputSwitchHover ? Mathf.Lerp(0.48f, 0.96f, pushT) : 0.48f);
             Color innerColor = new Color(auraColor.r, auraColor.g, auraColor.b, auraColor.a * innerAlpha);
-            float innerWidth = (state == NodeHoloState.ReturningToRack ? 0.0062f : 0.0044f) * widthScale;
-            DrawAuraCircle(inner, nodeInnerMats[slotIndex], equatorCenter, nodeT.right, nodeT.forward, outerRadius * 0.84f, innerColor, innerWidth);
+            float innerWidth = (state == NodeHoloState.ReturningToRack
+                ? 0.0062f
+                : (isInputSwitchHover ? Mathf.Lerp(0.0044f, 0.0092f, pushT) : 0.0044f)) * widthScale;
+            float innerRadiusScale = isInputSwitchHover ? Mathf.Lerp(0.84f, 0.96f, pushT) : 0.84f;
+            DrawAuraCircle(inner, nodeInnerMats[slotIndex], equatorCenter, nodeT.right, nodeT.forward, outerRadius * innerRadiusScale, innerColor, innerWidth);
         }
         else if (inner != null && inner.enabled)
         {
@@ -1080,6 +1127,124 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         DrawReticleCircle(twoHandCenterRingRenderer, twoHandCenterMat, midPos - (forward * 0.005f), right, up, centerR, (isFistResetMode || isFreePanMode) ? mainCol : ReticleCoreWhiteColor, 0.0085f);
     }
 
+    /// <summary>
+    /// Merender garis proyeksi vertikal tipis (<c>drop-line</c>) + cincin bayangan di bidang lantai grid <c>HologramStageRoot</c>
+    /// agar kedalaman Z monokular tangan langsung terbaca jelas di layar 2D. Memakai buffer <c>Vector3[]</c> pra-alokasi (Zero-GC)
+    /// dan otomatis disembunyikan saat mode 2 tangan / Carry-Pan / overlay aktif.
+    /// </summary>
+    public void UpdateCursorDepthProjection(
+        int handSlot,
+        Transform stageRoot,
+        bool visible,
+        Vector3 cursorWorldPos,
+        bool isActiveContactGesture)
+    {
+        if (!isInitialized || handSlot < 0 || handSlot > 1)
+        {
+            return;
+        }
+
+        if (!visible || stageRoot == null)
+        {
+            SetCursorDepthProjectionVisible(handSlot, false);
+            return;
+        }
+
+        Vector3 localPos = stageRoot.InverseTransformPoint(cursorWorldPos);
+        if (localPos.x < -DropDeckMarginX
+            || localPos.x > DropDeckMarginX
+            || localPos.z < DropDeckMarginZMin
+            || localPos.z > DropDeckMarginZMax)
+        {
+            SetCursorDepthProjectionVisible(handSlot, false);
+            return;
+        }
+
+        float deckY = AirWeavingStageController.ContactRingLocalY + 0.002f;
+        Vector3 floorWorldPos = stageRoot.TransformPoint(new Vector3(localPos.x, deckY, localPos.z));
+        float signedElevY = localPos.y - deckY;
+        float absElevY = Mathf.Abs(signedElevY);
+        float heightNorm = Mathf.Clamp01(absElevY / 1.40f);
+
+        float stageScale = Mathf.Clamp(stageRoot.lossyScale.x, 0.18f, 6.0f);
+        float widthScale = Mathf.Clamp(stageScale, 0.48f, 2.20f);
+        bool nearDeckContact = signedElevY <= 0.06f;
+
+        Color baseCol = (isActiveContactGesture || nearDeckContact)
+            ? DropLineContactColor
+            : (handSlot == 0 ? DropLinePrimaryColor : DropLineSecondaryColor);
+
+        float ringRadius = Mathf.Lerp(0.055f, 0.145f, heightNorm) * stageScale;
+        float ringAlpha = Mathf.Lerp(0.84f, 0.24f, heightNorm);
+        Color ringCol = new Color(baseCol.r, baseCol.g, baseCol.b, ringAlpha);
+        float ringWidth = Mathf.Lerp(0.0062f, 0.0036f, heightNorm) * widthScale;
+
+        LineRenderer shadowLr = cursorShadowRings[handSlot];
+        Material shadowMat = cursorShadowRingMats[handSlot];
+        if (shadowLr != null)
+        {
+            Vector3 axisA = stageRoot.right;
+            Vector3 axisB = stageRoot.forward;
+            for (int i = 0; i < DropRingSegments; i++)
+            {
+                dropRingBuffer[i] = floorWorldPos
+                                    + (axisA * (dropRingCosTable[i] * ringRadius))
+                                    + (axisB * (dropRingSinTable[i] * ringRadius));
+            }
+            if (shadowMat != null)
+            {
+                shadowMat.color = ringCol;
+            }
+            shadowLr.enabled = true;
+            shadowLr.widthMultiplier = ringWidth;
+            shadowLr.startColor = ringCol;
+            shadowLr.endColor = ringCol;
+            shadowLr.SetPositions(dropRingBuffer);
+        }
+
+        LineRenderer dropLr = cursorDropLines[handSlot];
+        Material dropMat = cursorDropLineMats[handSlot];
+        if (dropLr != null)
+        {
+            if (absElevY > 0.030f)
+            {
+                float lineAlpha = Mathf.Lerp(0.56f, 0.20f, heightNorm);
+                Color topCol = new Color(baseCol.r, baseCol.g, baseCol.b, lineAlpha * 0.45f);
+                Color botCol = new Color(baseCol.r, baseCol.g, baseCol.b, lineAlpha);
+                if (dropMat != null)
+                {
+                    dropMat.color = Color.white;
+                }
+                dropLr.enabled = true;
+                dropLr.widthMultiplier = 0.0036f * widthScale;
+                dropLr.startColor = topCol;
+                dropLr.endColor = botCol;
+                dropLr.SetPosition(0, cursorWorldPos);
+                dropLr.SetPosition(1, floorWorldPos);
+            }
+            else if (dropLr.enabled)
+            {
+                dropLr.enabled = false;
+            }
+        }
+    }
+
+    private void SetCursorDepthProjectionVisible(int handSlot, bool visible)
+    {
+        if (handSlot < 0 || handSlot > 1)
+        {
+            return;
+        }
+        if (cursorDropLines != null && cursorDropLines[handSlot] != null && cursorDropLines[handSlot].enabled != visible)
+        {
+            cursorDropLines[handSlot].enabled = visible;
+        }
+        if (cursorShadowRings != null && cursorShadowRings[handSlot] != null && cursorShadowRings[handSlot].enabled != visible)
+        {
+            cursorShadowRings[handSlot].enabled = visible;
+        }
+    }
+
     private void SetTwoHandLinkVisible(bool visible)
     {
         if (twoHandBeamRenderer != null && twoHandBeamRenderer.enabled != visible)
@@ -1359,5 +1524,16 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         secondaryPinchCoreRenderer = null;
         secondaryPinchRingMat = null;
         secondaryPinchCoreMat = null;
+        twoHandBeamRenderer = null;
+        twoHandAnchorARenderer = null;
+        twoHandAnchorBRenderer = null;
+        twoHandCenterRingRenderer = null;
+        twoHandBeamMat = null;
+        twoHandAnchorMat = null;
+        twoHandCenterMat = null;
+        cursorDropLines = null;
+        cursorShadowRings = null;
+        cursorDropLineMats = null;
+        cursorShadowRingMats = null;
     }
 }

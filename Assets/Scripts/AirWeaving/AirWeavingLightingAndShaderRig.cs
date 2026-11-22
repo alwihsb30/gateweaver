@@ -254,12 +254,19 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
             }
         }
 
+        // Upload 5 warna lampu statis Linear sekali saat aktivasi (tidak perlu diulang tiap frame di TickLightingRig)
+        Shader.SetGlobalVector(GwKeyLightColorPropId, KeyLightColorLinear);
+        Shader.SetGlobalVector(GwFillLightColorPropId, FillLightColorLinear);
+        Shader.SetGlobalVector(GwRimLightColorPropId, RimLightColorLinear);
+        Shader.SetGlobalVector(GwHemiSkyColorPropId, HemiSkyColorLinear);
+        Shader.SetGlobalVector(GwHemiGroundColorPropId, HemiGroundColorLinear);
+
         isRigActive = true;
         TickLightingRig(mainCam, stageRoot);
     }
 
     /// <summary>
-    /// Memperbarui vektor arah &amp; warna 3-Point + Hemisphere Lighting Rig (terikat kamera + bias halus panggung)
+    /// Memperbarui vektor arah 3-Point + Hemisphere Lighting Rig (terikat kamera + bias halus panggung)
     /// sekali per frame via Shader.SetGlobalVector (100% Zero-GC, 1-pass ForwardBase, aman orbit 360°).
     /// </summary>
     public void TickLightingRig(Camera mainCam, Transform stageRoot)
@@ -290,14 +297,9 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
         Vector3 hemiUp = (camU + (stageBias * 0.65f)).normalized;
 
         Shader.SetGlobalVector(GwKeyLightDirPropId, new Vector4(keyDir.x, keyDir.y, keyDir.z, 1.0f));
-        Shader.SetGlobalVector(GwKeyLightColorPropId, KeyLightColorLinear);
         Shader.SetGlobalVector(GwFillLightDirPropId, new Vector4(fillDir.x, fillDir.y, fillDir.z, 1.0f));
-        Shader.SetGlobalVector(GwFillLightColorPropId, FillLightColorLinear);
         Shader.SetGlobalVector(GwRimLightDirPropId, new Vector4(rimDir.x, rimDir.y, rimDir.z, 1.0f));
-        Shader.SetGlobalVector(GwRimLightColorPropId, RimLightColorLinear);
         Shader.SetGlobalVector(GwHemiUpDirPropId, new Vector4(hemiUp.x, hemiUp.y, hemiUp.z, 1.0f));
-        Shader.SetGlobalVector(GwHemiSkyColorPropId, HemiSkyColorLinear);
-        Shader.SetGlobalVector(GwHemiGroundColorPropId, HemiGroundColorLinear);
 
         // Selaraskan Directional Light utama ke arah Key Light (tanpa bayangan) untuk kesatuan objek fallback bila ada
         if (primaryDirectionalLight != null && primaryDirectionalLight.isActiveAndEnabled)

@@ -37,6 +37,7 @@ public enum SummonHandPose
 public struct OneEuroFilter1D
 {
     private const float TwoPi = 6.283185307f;
+    private const float MaxActiveCutoffHz = 14.0f;
 
     private bool initialized;
     private float xPrev;
@@ -56,7 +57,7 @@ public struct OneEuroFilter1D
         dxPrev = 0f;
         targetSample = 0f;
         prevRawSample = 0f;
-        activeCutoffHz = 1.4f;
+        activeCutoffHz = 2.0f;
     }
 
     public float PushSample(
@@ -74,7 +75,7 @@ public struct OneEuroFilter1D
             targetSample = rawValue;
             prevRawSample = rawValue;
             dxPrev = 0f;
-            activeCutoffHz = minCutoff;
+            activeCutoffHz = Mathf.Min(MaxActiveCutoffHz, minCutoff);
             return xPrev;
         }
 
@@ -85,7 +86,7 @@ public struct OneEuroFilter1D
 
         float alphaD = ComputeAlpha(safeDt, dCutoff);
         dxPrev += alphaD * (rawDx - dxPrev);
-        activeCutoffHz = minCutoff + (beta * Mathf.Abs(dxPrev));
+        activeCutoffHz = Mathf.Min(MaxActiveCutoffHz, minCutoff + (beta * Mathf.Abs(dxPrev)));
         return xPrev;
     }
 
@@ -117,7 +118,7 @@ public struct OneEuroFilter1D
             targetSample = rawValue;
             prevRawSample = rawValue;
             dxPrev = 0f;
-            activeCutoffHz = minCutoff;
+            activeCutoffHz = Mathf.Min(MaxActiveCutoffHz, minCutoff);
             return xPrev;
         }
 
@@ -128,7 +129,7 @@ public struct OneEuroFilter1D
 
         float alphaD = ComputeAlpha(safeDt, dCutoff);
         dxPrev += alphaD * (rawDx - dxPrev);
-        activeCutoffHz = minCutoff + (beta * Mathf.Abs(dxPrev));
+        activeCutoffHz = Mathf.Min(MaxActiveCutoffHz, minCutoff + (beta * Mathf.Abs(dxPrev)));
 
         float alphaX = ComputeAlpha(safeDt, activeCutoffHz);
         xPrev += alphaX * (rawValue - xPrev);
@@ -148,6 +149,8 @@ public struct OneEuroFilter1D
 /// </summary>
 public struct OneEuroFilter3D
 {
+    private const float MaxActiveCutoffHz = 14.0f;
+
     private bool initialized;
     private Vector3 posPrev;
     private Vector3 velPrev;
@@ -166,7 +169,7 @@ public struct OneEuroFilter3D
         velPrev = Vector3.zero;
         targetSample = Vector3.zero;
         prevRawSample = Vector3.zero;
-        activeCutoffHz = 1.4f;
+        activeCutoffHz = 2.0f;
     }
 
     public Vector3 PushSample(
@@ -184,7 +187,7 @@ public struct OneEuroFilter3D
             targetSample = rawValue;
             prevRawSample = rawValue;
             velPrev = Vector3.zero;
-            activeCutoffHz = minCutoff;
+            activeCutoffHz = Mathf.Min(MaxActiveCutoffHz, minCutoff);
             return posPrev;
         }
 
@@ -197,7 +200,7 @@ public struct OneEuroFilter3D
         velPrev += alphaD * (rawVel - velPrev);
 
         float scaledSpeed = velPrev.magnitude * velocityScale;
-        activeCutoffHz = minCutoff + (beta * scaledSpeed);
+        activeCutoffHz = Mathf.Min(MaxActiveCutoffHz, minCutoff + (beta * scaledSpeed));
         return posPrev;
     }
 
@@ -229,7 +232,7 @@ public struct OneEuroFilter3D
             targetSample = rawValue;
             prevRawSample = rawValue;
             velPrev = Vector3.zero;
-            activeCutoffHz = minCutoff;
+            activeCutoffHz = Mathf.Min(MaxActiveCutoffHz, minCutoff);
             return posPrev;
         }
 
@@ -242,7 +245,7 @@ public struct OneEuroFilter3D
         velPrev += alphaD * (rawVel - velPrev);
 
         float scaledSpeed = velPrev.magnitude * velocityScale;
-        activeCutoffHz = minCutoff + (beta * scaledSpeed);
+        activeCutoffHz = Mathf.Min(MaxActiveCutoffHz, minCutoff + (beta * scaledSpeed));
 
         float alphaX = OneEuroFilter1D.ComputeAlpha(safeDt, activeCutoffHz);
         posPrev += alphaX * (rawValue - posPrev);
@@ -262,24 +265,33 @@ public sealed class AirWeavingHandGestureDetector
     private const float MetricEmaTauSeconds = 0.020f;
     private const float DefaultReferenceDepth = 3.82f;
 
-    // Parameter One-Euro 3D kursor interaksi (minCutoff rendah 1.35-1.45 Hz bunuh micro-jitter, beta 0.055-0.065 nol-lag, dCutoff = 1.0 Hz)
-    private const float CursorOneEuroPalmMinCutoff = 1.40f;
-    private const float CursorOneEuroPalmBeta = 0.060f;
-    private const float CursorOneEuroPinchMinCutoff = 1.35f;
-    private const float CursorOneEuroPinchBeta = 0.055f;
-    private const float CursorOneEuroIndexMinCutoff = 1.40f;
-    private const float CursorOneEuroIndexBeta = 0.065f;
-    private const float CursorOneEuroDCutoff = 1.00f;
+    // Parameter One-Euro 3D kursor interaksi Tahap 8 (responsif gerak cepat bebas karet, stabil anti-jitter di webcam 30 Hz)
+    private const float CursorOneEuroPalmMinCutoff = 1.70f;
+    private const float CursorOneEuroPalmBeta = 0.12f;
+    private const float CursorOneEuroPinchMinCutoff = 1.65f;
+    private const float CursorOneEuroPinchBeta = 0.11f;
+    private const float CursorOneEuroIndexMinCutoff = 1.75f;
+    private const float CursorOneEuroIndexBeta = 0.13f;
+    private const float CursorOneEuroDCutoff = 1.75f;
     private const float CursorOneEuroWorldSpeedScale = 22.0f;
 
-    // Parameter True 3D Hand Depth Tracking berbasis Rigid Metacarpal Palm Span (Tahap 4.7 v8.0)
+    // Parameter True 3D Hand Depth Tracking (Monocular Z-Depth Logaritmik + Baseline Adaptif — Tahap 8 v8.0)
     public const float DefaultComfortPalmSpan = 0.172f;
     private const float MinRigidPalmSpanClamp = 0.030f;
     private const float MaxRigidPalmSpanClamp = 0.620f;
-    private const float PalmSpanOneEuroMinCutoff = 1.15f;
-    private const float PalmSpanOneEuroBeta = 0.08f;
-    private const float PalmSpanOneEuroDCutoff = 1.00f;
+    private const float PalmSpanOneEuroMinCutoff = 1.25f;
+    private const float PalmSpanOneEuroBeta = 0.10f;
+    private const float PalmSpanOneEuroDCutoff = 1.50f;
     private const float PalmSpanMicroDeadzoneRatio = 0.020f;
+    private const float MinAdaptiveBaselinePalmSpan = 0.065f;
+    private const float MaxAdaptiveBaselinePalmSpan = 0.360f;
+    private const float BaselineEntryFastLockSeconds = 0.160f;
+    private const float BaselineEntryFastTauSeconds = 0.18f;
+    private const float BaselineIdleSlowTauSeconds = 8.00f;
+    private const float BaselineCalmLogVelMax = 0.32f;
+    private const float BaselineCalmDelaySeconds = 0.42f;
+    private const float DepthLogMicroDeadzone = 0.024f;
+    private const float IndexPokeEmaTauSeconds = 0.030f;
 
     // Ambang sudut sendi 3D per jari (derajat) — kebal jarak kamera & rotasi miring
     private const float FingerExtendMaxPipDipDeg = 48.0f;
@@ -439,10 +451,20 @@ public sealed class AirWeavingHandGestureDetector
     private Vector2 prevRawIndexTipLocalXY = Vector2.zero;
     private float lastLandmarkUpdateUnscaledTime = -1f;
 
-    // State 1D One-Euro Filter + Micro-Deadzone untuk Rigid Metacarpal Palm Span (True 3D Depth Tracking Tahap 4.7)
+    // State 1D One-Euro Filter + Baseline Adaptif Monocular Z-Depth (Tahap 8 v8.0, Zero-GC)
     private OneEuroFilter1D palmSpanOneEuroFilter;
     private float rawRigidPalmSpan = DefaultComfortPalmSpan;
     private float filteredPalmSpan = DefaultComfortPalmSpan;
+    private bool hasBaselinePalmSpan = false;
+    private float baselinePalmSpan = DefaultComfortPalmSpan;
+    private float baselineEntryElapsed = 0f;
+    private float baselineCalmTimer = 0f;
+    private float prevLogPalmSpan = 0f;
+    private bool hasPrevLogPalmSpan = false;
+    private float depthLogDeltaRaw = 0f;
+    private float depthLogDeltaEffective = 0f;
+    private ScalarEmaFilter indexPokeZEma;
+    private float indexFingerPokeZ = 0f;
 
     // One-Euro Filter 3D Zero-GC untuk posisi kursor telapak, titik bidik Pinch (#4-#8), ujung telunjuk (#8), jempol (#4), & summon tip
     private OneEuroFilter3D palmCursorFilter;
@@ -477,6 +499,10 @@ public sealed class AirWeavingHandGestureDetector
     public int FoldedFingerCount => foldedFingerCount;
     public float RawRigidPalmSpan => rawRigidPalmSpan;
     public float FilteredPalmSpan => filteredPalmSpan;
+    public float BaselinePalmSpan => baselinePalmSpan;
+    public float DepthLogDelta => depthLogDeltaEffective;
+    public float DepthLogDeltaRaw => depthLogDeltaRaw;
+    public float IndexFingerPokeZ => indexFingerPokeZ;
 
     public bool IsPinchActive => isPinchActive;
     public bool PinchJustStarted => pinchJustStarted;
@@ -574,6 +600,16 @@ public sealed class AirWeavingHandGestureDetector
         palmSpanOneEuroFilter.Reset();
         rawRigidPalmSpan = DefaultComfortPalmSpan;
         filteredPalmSpan = DefaultComfortPalmSpan;
+        hasBaselinePalmSpan = false;
+        baselinePalmSpan = DefaultComfortPalmSpan;
+        baselineEntryElapsed = 0f;
+        baselineCalmTimer = 0f;
+        prevLogPalmSpan = 0f;
+        hasPrevLogPalmSpan = false;
+        depthLogDeltaRaw = 0f;
+        depthLogDeltaEffective = 0f;
+        indexPokeZEma.Reset(0f);
+        indexFingerPokeZ = 0f;
         cachedProjectionCamTransform = null;
         cachedProjectionRefDepth = DefaultReferenceDepth;
 
@@ -626,6 +662,14 @@ public sealed class AirWeavingHandGestureDetector
         hasPrevSampleCursors = false;
         lastLandmarkUpdateUnscaledTime = -1f;
         palmSpanOneEuroFilter.Reset();
+        hasBaselinePalmSpan = false;
+        baselineEntryElapsed = 0f;
+        baselineCalmTimer = 0f;
+        hasPrevLogPalmSpan = false;
+        depthLogDeltaRaw = 0f;
+        depthLogDeltaEffective = 0f;
+        indexPokeZEma.Reset(0f);
+        indexFingerPokeZ = 0f;
         ResetScalarEmaFilters();
         ResetCursorFilters();
     }
@@ -661,11 +705,15 @@ public sealed class AirWeavingHandGestureDetector
 
     /// <summary>
     /// Menghitung metrik ukuran telapak kaku (Rigid Metacarpal Span) yang tidak berubah bentuk saat tangan mengepal/mencubit
-    /// dari kombinasi 3D-compensated #0-&gt;#9, #0-&gt;#5, #0-&gt;#17, dan #5-&gt;#17, lalu menyaringnya dengan 1D One-Euro Filter
-    /// + micro-deadzone 2% agar bebas getar saat diam dan responsif saat tangan maju/mundur.
-    /// Dipanggil tepat 1x per frame inferensi per tangan dari AirWeavingController. Zero-GC.
+    /// dari kombinasi 3D-compensated #0-&gt;#9, #0-&gt;#5, #0-&gt;#17, dan #5-&gt;#17, menyaringnya dengan 1D One-Euro Filter,
+    /// memperbarui baseline adaptif jarak duduk (<c>baselinePalmSpan</c>), delta logaritmik (<c>DepthLogDelta</c>),
+    /// serta juluran telunjuk relatif (<c>IndexFingerPokeZ</c>). Dipanggil tepat 1x per frame inferensi per tangan. Zero-GC.
     /// </summary>
-    public float UpdateRigidPalmSpanOnly(List<NormalizedLandmark> landmarks, float sampleDt, float cameraAspect = 1.3333f)
+    public float UpdateRigidPalmSpanOnly(
+        List<NormalizedLandmark> landmarks,
+        float sampleDt,
+        float cameraAspect = 1.3333f,
+        bool freezeBaselineAdaptation = false)
     {
         if (landmarks == null || landmarks.Count < 21)
         {
@@ -674,6 +722,7 @@ public sealed class AirWeavingHandGestureDetector
 
         NormalizedLandmark l0 = landmarks[0];
         NormalizedLandmark l5 = landmarks[5];
+        NormalizedLandmark l8 = landmarks[8];
         NormalizedLandmark l9 = landmarks[9];
         NormalizedLandmark l17 = landmarks[17];
 
@@ -699,24 +748,91 @@ public sealed class AirWeavingHandGestureDetector
         if (!wasInitialized)
         {
             filteredPalmSpan = Mathf.Clamp(oneEuroSpan, MinRigidPalmSpanClamp, MaxRigidPalmSpanClamp);
-            return filteredPalmSpan;
-        }
-
-        // Micro-deadzone halus (~2%) agar kedalaman 3D terkunci tenang saat tangan diam namun mulus tanpa lompatan saat bergerak
-        float deadzoneRadius = Mathf.Max(0.0012f, filteredPalmSpan * PalmSpanMicroDeadzoneRatio);
-        float deltaFromStable = oneEuroSpan - filteredPalmSpan;
-        float absDelta = Mathf.Abs(deltaFromStable);
-        if (absDelta > deadzoneRadius)
-        {
-            float excess = absDelta - deadzoneRadius;
-            filteredPalmSpan += Mathf.Sign(deltaFromStable) * excess;
         }
         else
         {
-            filteredPalmSpan = Mathf.Lerp(filteredPalmSpan, oneEuroSpan, dt * 1.25f);
+            // Micro-deadzone halus (~1.5%) agar kedalaman 3D terkunci tenang saat tangan diam namun responsif saat maju/mundur
+            float deadzoneRadius = Mathf.Max(0.0010f, filteredPalmSpan * PalmSpanMicroDeadzoneRatio);
+            float deltaFromStable = oneEuroSpan - filteredPalmSpan;
+            float absDelta = Mathf.Abs(deltaFromStable);
+            if (absDelta > deadzoneRadius)
+            {
+                float excess = absDelta - deadzoneRadius;
+                filteredPalmSpan += Mathf.Sign(deltaFromStable) * excess;
+            }
+            else
+            {
+                filteredPalmSpan = Mathf.Lerp(filteredPalmSpan, oneEuroSpan, dt * 1.40f);
+            }
+            filteredPalmSpan = Mathf.Clamp(filteredPalmSpan, MinRigidPalmSpanClamp, MaxRigidPalmSpanClamp);
         }
 
-        filteredPalmSpan = Mathf.Clamp(filteredPalmSpan, MinRigidPalmSpanClamp, MaxRigidPalmSpanClamp);
+        // Kalibrasi baseline jarak duduk adaptif otomatis (cepat kunci saat fresh entry, drift amat lambat hanya saat Idle tenang,
+        // dan DIBEKUKAN penuh saat gestur aktif / Push-to-Touch / Carry-Pan / mode 2 tangan)
+        float clampedTargetBase = Mathf.Clamp(filteredPalmSpan, MinAdaptiveBaselinePalmSpan, MaxAdaptiveBaselinePalmSpan);
+        float curLogSpan = Mathf.Log(Mathf.Max(MinRigidPalmSpanClamp, filteredPalmSpan));
+        if (!hasBaselinePalmSpan)
+        {
+            baselinePalmSpan = clampedTargetBase;
+            hasBaselinePalmSpan = true;
+            baselineEntryElapsed = 0f;
+            baselineCalmTimer = 0f;
+            prevLogPalmSpan = curLogSpan;
+            hasPrevLogPalmSpan = true;
+        }
+        else
+        {
+            float logVel = hasPrevLogPalmSpan ? (Mathf.Abs(curLogSpan - prevLogPalmSpan) / dt) : 0f;
+            prevLogPalmSpan = curLogSpan;
+            hasPrevLogPalmSpan = true;
+            baselineEntryElapsed += dt;
+
+            if (!freezeBaselineAdaptation)
+            {
+                if (baselineEntryElapsed < BaselineEntryFastLockSeconds)
+                {
+                    float entryAlpha = 1f - Mathf.Exp(-dt / BaselineEntryFastTauSeconds);
+                    baselinePalmSpan = Mathf.Clamp(
+                        Mathf.Lerp(baselinePalmSpan, clampedTargetBase, entryAlpha),
+                        MinAdaptiveBaselinePalmSpan,
+                        MaxAdaptiveBaselinePalmSpan);
+                }
+                else if (logVel <= BaselineCalmLogVelMax)
+                {
+                    baselineCalmTimer += dt;
+                    if (baselineCalmTimer >= BaselineCalmDelaySeconds)
+                    {
+                        float slowAlpha = 1f - Mathf.Exp(-dt / BaselineIdleSlowTauSeconds);
+                        baselinePalmSpan = Mathf.Clamp(
+                            Mathf.Lerp(baselinePalmSpan, clampedTargetBase, slowAlpha),
+                            MinAdaptiveBaselinePalmSpan,
+                            MaxAdaptiveBaselinePalmSpan);
+                    }
+                }
+                else
+                {
+                    baselineCalmTimer = 0f;
+                }
+            }
+            else
+            {
+                baselineCalmTimer = 0f;
+            }
+        }
+
+        // Delta kedalaman logaritmik simetris: >0 saat tangan maju mendekati layar, <0 saat tangan mundur menjauhi layar
+        depthLogDeltaRaw = Mathf.Log(
+            Mathf.Max(MinRigidPalmSpanClamp, filteredPalmSpan) / Mathf.Max(MinAdaptiveBaselinePalmSpan, baselinePalmSpan));
+        float absLogDelta = Mathf.Abs(depthLogDeltaRaw);
+        depthLogDeltaEffective = absLogDelta > DepthLogMicroDeadzone
+            ? (depthLogDeltaRaw - (Mathf.Sign(depthLogDeltaRaw) * DepthLogMicroDeadzone))
+            : 0f;
+
+        // Juluran ujung telunjuk (#8) maju menuju kamera relatif terhadap pergelangan (#0):
+        // di MediaPipe lm.z negatif = lebih dekat ke kamera -> -(lm8.z - lm0.z) positif saat jari menjulur maju menekan sakelar
+        float rawIndexPoke = Mathf.Clamp(-(l8.z - l0.z), -0.18f, 0.28f);
+        indexFingerPokeZ = indexPokeZEma.Update(rawIndexPoke, dt, IndexPokeEmaTauSeconds);
+
         return filteredPalmSpan;
     }
 

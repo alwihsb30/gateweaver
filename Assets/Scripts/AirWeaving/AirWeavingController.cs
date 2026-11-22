@@ -2,9 +2,11 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.Rendering;
 using TMPro;
 using Mediapipe;
 using Mediapipe.Tasks.Components.Containers;
@@ -14,6 +16,7 @@ using Mediapipe.Tasks.Vision.HandLandmarker;
 using Color = UnityEngine.Color;
 using Landmark = Mediapipe.Tasks.Components.Containers.Landmark;
 using NormalizedLandmark = Mediapipe.Tasks.Components.Containers.NormalizedLandmark;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 /// <summary>
 /// Pengendali Mode Air-Weaving (GateWeaver AR v6.0 Tahap 1 + Tahap 2):
@@ -31,8 +34,10 @@ public class AirWeavingController : MonoBehaviour
     private const int RequestedCamWidth = 480;
     private const int RequestedCamHeight = 360;
     private const int RequestedCamFps = 30;
-    private const int MaxInferenceLongEdge = 288;
+    private const int MaxInferenceLongEdge = 224;
     private const int LandmarkCount = 21;
+    private const int WorkerShutdownJoinTimeoutMs = 1500;
+    private const int MaxAsyncGpuReadbackErrorsBeforeFallback = 3;
 
     private const float VuforiaReleaseDelaySeconds = 0.45f;
     private const float WebCamReleaseDelaySeconds = 0.40f;
@@ -41,7 +46,7 @@ public class AirWeavingController : MonoBehaviour
     // Geometri Meja Hologram 3D Horizontal (bidang XZ lokal HologramStageRoot, +Y = tinggi melayang di atas meja) — Tahap 4.6 v8.0
     private const float VideoQuadDepth = 8.0f;
     private const float WorkbenchDepth = 3.82f;
-    private const float DepthParallaxScale = 0.25f;
+    private const float DepthParallaxScale = 0.38f;
     private const float BaseHoverHeight = AirWeavingStageController.BaseHoverHeight; // +0.22m di atas permukaan meja
     private const float GrabExtraLiftHeight = AirWeavingStageController.GrabExtraLiftHeight; // +0.185m ekstra saat dikepal (~0.405m total, anti-fish-eye)
     private const float InputAHoverHeight = BaseHoverHeight + 0.050f;
@@ -57,15 +62,18 @@ public class AirWeavingController : MonoBehaviour
     private const float ParkingMaxArcYawDeg = 16.0f;
     private const float NodeTableErgonomicPitchBiasDeg = -4.0f;
 
-    // Parameter True 3D Hand Depth Tracking (Rigid Metacarpal Palm Span) & Mode Meja Catur 3D (Tahap 4.7 v8.0)
-    private const float FistGrabDepthGain = 1.24f;
+    // Parameter Monocular Z-Depth 3D Logaritmik + Baseline Adaptif & Mode Meja Catur 3D (Tahap 8 v8.0)
+    private const float SingleHandNeutralHoverFrontOffset = 0.55f;
+    private const float SingleHandDepthMetersPerLog = 1.65f;
+    private const float FistGrabDepthGainMeters = 2.60f;
+    private const float FistGrabDepthLogDeadzone = 0.016f;
     private const float MinGrabCameraDepth = 0.55f;
-    private const float MaxGrabCameraDepth = 14.0f;
-    private const float MinGrabTableLocalY = 0.08f;
-    private const float MaxGrabTableLocalY = 2.40f;
-    private const float HandCursorDepthTrackGain = 0.72f;
-    private const float MinHandRigCameraDepth = 1.25f;
-    private const float MaxHandRigCameraDepth = 5.40f;
+    private const float MaxGrabCameraDepth = 7.75f;
+    private const float MinGrabTableLocalY = 0.14f;
+    private const float MaxGrabTableLocalY = 1.65f;
+    private const float MinHandRigCameraDepth = 0.85f;
+    private const float HandNearClipMinOffsetMeters = 0.35f;
+    private const float HandMaxBehindVideoQuadMarginMeters = 0.25f;
     private const float MinNearClipSafeOffsetMeters = 0.28f;
 
     // Parameter Kontrol 2 Tangan Full Free-View 6-DoF Focus-Point Orbit 360° + Ultra-Wide Zoom 0.18x..15x + True Z-Axis Push/Pull
@@ -133,9 +141,9 @@ public class AirWeavingController : MonoBehaviour
     private const float GateGrabEnterMaxSpeed = 1.85f;
     private const float InputSwitchEnterMaxSpeed = 1.25f;
 
-    // Critically Damped Spring-Damper analitik & Elastic Scale Pop (damping licin, berat, dan konsisten berbasis dt)
-    private const float GateDragSpringOmega = 21.0f;
-    private const float GateDragTargetDampRate = 24.0f;
+    // Critically Damped Spring-Damper analitik & Elastic Scale Pop (responsif gerak cepat Tahap 8, tetap berbobot & konsisten dt)
+    private const float GateDragSpringOmega = 28.0f;
+    private const float GateDragTargetDampRate = 34.0f;
     private const float GateLiftZSpringOmega = 19.0f;
     private const float GateScaleSpringOmega = 22.0f;
     private const float GateSettleSpringOmega = 22.0f;
@@ -149,11 +157,20 @@ public class AirWeavingController : MonoBehaviour
     private const float GateCoastEdgeBounceFactor = 0.30f;
     private const float GateDragVelocitySmoothRate = 18.0f;
 
-    // Soft Magnetic Aim-Assist kalem untuk sakelar Input A/B (R=0.24, maxPull=0.22, blend 18/s, 0 saat >0.85 u/s)
+    // Soft Magnetic Aim-Assist kalem untuk sakelar Input A/B (R=0.24, maxPull=0.22, blend 18/s, 0 saat >1.25 u/s)
     private const float InputSwitchMagnetRadius = 0.24f;
     private const float InputSwitchMagnetMaxPull = 0.22f;
     private const float SoftMagnetMaxHandSpeed = InputSwitchEnterMaxSpeed;
     private const float SoftMagnetOffsetBlendSpeed = 18.0f;
+
+    // Parameter Push-to-Touch Kedalaman Z (#8) pada sakelar Input A/B (Tahap 8: anti-accidental-sweep ~55 ms + Z-rearm)
+    private const float InputPushEngageGapMeters = 0.62f;
+    private const float InputPushTriggerGapMeters = 0.18f;
+    private const float InputPushRelativeLogThreshold = 0.095f;
+    private const float InputPushPokeWeight = 0.65f;
+    private const float InputPushConfirmSeconds = 0.055f;
+    private const float InputPushRearmProgressThreshold = 0.35f;
+    private const float InputPushRearmHoldSeconds = 0.080f;
 
     // Batas dt sampel untuk One-Euro Filter 3D (filter berjalan bersih di AirWeavingHandGestureDetector & AirWeavingHologramVisual)
     private const float OneEuroMinDtSeconds = 0.005f;
@@ -177,7 +194,6 @@ public class AirWeavingController : MonoBehaviour
     private const float ParkedGateHoverRadius = 0.245f;
     private const float InputAirTapRadius = 0.195f;
     private const float InputAirTapRearmRadius = InputAirTapRadius * 1.35f;
-    private const float InputAirTapDwellSeconds = 0.105f;
     private const float InputAirTapCooldownSeconds = 0.40f;
     private const float InputTouchRippleDuration = 0.34f;
     private const float ParkReturnThresholdY = 1.12f;
@@ -395,6 +411,9 @@ public class AirWeavingController : MonoBehaviour
     private CameraClearFlags savedCameraClearFlags = CameraClearFlags.SolidColor;
     private Color savedCameraBgColor = Color.black;
     private bool hasSavedCameraState = false;
+    private bool hasSavedFramePacing = false;
+    private int savedVSyncCount = 1;
+    private int savedTargetFrameRate = 60;
 
     private bool isAirWeavingActive = false;
     private bool isTransitioning = false;
@@ -414,6 +433,12 @@ public class AirWeavingController : MonoBehaviour
     private readonly float[] inputBDwellTimers = new float[2];
     private readonly bool[] inputARequiresExitRearmBySlot = new bool[2];
     private readonly bool[] inputBRequiresExitRearmBySlot = new bool[2];
+    private readonly float[] inputARearmZTimers = new float[2];
+    private readonly float[] inputBRearmZTimers = new float[2];
+    private readonly GateNode[] inputPushHoverTargetBySlot = new GateNode[2];
+    private readonly float[] inputPushEntrySpanBySlot = new float[2];
+    private readonly float[] inputPushEntryPokeBySlot = new float[2];
+    private readonly float[] inputPushProgressBySlot = new float[2];
     private float inputATouchRippleTimer = 0f;
     private float inputBTouchRippleTimer = 0f;
     private readonly Vector2[] inputSwitchMagnetOffsetBySlot = new Vector2[2];
@@ -446,7 +471,6 @@ public class AirWeavingController : MonoBehaviour
 
     private readonly Vector3[] rawLandmarksWorld = new Vector3[LandmarkCount];
     private readonly Vector3[] secondaryRawLandmarksWorld = new Vector3[LandmarkCount];
-    private readonly int[] validHandSourceIndices = new int[2];
     private long lastPrimaryFilterTimestampMs = 0;
     private long lastSecondaryFilterTimestampMs = 0;
     private bool primarySlotActive = false;
@@ -541,16 +565,88 @@ public class AirWeavingController : MonoBehaviour
     private float noHandAbsentTimer = 0f;
     private bool noHandToastShown = false;
 
+    private sealed class WorkerHandRecord
+    {
+        public readonly List<NormalizedLandmark> landmarks = new List<NormalizedLandmark>(LandmarkCount);
+        public readonly List<Landmark> worldLandmarks = new List<Landmark>(LandmarkCount);
+        public bool hasWorldLandmarks;
+        public TrackedHandedness handedness;
+    }
+
+    private sealed class WorkerInferenceSnapshot
+    {
+        public readonly WorkerHandRecord[] hands = { new WorkerHandRecord(), new WorkerHandRecord() };
+        public int validHandCount;
+        public long timestampMs;
+        public string errorMessage;
+    }
+
     private Coroutine transitionCoroutine;
     private WebCamTexture webCamTexture;
     private Color32[] rawWebcamPixels;
-    private NativeArray<byte> nativeWorkPixels;
-    private int workWidth = 0;
-    private int workHeight = 0;
     private int lastCamWidth = 0;
     private int lastCamHeight = 0;
 
-    // Pre-computed 1D LUT untuk downscaler 2-tap diagonal Zero-GC (hanya dihitung ulang bila resolusi/rotasi/mirror berubah)
+    // Jalur GPU Downscale (ARGB32/RGBA32) + AsyncGPUReadback non-blocking + Fallback GetPixels32 + Worker Thread MediaPipe Zero-GC
+    private RenderTexture inferenceRenderTexture;
+    private bool useAsyncGpuReadback = true;
+    private int asyncGpuReadbackErrorCount = 0;
+    private bool gpuReadbackInFlight = false;
+    private AsyncGPUReadbackRequest gpuReadbackRequest;
+    private int gpuReadbackSrcW = 0;
+    private int gpuReadbackSrcH = 0;
+    private int gpuReadbackDstW = 0;
+    private int gpuReadbackDstH = 0;
+    private int gpuReadbackRotAngle = 0;
+    private bool gpuReadbackEffectiveVMirror = false;
+    private bool gpuReadbackHMirror = false;
+    private bool gpuReadbackUseTwoTap = false;
+
+    // 3 slot RGBA32 terpisah ketat: gpuWriteSlotIdx (GPU/Main) | pendingSlotIdx (mailbox) | workerReadSlotIdx (Worker)
+    private readonly NativeArray<byte>[] inputRgbaSlots = new NativeArray<byte>[3];
+    private int inputSlotWidth = 0;
+    private int inputSlotHeight = 0;
+    private int gpuWriteSlotIdx = 0;
+    private int pendingSlotIdx = 1;
+    private int workerReadSlotIdx = 2;
+
+    // Buffer Srgb 3-byte eksklusif Worker Thread (dialokasi & didispose di Main Thread hanya saat worker idle/berhenti)
+    private NativeArray<byte> workerRgbPixels;
+    private int workerRgbWidth = 0;
+    private int workerRgbHeight = 0;
+
+    private readonly object workerFrameLock = new object();
+    private bool hasPendingWorkerFrame = false;
+    private bool workerIsProcessingFrame = false;
+    private int pendingSrcW = 0;
+    private int pendingSrcH = 0;
+    private int pendingDstW = 0;
+    private int pendingDstH = 0;
+    private int pendingRotAngle = 0;
+    private bool pendingEffectiveVMirror = false;
+    private bool pendingHMirror = false;
+    private bool pendingUseTwoTap = false;
+
+    private readonly object workerResultLock = new object();
+    private readonly WorkerInferenceSnapshot[] resultSlots =
+    {
+        new WorkerInferenceSnapshot(),
+        new WorkerInferenceSnapshot(),
+        new WorkerInferenceSnapshot()
+    };
+    private int workerWriteResultIdx = 0;
+    private int latestResultIdx = 1;
+    private int mainReadResultIdx = 2;
+    private int latestResultSequence = 0;
+    private int consumedResultSequence = 0;
+
+    private Thread inferenceWorkerThread;
+    private AutoResetEvent workerWakeEvent;
+    private volatile bool workerStopRequested = false;
+    private readonly Stopwatch inferenceStopwatch = new Stopwatch();
+    private long lastWorkerTimestampMs = 0;
+
+    // Pre-computed 1D LUT untuk konversi RGBA->RGB + rotasi/mirror di Worker Thread (hanya dihitung ulang bila resolusi/rotasi/mirror berubah)
     private int[] downscaleLutX0;
     private int[] downscaleLutX1;
     private int[] downscaleLutY0;
@@ -566,7 +662,6 @@ public class AirWeavingController : MonoBehaviour
     private HandLandmarker handLandmarker;
     private HandLandmarkerResult cachedResult;
     private readonly ImageProcessingOptions zeroRotationOptions = new ImageProcessingOptions(rotationDegrees: 0);
-    private long lastTimestampMs = 0;
 
     // Bidang video kamera depan, panduan meja kerja, & rig 3D tangan neon (semua pra-alokasi, tanpa Collider, tanpa shadow)
     private GameObject videoQuadRootObj;
@@ -934,11 +1029,13 @@ public class AirWeavingController : MonoBehaviour
 
         UpdateVideoQuadTransform(mainCam);
 
-        if (webCamTexture.didUpdateThisFrame && handLandmarker != null && webCamTexture.width > 16 && webCamTexture.height > 16)
+        if (handLandmarker != null && webCamTexture.width > 16 && webCamTexture.height > 16)
         {
-            ProcessCurrentWebCamFrame(mainCam);
+            PumpAsyncCameraInference();
         }
-        else if (isHandDetected || isSecondaryHandDetected || primarySlotActive || secondarySlotActive)
+
+        bool consumedNewInference = TryConsumeLatestWorkerInferenceResult(mainCam);
+        if (!consumedNewInference && (isHandDetected || isSecondaryHandDetected || primarySlotActive || secondarySlotActive))
         {
             timeSinceLastValidHand += dt;
             if (timeSinceLastValidHand >= HandFrameStaleTimeoutSeconds)
@@ -1065,6 +1162,7 @@ public class AirWeavingController : MonoBehaviour
         floatingPropRig?.DeactivateAndRestoreForCardMode();
         lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         ShutdownNativeAndCameraImmediate();
+        RestoreFramePacingState();
     }
 
     private void OnDestroy()
@@ -1100,6 +1198,7 @@ public class AirWeavingController : MonoBehaviour
         lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         RestoreAirWeavingLabelReadabilityStyles();
         ShutdownNativeAndCameraImmediate();
+        RestoreFramePacingState();
         DestroyVisualRigAndMaterials();
         cachedGateNodes.Clear();
         pausedObserverHandlers.Clear();
@@ -1109,6 +1208,32 @@ public class AirWeavingController : MonoBehaviour
         airDrawPointsLocal.Clear();
         cachedMainCamera = null;
         cachedVuforiaBehaviour = null;
+    }
+
+    private void ApplyAirWeavingFramePacingState()
+    {
+        if (!hasSavedFramePacing)
+        {
+            savedVSyncCount = QualitySettings.vSyncCount;
+            savedTargetFrameRate = Application.targetFrameRate;
+            hasSavedFramePacing = true;
+        }
+
+        // Nonaktifkan vSyncCount selama Mode Udara agar Application.targetFrameRate = 60 aktif di Android (anti stair-stepping 120Hz/60Hz)
+        QualitySettings.vSyncCount = 0;
+        Application.targetFrameRate = 60;
+    }
+
+    private void RestoreFramePacingState()
+    {
+        if (!hasSavedFramePacing)
+        {
+            return;
+        }
+
+        QualitySettings.vSyncCount = savedVSyncCount;
+        Application.targetFrameRate = savedTargetFrameRate;
+        hasSavedFramePacing = false;
     }
 
     private void OnApplicationQuit()
@@ -1323,7 +1448,8 @@ public class AirWeavingController : MonoBehaviour
         ResetLandmarkOneEuroFilters();
         ResetSecondaryLandmarkOneEuroFilters();
         ResetExclusiveArbiterAndTwoHandState();
-        lastTimestampMs = 0;
+        ApplyAirWeavingFramePacingState();
+        StartInferenceWorkerThread();
         fpsTimer = 0f;
         timeSinceLastValidHand = 0f;
         inferenceFramesInWindow = 0;
@@ -1436,6 +1562,8 @@ public class AirWeavingController : MonoBehaviour
 
     private void RestoreCameraAndVuforiaState()
     {
+        RestoreFramePacingState();
+
         Camera mainCam = ResolveMainCamera();
         if (mainCam != null && hasSavedCameraState)
         {
@@ -2673,6 +2801,8 @@ public class AirWeavingController : MonoBehaviour
             inputADwellTimers[1] = 0f;
             inputBDwellTimers[0] = 0f;
             inputBDwellTimers[1] = 0f;
+            ClearInputPushHoverState(0);
+            ClearInputPushHoverState(1);
             inputSwitchMagnetOffsetBySlot[0] = Vector2.zero;
             inputSwitchMagnetOffsetBySlot[1] = Vector2.zero;
             isPinching = false;
@@ -2717,11 +2847,18 @@ public class AirWeavingController : MonoBehaviour
                         handRayDir.Normalize();
                     }
 
-                    // Hitung target jarak kamera 3D nyata khusus kamera depan (Front-Cam Mirror Depth):
-                    // Tangan didorong maju ke arah layar (PalmSpan membesar) -> targetCamDepth bertambah (objek terdorong masuk ke dalam meja)
+                    // Hitung target jarak kamera 3D logaritmik simetris (Monocular Z-Depth Tahap 8):
+                    // Tangan didorong maju ke layar (PalmSpan membesar) -> logDelta positif -> objek terdorong masuk/turun mendekati dek;
+                    // tangan mundur menjauhi layar -> logDelta negatif -> objek terangkat naik dalam ruang 3D.
+                    float safeMinGrabDepth = Mathf.Max(MinGrabCameraDepth, mainCam.nearClipPlane + HandNearClipMinOffsetMeters);
+                    float safeMaxGrabDepth = Mathf.Min(MaxGrabCameraDepth, VideoQuadDepth - HandMaxBehindVideoQuadMarginMeters);
                     float currentFilteredPalmSpan = Mathf.Max(0.055f, grabDetector.FilteredPalmSpan);
-                    float spanDepthRatio = Mathf.Pow(currentFilteredPalmSpan / Mathf.Max(0.055f, grabStartPalmSpan), FistGrabDepthGain);
-                    float baseGrabDepth = grabStartCameraDepth * spanDepthRatio;
+                    float grabLogDelta = Mathf.Log(currentFilteredPalmSpan / Mathf.Max(0.055f, grabStartPalmSpan));
+                    float absGrabLog = Mathf.Abs(grabLogDelta);
+                    float effGrabLog = absGrabLog > FistGrabDepthLogDeadzone
+                        ? (grabLogDelta - (Mathf.Sign(grabLogDelta) * FistGrabDepthLogDeadzone))
+                        : 0f;
+                    float baseGrabDepth = grabStartCameraDepth + (effGrabLog * FistGrabDepthGainMeters);
 
                     // Kompensasi kedalaman mulus saat panggung bergeser X/Y/Z oleh Carry-Pan atau Auto Edge-Pan
                     // agar gerbang tetap menempel di bawah kepalan Tangan 1 tanpa melompat vertikal/kedalaman
@@ -2761,13 +2898,13 @@ public class AirWeavingController : MonoBehaviour
                                 }
                                 grabStageDepthCompMeters = Mathf.Clamp(
                                     grabStageDepthCompMeters + depthCompDelta,
-                                    MinGrabCameraDepth - baseGrabDepth,
-                                    MaxGrabCameraDepth - baseGrabDepth);
+                                    safeMinGrabDepth - baseGrabDepth,
+                                    safeMaxGrabDepth - baseGrabDepth);
                             }
                         }
                     }
 
-                    float targetCamDepth = Mathf.Clamp(baseGrabDepth + grabStageDepthCompMeters, MinGrabCameraDepth, MaxGrabCameraDepth);
+                    float targetCamDepth = Mathf.Clamp(baseGrabDepth + grabStageDepthCompMeters, safeMinGrabDepth, safeMaxGrabDepth);
                     Vector3 targetWorldPos = camPos + (handRayDir * targetCamDepth);
 
                     Transform stageRoot = stageController != null ? stageController.StageRoot : null;
@@ -2777,8 +2914,8 @@ public class AirWeavingController : MonoBehaviour
                         Vector3 stageLocal3D = stageRoot.InverseTransformPoint(targetWorldPos);
                         targetStageXZ = new Vector2(stageLocal3D.x, stageLocal3D.z);
                         float defaultLiftedY = ComputeArenaBaseHoverHeightY(targetStageXZ, aspectScale, grabbed.slotIndex) + GrabExtraLiftHeight;
-                        // Padukan posisi tinggi 3D langsung dari ray tangan dengan angkatan dasar di atas permukaan meja (localY >= 0.08f)
-                        liftedTargetHeightY = Mathf.Clamp(Mathf.Max(MinGrabTableLocalY, Mathf.Lerp(defaultLiftedY, stageLocal3D.y, 0.72f)), MinGrabTableLocalY, MaxGrabTableLocalY);
+                        // Beri bobot elevasi 3D nyata (0.90) agar maju-mundur tangan mengatur tinggi/kedalaman gerbang secara langsung
+                        liftedTargetHeightY = Mathf.Clamp(Mathf.Lerp(defaultLiftedY, stageLocal3D.y, 0.90f), MinGrabTableLocalY, MaxGrabTableLocalY);
                     }
                     else
                     {
@@ -2868,6 +3005,8 @@ public class AirWeavingController : MonoBehaviour
             inputADwellTimers[1] = 0f;
             inputBDwellTimers[0] = 0f;
             inputBDwellTimers[1] = 0f;
+            ClearInputPushHoverState(0);
+            ClearInputPushHoverState(1);
             DecayInputSwitchMagnetOffset(0, dt);
             DecayInputSwitchMagnetOffset(1, dt);
             wasPinching = isPinching;
@@ -2923,6 +3062,8 @@ public class AirWeavingController : MonoBehaviour
             inputADwellTimers[1] = 0f;
             inputBDwellTimers[0] = 0f;
             inputBDwellTimers[1] = 0f;
+            ClearInputPushHoverState(0);
+            ClearInputPushHoverState(1);
             DecayInputSwitchMagnetOffset(0, dt);
             DecayInputSwitchMagnetOffset(1, dt);
             wasPinching = isPinching;
@@ -2955,6 +3096,7 @@ public class AirWeavingController : MonoBehaviour
                 }
                 inputADwellTimers[handSlot] = 0f;
                 inputBDwellTimers[handSlot] = 0f;
+                ClearInputPushHoverState(handSlot);
                 DecayInputSwitchMagnetOffset(handSlot, dt);
                 if (activeInteractionMode == ActiveInteractionMode.InputSwitch && activeInteractionHandSlot == handSlot)
                 {
@@ -2998,6 +3140,7 @@ public class AirWeavingController : MonoBehaviour
             {
                 inputADwellTimers[handSlot] = 0f;
                 inputBDwellTimers[handSlot] = 0f;
+                ClearInputPushHoverState(handSlot);
                 DecayInputSwitchMagnetOffset(handSlot, dt);
                 if (activeInteractionMode == ActiveInteractionMode.InputSwitch && activeInteractionHandSlot == handSlot)
                 {
@@ -3523,12 +3666,77 @@ public class AirWeavingController : MonoBehaviour
             inputBDwellTimers[s] = 0f;
             inputARequiresExitRearmBySlot[s] = false;
             inputBRequiresExitRearmBySlot[s] = false;
+            inputARearmZTimers[s] = 0f;
+            inputBRearmZTimers[s] = 0f;
+            inputPushHoverTargetBySlot[s] = null;
+            inputPushEntrySpanBySlot[s] = AirWeavingHandGestureDetector.DefaultComfortPalmSpan;
+            inputPushEntryPokeBySlot[s] = 0f;
+            inputPushProgressBySlot[s] = 0f;
             inputSwitchMagnetOffsetBySlot[s] = Vector2.zero;
         }
         inputATouchRippleTimer = 0f;
         inputBTouchRippleTimer = 0f;
         inputAScalePop.Reset();
         inputBScalePop.Reset();
+    }
+
+    private void ClearInputPushHoverState(int handSlot)
+    {
+        inputPushHoverTargetBySlot[handSlot] = null;
+        inputPushProgressBySlot[handSlot] = 0f;
+        inputARearmZTimers[handSlot] = 0f;
+        inputBRearmZTimers[handSlot] = 0f;
+    }
+
+    private float EvaluateInputPushDepthProgress(
+        int handSlot,
+        AirWeavingHandGestureDetector detector,
+        Camera mainCam,
+        GateNode targetSwitchNode)
+    {
+        float curSpan = Mathf.Max(0.045f, detector.FilteredPalmSpan);
+        float curPoke = detector.IndexFingerPokeZ;
+
+        if (inputPushHoverTargetBySlot[handSlot] != targetSwitchNode)
+        {
+            inputPushHoverTargetBySlot[handSlot] = targetSwitchNode;
+            inputPushEntrySpanBySlot[handSlot] = curSpan;
+            inputPushEntryPokeBySlot[handSlot] = curPoke;
+        }
+        else
+        {
+            // Jika pengguna sempat memundurkan tangan saat hover di atas sakelar, ikuti posisi mundur terendah
+            // agar dorongan maju berikutnya langsung responsif dari titik rehat terbaru.
+            if (curSpan < inputPushEntrySpanBySlot[handSlot])
+            {
+                inputPushEntrySpanBySlot[handSlot] = curSpan;
+            }
+            if (curPoke < inputPushEntryPokeBySlot[handSlot])
+            {
+                inputPushEntryPokeBySlot[handSlot] = curPoke;
+            }
+        }
+
+        float absPushProg = 0f;
+        if (mainCam != null && targetSwitchNode != null)
+        {
+            Transform camT = mainCam.transform;
+            float tipCamZ = camT.InverseTransformPoint(detector.IndexTipWorldPosition).z;
+            float switchCamZ = camT.InverseTransformPoint(targetSwitchNode.transform.position).z;
+            float depthGap = switchCamZ - tipCamZ;
+            absPushProg = Mathf.Clamp01(
+                (InputPushEngageGapMeters - depthGap)
+                / Mathf.Max(0.05f, InputPushEngageGapMeters - InputPushTriggerGapMeters));
+        }
+
+        float relPalmLog = Mathf.Log(curSpan / Mathf.Max(0.045f, inputPushEntrySpanBySlot[handSlot]));
+        float relPoke = Mathf.Max(0f, curPoke - inputPushEntryPokeBySlot[handSlot]);
+        float relCombined = relPalmLog + (InputPushPokeWeight * relPoke);
+        float relPushProg = Mathf.Clamp01(relCombined / InputPushRelativeLogThreshold);
+
+        float progress = Mathf.Max(absPushProg, relPushProg);
+        inputPushProgressBySlot[handSlot] = progress;
+        return progress;
     }
 
     private void DecayInputSwitchMagnetOffset(int handSlot, float dt)
@@ -3598,6 +3806,7 @@ public class AirWeavingController : MonoBehaviour
         {
             inputADwellTimers[handSlot] = 0f;
             inputBDwellTimers[handSlot] = 0f;
+            ClearInputPushHoverState(handSlot);
             DecayInputSwitchMagnetOffset(handSlot, dt);
             if (isOwner)
             {
@@ -3644,14 +3853,16 @@ public class AirWeavingController : MonoBehaviour
         float scaledTapRadiusA = InputAirTapRadius * scaleA;
         float scaledTapRadiusB = InputAirTapRadius * scaleB;
 
-        // Logika Exit-to-Rearm WAJIB memakai posisi ujung jari mentah (rawDistA/rawDistB) agar tidak pernah nyangkut oleh magnet
+        // Logika Exit-to-Rearm 2D WAJIB memakai posisi ujung jari mentah (rawDistA/rawDistB) agar tidak pernah nyangkut oleh magnet
         if (inputARequiresExitRearmBySlot[handSlot] && rawDistA > scaledRearmRadiusA)
         {
             inputARequiresExitRearmBySlot[handSlot] = false;
+            inputARearmZTimers[handSlot] = 0f;
         }
         if (inputBRequiresExitRearmBySlot[handSlot] && rawDistB > scaledRearmRadiusB)
         {
             inputBRequiresExitRearmBySlot[handSlot] = false;
+            inputBRearmZTimers[handSlot] = 0f;
         }
 
         // Gerbang Anatomi, Quality Gate, Neutral Cooldown, & Velocity Gate ketat (cegah tangan lewat / terbuka lebar memicu sakelar)
@@ -3666,6 +3877,7 @@ public class AirWeavingController : MonoBehaviour
         {
             inputADwellTimers[handSlot] = Mathf.Max(0f, inputADwellTimers[handSlot] - (dt * 6f));
             inputBDwellTimers[handSlot] = Mathf.Max(0f, inputBDwellTimers[handSlot] - (dt * 6f));
+            ClearInputPushHoverState(handSlot);
             DecayInputSwitchMagnetOffset(handSlot, dt);
             if (isOwner && inputADwellTimers[handSlot] <= 0f && inputBDwellTimers[handSlot] <= 0f)
             {
@@ -3706,7 +3918,30 @@ public class AirWeavingController : MonoBehaviour
         {
             slotHoveredInput = inputANode;
             inputBDwellTimers[handSlot] = Mathf.Max(0f, inputBDwellTimers[handSlot] - (dt * 4f));
-            if (speedAllowed && !inputARequiresExitRearmBySlot[handSlot] && inputATapCooldown <= 0f)
+            inputBRearmZTimers[handSlot] = 0f;
+
+            float pushProgA = EvaluateInputPushDepthProgress(handSlot, detector, mainCam, inputANode);
+            if (inputARequiresExitRearmBySlot[handSlot])
+            {
+                if (pushProgA < InputPushRearmProgressThreshold)
+                {
+                    inputARearmZTimers[handSlot] += dt;
+                    if (inputARearmZTimers[handSlot] >= InputPushRearmHoldSeconds)
+                    {
+                        inputARequiresExitRearmBySlot[handSlot] = false;
+                        inputARearmZTimers[handSlot] = 0f;
+                        inputPushEntrySpanBySlot[handSlot] = Mathf.Max(0.045f, detector.FilteredPalmSpan);
+                        inputPushEntryPokeBySlot[handSlot] = detector.IndexFingerPokeZ;
+                    }
+                }
+                else
+                {
+                    inputARearmZTimers[handSlot] = 0f;
+                }
+            }
+
+            bool depthCrossedA = pushProgA >= 0.999f;
+            if (speedAllowed && depthCrossedA && !inputARequiresExitRearmBySlot[handSlot] && inputATapCooldown <= 0f)
             {
                 if (activeInteractionMode == ActiveInteractionMode.Idle)
                 {
@@ -3717,11 +3952,13 @@ public class AirWeavingController : MonoBehaviour
                 }
                 if (isOwner)
                 {
+                    // Konfirmasi singkat ~55 ms pasca tembus ambang kedalaman (anti-accidental-sweep menyamping)
                     inputADwellTimers[handSlot] += dt;
-                    if (inputADwellTimers[handSlot] >= InputAirTapDwellSeconds)
+                    if (inputADwellTimers[handSlot] >= InputPushConfirmSeconds)
                     {
                         inputADwellTimers[handSlot] = 0f;
                         inputARequiresExitRearmBySlot[handSlot] = true;
+                        inputARearmZTimers[handSlot] = 0f;
                         inputATapCooldown = InputAirTapCooldownSeconds;
                         inputATouchRippleTimer = InputTouchRippleDuration;
                         ToggleInputTerminalNode(isInputB: false);
@@ -3731,7 +3968,7 @@ public class AirWeavingController : MonoBehaviour
             }
             else
             {
-                inputADwellTimers[handSlot] = Mathf.Max(0f, inputADwellTimers[handSlot] - (dt * 4f));
+                inputADwellTimers[handSlot] = Mathf.Max(0f, inputADwellTimers[handSlot] - (dt * 6f));
                 if (isOwner && inputADwellTimers[handSlot] <= 0f && inputBDwellTimers[handSlot] <= 0f)
                 {
                     ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
@@ -3742,7 +3979,30 @@ public class AirWeavingController : MonoBehaviour
         {
             slotHoveredInput = inputBNode;
             inputADwellTimers[handSlot] = Mathf.Max(0f, inputADwellTimers[handSlot] - (dt * 4f));
-            if (speedAllowed && !inputBRequiresExitRearmBySlot[handSlot] && inputBTapCooldown <= 0f)
+            inputARearmZTimers[handSlot] = 0f;
+
+            float pushProgB = EvaluateInputPushDepthProgress(handSlot, detector, mainCam, inputBNode);
+            if (inputBRequiresExitRearmBySlot[handSlot])
+            {
+                if (pushProgB < InputPushRearmProgressThreshold)
+                {
+                    inputBRearmZTimers[handSlot] += dt;
+                    if (inputBRearmZTimers[handSlot] >= InputPushRearmHoldSeconds)
+                    {
+                        inputBRequiresExitRearmBySlot[handSlot] = false;
+                        inputBRearmZTimers[handSlot] = 0f;
+                        inputPushEntrySpanBySlot[handSlot] = Mathf.Max(0.045f, detector.FilteredPalmSpan);
+                        inputPushEntryPokeBySlot[handSlot] = detector.IndexFingerPokeZ;
+                    }
+                }
+                else
+                {
+                    inputBRearmZTimers[handSlot] = 0f;
+                }
+            }
+
+            bool depthCrossedB = pushProgB >= 0.999f;
+            if (speedAllowed && depthCrossedB && !inputBRequiresExitRearmBySlot[handSlot] && inputBTapCooldown <= 0f)
             {
                 if (activeInteractionMode == ActiveInteractionMode.Idle)
                 {
@@ -3753,11 +4013,13 @@ public class AirWeavingController : MonoBehaviour
                 }
                 if (isOwner)
                 {
+                    // Konfirmasi singkat ~55 ms pasca tembus ambang kedalaman (anti-accidental-sweep menyamping)
                     inputBDwellTimers[handSlot] += dt;
-                    if (inputBDwellTimers[handSlot] >= InputAirTapDwellSeconds)
+                    if (inputBDwellTimers[handSlot] >= InputPushConfirmSeconds)
                     {
                         inputBDwellTimers[handSlot] = 0f;
                         inputBRequiresExitRearmBySlot[handSlot] = true;
+                        inputBRearmZTimers[handSlot] = 0f;
                         inputBTapCooldown = InputAirTapCooldownSeconds;
                         inputBTouchRippleTimer = InputTouchRippleDuration;
                         ToggleInputTerminalNode(isInputB: true);
@@ -3767,7 +4029,7 @@ public class AirWeavingController : MonoBehaviour
             }
             else
             {
-                inputBDwellTimers[handSlot] = Mathf.Max(0f, inputBDwellTimers[handSlot] - (dt * 4f));
+                inputBDwellTimers[handSlot] = Mathf.Max(0f, inputBDwellTimers[handSlot] - (dt * 6f));
                 if (isOwner && inputADwellTimers[handSlot] <= 0f && inputBDwellTimers[handSlot] <= 0f)
                 {
                     ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
@@ -3776,8 +4038,9 @@ public class AirWeavingController : MonoBehaviour
         }
         else
         {
-            inputADwellTimers[handSlot] = Mathf.Max(0f, inputADwellTimers[handSlot] - (dt * 4f));
-            inputBDwellTimers[handSlot] = Mathf.Max(0f, inputBDwellTimers[handSlot] - (dt * 4f));
+            inputADwellTimers[handSlot] = Mathf.Max(0f, inputADwellTimers[handSlot] - (dt * 6f));
+            inputBDwellTimers[handSlot] = Mathf.Max(0f, inputBDwellTimers[handSlot] - (dt * 6f));
+            ClearInputPushHoverState(handSlot);
             if (isOwner && inputADwellTimers[handSlot] <= 0f && inputBDwellTimers[handSlot] <= 0f)
             {
                 ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
@@ -4244,7 +4507,10 @@ public class AirWeavingController : MonoBehaviour
             }
         }
 
-        UpdateAirWeavingLabelsAndTruthPodSpatialPose(mainCam);
+        if (snapImmediately)
+        {
+            UpdateAirWeavingLabelsAndTruthPodSpatialPose(mainCam);
+        }
     }
 
     private int FindNearestGateSlotIndex(Camera mainCam, Vector3 cursorWorldPos, float placedMaxRadius, float parkedMaxRadius)
@@ -4328,11 +4594,133 @@ public class AirWeavingController : MonoBehaviour
     }
 
     // =========================================================================
-    // PER-FRAME INFERENCE, 1:1 COORDINATE MAPPING, SMOOTHING, & PINCH RATIO
+    // ASYNC GPU READBACK + DEDICATED WORKER THREAD MEDIAPIPE & VOLUMETRIC 3D Z
     // =========================================================================
 
-    private void ProcessCurrentWebCamFrame(Camera mainCam)
+    private void StartInferenceWorkerThread()
     {
+        StopInferenceWorkerThread();
+
+        useAsyncGpuReadback = SystemInfo.supportsAsyncGPUReadback;
+        asyncGpuReadbackErrorCount = 0;
+        gpuReadbackInFlight = false;
+
+        lock (workerFrameLock)
+        {
+            hasPendingWorkerFrame = false;
+            workerIsProcessingFrame = false;
+            gpuWriteSlotIdx = 0;
+            pendingSlotIdx = 1;
+            workerReadSlotIdx = 2;
+        }
+
+        lock (workerResultLock)
+        {
+            workerWriteResultIdx = 0;
+            latestResultIdx = 1;
+            mainReadResultIdx = 2;
+            latestResultSequence = 0;
+            consumedResultSequence = 0;
+            for (int i = 0; i < resultSlots.Length; i++)
+            {
+                resultSlots[i].validHandCount = 0;
+                resultSlots[i].timestampMs = 0;
+                resultSlots[i].errorMessage = null;
+            }
+        }
+
+        workerStopRequested = false;
+        lastWorkerTimestampMs = 0;
+        inferenceStopwatch.Restart();
+
+        workerWakeEvent = new AutoResetEvent(false);
+        inferenceWorkerThread = new Thread(InferenceWorkerLoop)
+        {
+            Name = "GateWeaver_MP_Worker",
+            IsBackground = true
+        };
+        inferenceWorkerThread.Start();
+    }
+
+    private bool StopInferenceWorkerThread()
+    {
+        workerStopRequested = true;
+        if (workerWakeEvent != null)
+        {
+            try
+            {
+                workerWakeEvent.Set();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Abaikan bila event sudah ditutup
+            }
+        }
+
+        bool exitedCleanly = true;
+        if (inferenceWorkerThread != null)
+        {
+            if (inferenceWorkerThread.IsAlive)
+            {
+                exitedCleanly = inferenceWorkerThread.Join(WorkerShutdownJoinTimeoutMs);
+                if (!exitedCleanly)
+                {
+                    Debug.LogWarning("[AirWeavingController] Worker thread MediaPipe belum berhenti dalam 1500 ms.");
+                }
+            }
+            inferenceWorkerThread = null;
+        }
+
+        if (workerWakeEvent != null)
+        {
+            workerWakeEvent.Dispose();
+            workerWakeEvent = null;
+        }
+
+        inferenceStopwatch.Stop();
+        return exitedCleanly;
+    }
+
+    private void PumpAsyncCameraInference()
+    {
+        // 1. Selesaikan AsyncGPUReadback yang sedang berjalan (polling Zero-GC di Main Thread)
+        if (gpuReadbackInFlight)
+        {
+            if (!gpuReadbackRequest.done)
+            {
+                return;
+            }
+
+            gpuReadbackInFlight = false;
+            if (gpuReadbackRequest.hasError)
+            {
+                asyncGpuReadbackErrorCount++;
+                if (asyncGpuReadbackErrorCount >= MaxAsyncGpuReadbackErrorsBeforeFallback)
+                {
+                    useAsyncGpuReadback = false;
+                    Debug.LogWarning("[AirWeavingController] AsyncGPUReadback gagal berulang; beralih otomatis ke fallback GetPixels32().");
+                }
+                return;
+            }
+
+            asyncGpuReadbackErrorCount = 0;
+            CommitGpuWriteSlotToWorker(
+                gpuReadbackSrcW,
+                gpuReadbackSrcH,
+                gpuReadbackDstW,
+                gpuReadbackDstH,
+                gpuReadbackRotAngle,
+                gpuReadbackEffectiveVMirror,
+                gpuReadbackHMirror,
+                gpuReadbackUseTwoTap);
+        }
+
+        // 2. Hanya jadwalkan frame baru saat WebCamTexture benar-benar menghasilkan frame baru
+        if (!webCamTexture.didUpdateThisFrame)
+        {
+            return;
+        }
+
         int camW = webCamTexture.width;
         int camH = webCamTexture.height;
         int rotAngle = ((webCamTexture.videoRotationAngle % 360) + 360) % 360;
@@ -4345,55 +4733,397 @@ public class AirWeavingController : MonoBehaviour
         int targetW = Mathf.Max(64, (Mathf.RoundToInt(uprightW * downscale) / 4) * 4);
         int targetH = Mathf.Max(64, (Mathf.RoundToInt(uprightH * downscale) / 4) * 4);
 
-        EnsurePixelBuffersAllocated(camW, camH, targetW, targetH);
+        bool useGpuPath = useAsyncGpuReadback && SystemInfo.supportsAsyncGPUReadback;
+        int srcW = useGpuPath ? (isRotated90 ? targetH : targetW) : camW;
+        int srcH = useGpuPath ? (isRotated90 ? targetW : targetH) : camH;
 
-        webCamTexture.GetPixels32(rawWebcamPixels);
-        FillUprightMirroredRgbaBuffer(camW, camH, targetW, targetH, rotAngle, vMirror, mirrorHorizontalDisplay);
-
-        long timestampMs = (long)(Time.realtimeSinceStartupAsDouble * 1000.0);
-        if (timestampMs <= lastTimestampMs)
+        if (!EnsureAsyncInferenceBuffersReady(camW, camH, srcW, srcH, targetW, targetH, useGpuPath))
         {
-            timestampMs = lastTimestampMs + 1;
+            // Worker masih menyelesaikan frame terakhir tepat saat perubahan resolusi; coba lagi frame render berikutnya (16 ms)
+            return;
         }
-        lastTimestampMs = timestampMs;
 
-        bool detected = false;
-        try
+        if (useGpuPath && inferenceRenderTexture != null)
         {
-            using (Image mpImage = new Image(
-                ImageFormat.Types.Format.Srgba,
+            RenderTexture prevActive = RenderTexture.active;
+            Graphics.Blit(webCamTexture, inferenceRenderTexture);
+            RenderTexture.active = prevActive;
+
+            // Paritas orientasi vertikal OpenGLES3 & Windows DX11:
+            // Graphics.Blit(webCamTexture, RT) + AsyncGPUReadback selalu mengembalikan baris 0 = v=0 (bawah tekstur),
+            // 100% identik dengan WebCamTexture.GetPixels32() di DX11 maupun OpenGLES3 (tanpa XOR graphicsUVStartsAtTop).
+            gpuReadbackSrcW = srcW;
+            gpuReadbackSrcH = srcH;
+            gpuReadbackDstW = targetW;
+            gpuReadbackDstH = targetH;
+            gpuReadbackRotAngle = rotAngle;
+            gpuReadbackEffectiveVMirror = vMirror;
+            gpuReadbackHMirror = mirrorHorizontalDisplay;
+            gpuReadbackUseTwoTap = false;
+
+            gpuReadbackRequest = AsyncGPUReadback.RequestIntoNativeArray(
+                ref inputRgbaSlots[gpuWriteSlotIdx],
+                inferenceRenderTexture,
+                0,
+                TextureFormat.RGBA32);
+            gpuReadbackInFlight = true;
+        }
+        else
+        {
+            // Fallback aman GetPixels32() -> salin ke slot RGBA eksklusif Main Thread -> proses LUT & MediaPipe di Worker Thread
+            webCamTexture.GetPixels32(rawWebcamPixels);
+            NativeArray<Color32> dstColors = inputRgbaSlots[gpuWriteSlotIdx].Reinterpret<Color32>(1);
+            dstColors.CopyFrom(rawWebcamPixels);
+
+            CommitGpuWriteSlotToWorker(
+                camW,
+                camH,
                 targetW,
                 targetH,
-                targetW * 4,
-                nativeWorkPixels))
+                rotAngle,
+                vMirror,
+                mirrorHorizontalDisplay,
+                useTwoTap: true);
+        }
+    }
+
+    private void CommitGpuWriteSlotToWorker(
+        int srcW,
+        int srcH,
+        int dstW,
+        int dstH,
+        int rotAngle,
+        bool effectiveVMirror,
+        bool hMirror,
+        bool useTwoTap)
+    {
+        // Tukar slot eksklusif Main Thread (gpuWriteSlotIdx) dengan mailbox (pendingSlotIdx):
+        // TIDAK pernah menyentuh workerReadSlotIdx yang mungkin sedang dibaca oleh Worker Thread (latest-frame-wins).
+        lock (workerFrameLock)
+        {
+            int tmp = gpuWriteSlotIdx;
+            gpuWriteSlotIdx = pendingSlotIdx;
+            pendingSlotIdx = tmp;
+
+            pendingSrcW = srcW;
+            pendingSrcH = srcH;
+            pendingDstW = dstW;
+            pendingDstH = dstH;
+            pendingRotAngle = rotAngle;
+            pendingEffectiveVMirror = effectiveVMirror;
+            pendingHMirror = hMirror;
+            pendingUseTwoTap = useTwoTap;
+            hasPendingWorkerFrame = true;
+        }
+
+        if (workerWakeEvent != null)
+        {
+            try
             {
-                detected = handLandmarker.TryDetectForVideo(mpImage, timestampMs, zeroRotationOptions, ref cachedResult);
+                workerWakeEvent.Set();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Abaikan bila shutdown sedang berlangsung
             }
         }
-        catch (Exception ex)
-        {
-            Debug.LogWarning($"[AirWeavingController] Inferensi frame dilewati: {ex.Message}");
-            detected = false;
-        }
+    }
 
-        inferenceFramesInWindow++;
+    private bool EnsureAsyncInferenceBuffersReady(
+        int camW,
+        int camH,
+        int srcW,
+        int srcH,
+        int dstW,
+        int dstH,
+        bool needRenderTexture)
+    {
+        int neededRgbaBytes = srcW * srcH * 4;
+        int neededRgbBytes = dstW * dstH * 3;
 
-        int validHandCount = 0;
-        if (detected && cachedResult.handLandmarks != null)
+        bool needRgbaRealloc = inputSlotWidth != srcW
+                               || inputSlotHeight != srcH
+                               || !inputRgbaSlots[0].IsCreated
+                               || !inputRgbaSlots[1].IsCreated
+                               || !inputRgbaSlots[2].IsCreated
+                               || inputRgbaSlots[0].Length != neededRgbaBytes;
+        bool needRgbRealloc = workerRgbWidth != dstW
+                              || workerRgbHeight != dstH
+                              || !workerRgbPixels.IsCreated
+                              || workerRgbPixels.Length != neededRgbBytes;
+
+        if (needRgbaRealloc || needRgbRealloc)
         {
-            for (int h = 0; h < cachedResult.handLandmarks.Count && validHandCount < 2; h++)
+            if (gpuReadbackInFlight)
             {
-                List<NormalizedLandmark> cand = cachedResult.handLandmarks[h].landmarks;
-                if (IsValidHandLandmarkCandidate(cand))
+                return false;
+            }
+
+            lock (workerFrameLock)
+            {
+                if (workerIsProcessingFrame)
                 {
-                    validHandSourceIndices[validHandCount++] = h;
+                    hasPendingWorkerFrame = false;
+                    return false;
+                }
+
+                hasPendingWorkerFrame = false;
+
+                if (needRgbaRealloc)
+                {
+                    for (int i = 0; i < inputRgbaSlots.Length; i++)
+                    {
+                        if (inputRgbaSlots[i].IsCreated)
+                        {
+                            inputRgbaSlots[i].Dispose();
+                        }
+                        inputRgbaSlots[i] = new NativeArray<byte>(neededRgbaBytes, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                    }
+                    inputSlotWidth = srcW;
+                    inputSlotHeight = srcH;
+                    gpuWriteSlotIdx = 0;
+                    pendingSlotIdx = 1;
+                    workerReadSlotIdx = 2;
+                }
+
+                if (needRgbRealloc)
+                {
+                    if (workerRgbPixels.IsCreated)
+                    {
+                        workerRgbPixels.Dispose();
+                    }
+                    workerRgbPixels = new NativeArray<byte>(neededRgbBytes, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                    workerRgbWidth = dstW;
+                    workerRgbHeight = dstH;
                 }
             }
         }
 
+        if (needRenderTexture)
+        {
+            if (inferenceRenderTexture == null || inferenceRenderTexture.width != srcW || inferenceRenderTexture.height != srcH)
+            {
+                if (inferenceRenderTexture != null)
+                {
+                    inferenceRenderTexture.Release();
+                    Destroy(inferenceRenderTexture);
+                }
+                inferenceRenderTexture = new RenderTexture(srcW, srcH, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+                inferenceRenderTexture.filterMode = FilterMode.Bilinear;
+                inferenceRenderTexture.wrapMode = TextureWrapMode.Clamp;
+                inferenceRenderTexture.Create();
+            }
+        }
+        else if (rawWebcamPixels == null || lastCamWidth != camW || lastCamHeight != camH)
+        {
+            rawWebcamPixels = new Color32[camW * camH];
+            lastCamWidth = camW;
+            lastCamHeight = camH;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Loop Worker Thread murni (0 panggilan API UnityEngine):
+    /// melakukan konversi RGBA32-&gt;Srgb (3 byte) + rotasi/mirror 1D-LUT + inferensi MediaPipe HandLandmarker
+    /// menggunakan timestamp strictly monotonic dari <c>Stopwatch</c> dan menulis ke triple-buffer output Zero-GC.
+    /// </summary>
+    private void InferenceWorkerLoop()
+    {
+        while (!workerStopRequested)
+        {
+            if (workerWakeEvent != null)
+            {
+                workerWakeEvent.WaitOne(200);
+            }
+            if (workerStopRequested)
+            {
+                break;
+            }
+
+            int readSlot;
+            int srcW;
+            int srcH;
+            int dstW;
+            int dstH;
+            int rotAngle;
+            bool effVMirror;
+            bool hMirror;
+            bool useTwoTap;
+
+            lock (workerFrameLock)
+            {
+                if (!hasPendingWorkerFrame || workerStopRequested)
+                {
+                    continue;
+                }
+
+                int tmp = workerReadSlotIdx;
+                workerReadSlotIdx = pendingSlotIdx;
+                pendingSlotIdx = tmp;
+
+                readSlot = workerReadSlotIdx;
+                srcW = pendingSrcW;
+                srcH = pendingSrcH;
+                dstW = pendingDstW;
+                dstH = pendingDstH;
+                rotAngle = pendingRotAngle;
+                effVMirror = pendingEffectiveVMirror;
+                hMirror = pendingHMirror;
+                useTwoTap = pendingUseTwoTap;
+                hasPendingWorkerFrame = false;
+                workerIsProcessingFrame = true;
+            }
+
+            try
+            {
+                if (handLandmarker == null || !inputRgbaSlots[readSlot].IsCreated || !workerRgbPixels.IsCreated)
+                {
+                    continue;
+                }
+
+                FillWorkerRgbBufferFromRgba(
+                    inputRgbaSlots[readSlot],
+                    workerRgbPixels,
+                    srcW,
+                    srcH,
+                    dstW,
+                    dstH,
+                    rotAngle,
+                    effVMirror,
+                    hMirror,
+                    useTwoTap);
+
+                long tsMs = inferenceStopwatch.ElapsedMilliseconds;
+                if (tsMs <= lastWorkerTimestampMs)
+                {
+                    tsMs = lastWorkerTimestampMs + 1;
+                }
+                lastWorkerTimestampMs = tsMs;
+
+                bool detected = false;
+                string errMsg = null;
+                try
+                {
+                    using (Image mpImage = new Image(
+                        ImageFormat.Types.Format.Srgb,
+                        dstW,
+                        dstH,
+                        dstW * 3,
+                        workerRgbPixels))
+                    {
+                        detected = handLandmarker.TryDetectForVideo(mpImage, tsMs, zeroRotationOptions, ref cachedResult);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    detected = false;
+                    errMsg = ex.Message;
+                }
+
+                WorkerInferenceSnapshot dstSnap = resultSlots[workerWriteResultIdx];
+                PopulateWorkerSnapshot(dstSnap, detected, tsMs, errMsg);
+
+                lock (workerResultLock)
+                {
+                    int tmpRes = latestResultIdx;
+                    latestResultIdx = workerWriteResultIdx;
+                    workerWriteResultIdx = tmpRes;
+                    latestResultSequence++;
+                }
+            }
+            finally
+            {
+                lock (workerFrameLock)
+                {
+                    workerIsProcessingFrame = false;
+                }
+            }
+        }
+    }
+
+    private void PopulateWorkerSnapshot(WorkerInferenceSnapshot dstSnap, bool detected, long tsMs, string errMsg)
+    {
+        dstSnap.timestampMs = tsMs;
+        dstSnap.errorMessage = errMsg;
+        int validCount = 0;
+
+        if (detected && cachedResult.handLandmarks != null)
+        {
+            int count = cachedResult.handLandmarks.Count;
+            for (int h = 0; h < count && validCount < 2; h++)
+            {
+                List<NormalizedLandmark> cand = cachedResult.handLandmarks[h].landmarks;
+                if (!IsValidHandLandmarkCandidateWorker(cand))
+                {
+                    continue;
+                }
+
+                WorkerHandRecord rec = dstSnap.hands[validCount];
+                rec.landmarks.Clear();
+                for (int k = 0; k < LandmarkCount; k++)
+                {
+                    rec.landmarks.Add(cand[k]);
+                }
+
+                rec.hasWorldLandmarks = false;
+                if (cachedResult.handWorldLandmarks != null && h < cachedResult.handWorldLandmarks.Count)
+                {
+                    List<Landmark> worldLms = cachedResult.handWorldLandmarks[h].landmarks;
+                    if (worldLms != null && worldLms.Count >= LandmarkCount)
+                    {
+                        rec.worldLandmarks.Clear();
+                        for (int k = 0; k < LandmarkCount; k++)
+                        {
+                            rec.worldLandmarks.Add(worldLms[k]);
+                        }
+                        rec.hasWorldLandmarks = true;
+                    }
+                }
+
+                rec.handedness = ExtractHandednessWorker(h);
+                validCount++;
+            }
+        }
+
+        dstSnap.validHandCount = validCount;
+    }
+
+    private bool TryConsumeLatestWorkerInferenceResult(Camera mainCam)
+    {
+        bool hasNew = false;
+        lock (workerResultLock)
+        {
+            if (latestResultSequence != consumedResultSequence)
+            {
+                int tmp = mainReadResultIdx;
+                mainReadResultIdx = latestResultIdx;
+                latestResultIdx = tmp;
+                consumedResultSequence = latestResultSequence;
+                hasNew = true;
+            }
+        }
+
+        if (!hasNew)
+        {
+            return false;
+        }
+
+        WorkerInferenceSnapshot snap = resultSlots[mainReadResultIdx];
+        if (!string.IsNullOrEmpty(snap.errorMessage))
+        {
+            Debug.LogWarning($"[AirWeavingController] Inferensi frame dilewati: {snap.errorMessage}");
+            snap.errorMessage = null;
+        }
+
+        inferenceFramesInWindow++;
+        long timestampMs = snap.timestampMs;
+        int validHandCount = snap.validHandCount;
+
         if (validHandCount <= 0)
         {
-            // Jangan langsung me-reset One-Euro & status TwoHand pada 1-2 frame drop: beri frame-drop grace 100 ms per slot
+            // Jangan langsung me-reset One-Euro & status TwoHand pada 1-2 frame drop: beri frame-drop grace per slot
             if (primarySlotActive)
             {
                 primaryMissedLastInference = true;
@@ -4402,7 +5132,7 @@ public class AirWeavingController : MonoBehaviour
             {
                 secondaryMissedLastInference = true;
             }
-            return;
+            return true;
         }
 
         // Stabilisasi Dual-Hand berbasis handedness (skor >= 0.70) + nearest-palm + gating radius + anti-swap & anti-promosi paksa
@@ -4413,14 +5143,12 @@ public class AirWeavingController : MonoBehaviour
 
         if (validHandCount >= 2)
         {
-            int idx0 = validHandSourceIndices[0];
-            int idx1 = validHandSourceIndices[1];
-            List<NormalizedLandmark> hand0 = cachedResult.handLandmarks[idx0].landmarks;
-            List<NormalizedLandmark> hand1 = cachedResult.handLandmarks[idx1].landmarks;
-            Vector2 palm0 = ComputeNormalizedPalmCenter(hand0);
-            Vector2 palm1 = ComputeNormalizedPalmCenter(hand1);
-            TrackedHandedness handed0 = ExtractHandedness(idx0);
-            TrackedHandedness handed1 = ExtractHandedness(idx1);
+            WorkerHandRecord rec0 = snap.hands[0];
+            WorkerHandRecord rec1 = snap.hands[1];
+            Vector2 palm0 = ComputeNormalizedPalmCenter(rec0.landmarks);
+            Vector2 palm1 = ComputeNormalizedPalmCenter(rec1.landmarks);
+            TrackedHandedness handed0 = rec0.handedness;
+            TrackedHandedness handed1 = rec1.handedness;
 
             if (primarySlotActive && secondarySlotActive)
             {
@@ -4431,15 +5159,15 @@ public class AirWeavingController : MonoBehaviour
 
                 if ((cost1P + cost0S) < (cost0P + cost1S))
                 {
-                    primarySourceIndex = idx1;
-                    secondarySourceIndex = idx0;
+                    primarySourceIndex = 1;
+                    secondarySourceIndex = 0;
                     primaryJumpedOutsideGate = !gate1P;
                     secondaryJumpedOutsideGate = !gate0S;
                 }
                 else
                 {
-                    primarySourceIndex = idx0;
-                    secondarySourceIndex = idx1;
+                    primarySourceIndex = 0;
+                    secondarySourceIndex = 1;
                     primaryJumpedOutsideGate = !gate0P;
                     secondaryJumpedOutsideGate = !gate1S;
                 }
@@ -4451,14 +5179,14 @@ public class AirWeavingController : MonoBehaviour
                 bool prefer1 = (gate1P && !gate0P) || (gate1P == gate0P && cost1P < cost0P);
                 if (prefer1)
                 {
-                    primarySourceIndex = idx1;
-                    secondarySourceIndex = idx0;
+                    primarySourceIndex = 1;
+                    secondarySourceIndex = 0;
                     primaryJumpedOutsideGate = !gate1P;
                 }
                 else
                 {
-                    primarySourceIndex = idx0;
-                    secondarySourceIndex = idx1;
+                    primarySourceIndex = 0;
+                    secondarySourceIndex = 1;
                     primaryJumpedOutsideGate = !gate0P;
                 }
             }
@@ -4469,14 +5197,14 @@ public class AirWeavingController : MonoBehaviour
                 bool prefer1 = (gate1S && !gate0S) || (gate1S == gate0S && cost1S < cost0S);
                 if (prefer1)
                 {
-                    secondarySourceIndex = idx1;
-                    primarySourceIndex = idx0;
+                    secondarySourceIndex = 1;
+                    primarySourceIndex = 0;
                     secondaryJumpedOutsideGate = !gate1S;
                 }
                 else
                 {
-                    secondarySourceIndex = idx0;
-                    primarySourceIndex = idx1;
+                    secondarySourceIndex = 0;
+                    primarySourceIndex = 1;
                     secondaryJumpedOutsideGate = !gate0S;
                 }
             }
@@ -4485,30 +5213,29 @@ public class AirWeavingController : MonoBehaviour
                 // Kedua slot baru masuk bersamaan: jika handedness jelas, pilih Right sebagai primer secara deterministik
                 if (handed0 == TrackedHandedness.Left && handed1 == TrackedHandedness.Right)
                 {
-                    primarySourceIndex = idx1;
-                    secondarySourceIndex = idx0;
+                    primarySourceIndex = 1;
+                    secondarySourceIndex = 0;
                 }
                 else
                 {
-                    primarySourceIndex = idx0;
-                    secondarySourceIndex = idx1;
+                    primarySourceIndex = 0;
+                    secondarySourceIndex = 1;
                 }
             }
 
-            lastPrimaryPalmNormXY = primarySourceIndex == idx0 ? palm0 : palm1;
-            lastSecondaryPalmNormXY = secondarySourceIndex == idx0 ? palm0 : palm1;
-            TrackedHandedness matchedPrimaryHanded = primarySourceIndex == idx0 ? handed0 : handed1;
-            TrackedHandedness matchedSecondaryHanded = secondarySourceIndex == idx0 ? handed0 : handed1;
+            lastPrimaryPalmNormXY = primarySourceIndex == 0 ? palm0 : palm1;
+            lastSecondaryPalmNormXY = secondarySourceIndex == 0 ? palm0 : palm1;
+            TrackedHandedness matchedPrimaryHanded = primarySourceIndex == 0 ? handed0 : handed1;
+            TrackedHandedness matchedSecondaryHanded = secondarySourceIndex == 0 ? handed0 : handed1;
             if (matchedPrimaryHanded != TrackedHandedness.Unknown) primarySlotHandedness = matchedPrimaryHanded;
             if (matchedSecondaryHanded != TrackedHandedness.Unknown) secondarySlotHandedness = matchedSecondaryHanded;
         }
         else
         {
             // Hanya 1 tangan terdeteksi: cocokkan ke slot asalnya — DILARANG mempromosikan tangan sekunder ke slot primer 0!
-            int idx0 = validHandSourceIndices[0];
-            List<NormalizedLandmark> singleHand = cachedResult.handLandmarks[idx0].landmarks;
-            Vector2 palm0 = ComputeNormalizedPalmCenter(singleHand);
-            TrackedHandedness handed0 = ExtractHandedness(idx0);
+            WorkerHandRecord rec0 = snap.hands[0];
+            Vector2 palm0 = ComputeNormalizedPalmCenter(rec0.landmarks);
+            TrackedHandedness handed0 = rec0.handedness;
 
             if (primarySlotActive && secondarySlotActive)
             {
@@ -4545,14 +5272,14 @@ public class AirWeavingController : MonoBehaviour
 
                 if (matchSecondary)
                 {
-                    secondarySourceIndex = idx0;
+                    secondarySourceIndex = 0;
                     secondaryJumpedOutsideGate = !gateS;
                     lastSecondaryPalmNormXY = palm0;
                     if (handed0 != TrackedHandedness.Unknown) secondarySlotHandedness = handed0;
                 }
                 else
                 {
-                    primarySourceIndex = idx0;
+                    primarySourceIndex = 0;
                     primaryJumpedOutsideGate = !gateP;
                     lastPrimaryPalmNormXY = palm0;
                     if (handed0 != TrackedHandedness.Unknown) primarySlotHandedness = handed0;
@@ -4571,7 +5298,7 @@ public class AirWeavingController : MonoBehaviour
 
                 if (!contradictsSecondaryHanded && (gateS || matchesSecondaryHanded))
                 {
-                    secondarySourceIndex = idx0;
+                    secondarySourceIndex = 0;
                     secondaryJumpedOutsideGate = !gateS;
                     lastSecondaryPalmNormXY = palm0;
                     if (handed0 != TrackedHandedness.Unknown) secondarySlotHandedness = handed0;
@@ -4579,7 +5306,7 @@ public class AirWeavingController : MonoBehaviour
                 else
                 {
                     // Tangan berbeda (primer baru masuk kembali) -> tempatkan bersih di slot primer
-                    primarySourceIndex = idx0;
+                    primarySourceIndex = 0;
                     lastPrimaryPalmNormXY = palm0;
                     primarySlotHandedness = handed0;
                 }
@@ -4593,13 +5320,13 @@ public class AirWeavingController : MonoBehaviour
                 if (contradictsPrimaryHanded && !gateP)
                 {
                     // Tangan lain muncul saat primer jeda sesaat -> masukkan ke slot sekunder agar primer tidak melompat
-                    secondarySourceIndex = idx0;
+                    secondarySourceIndex = 0;
                     lastSecondaryPalmNormXY = palm0;
                     secondarySlotHandedness = handed0;
                 }
                 else
                 {
-                    primarySourceIndex = idx0;
+                    primarySourceIndex = 0;
                     primaryJumpedOutsideGate = !gateP;
                     lastPrimaryPalmNormXY = palm0;
                     if (handed0 != TrackedHandedness.Unknown) primarySlotHandedness = handed0;
@@ -4607,7 +5334,7 @@ public class AirWeavingController : MonoBehaviour
             }
             else
             {
-                primarySourceIndex = idx0;
+                primarySourceIndex = 0;
                 lastPrimaryPalmNormXY = palm0;
                 primarySlotHandedness = handed0;
             }
@@ -4632,9 +5359,12 @@ public class AirWeavingController : MonoBehaviour
             primaryMissedLastInference = false;
             primaryMissingTimer = 0f;
 
-            List<NormalizedLandmark> primaryLandmarks = cachedResult.handLandmarks[primarySourceIndex].landmarks;
-            List<Landmark> primaryWorldLandmarks = TryGetWorldLandmarks(primarySourceIndex);
-            UpdateHandVisualsFromLandmarks(primaryLandmarks, primaryWorldLandmarks, mainCam, primarySampleDt);
+            WorkerHandRecord primaryRec = snap.hands[primarySourceIndex];
+            UpdateHandVisualsFromLandmarks(
+                primaryRec.landmarks,
+                primaryRec.hasWorldLandmarks ? primaryRec.worldLandmarks : null,
+                mainCam,
+                primarySampleDt);
         }
         else if (primarySlotActive)
         {
@@ -4658,14 +5388,19 @@ public class AirWeavingController : MonoBehaviour
             secondaryMissedLastInference = false;
             secondaryMissingTimer = 0f;
 
-            List<NormalizedLandmark> secondaryLandmarks = cachedResult.handLandmarks[secondarySourceIndex].landmarks;
-            List<Landmark> secondaryWorldLandmarks = TryGetWorldLandmarks(secondarySourceIndex);
-            UpdateSecondaryHandVisualsFromLandmarks(secondaryLandmarks, secondaryWorldLandmarks, mainCam, secondarySampleDt);
+            WorkerHandRecord secondaryRec = snap.hands[secondarySourceIndex];
+            UpdateSecondaryHandVisualsFromLandmarks(
+                secondaryRec.landmarks,
+                secondaryRec.hasWorldLandmarks ? secondaryRec.worldLandmarks : null,
+                mainCam,
+                secondarySampleDt);
         }
         else if (secondarySlotActive)
         {
             secondaryMissedLastInference = true;
         }
+
+        return true;
     }
 
     private float GetActiveFrameDropGraceSecondsForSlot(int handSlot)
@@ -4721,6 +5456,7 @@ public class AirWeavingController : MonoBehaviour
         inputBDwellTimers[0] = 0f;
         inputARequiresExitRearmBySlot[0] = false;
         inputBRequiresExitRearmBySlot[0] = false;
+        ClearInputPushHoverState(0);
         inputSwitchMagnetOffsetBySlot[0] = Vector2.zero;
         circleSummoners[0].ClearPoseVoteBuffer();
         ResetLandmarkOneEuroFilters();
@@ -4745,6 +5481,7 @@ public class AirWeavingController : MonoBehaviour
         inputBDwellTimers[1] = 0f;
         inputARequiresExitRearmBySlot[1] = false;
         inputBRequiresExitRearmBySlot[1] = false;
+        ClearInputPushHoverState(1);
         inputSwitchMagnetOffsetBySlot[1] = Vector2.zero;
         circleSummoners[1].ClearPoseVoteBuffer();
         if (!secondaryHandGestureDetector.IsFistActive && !secondaryHandGestureDetector.IsPinchActive)
@@ -4754,7 +5491,7 @@ public class AirWeavingController : MonoBehaviour
         ResetSecondaryLandmarkOneEuroFilters();
     }
 
-    private static bool IsValidHandLandmarkCandidate(List<NormalizedLandmark> landmarks)
+    private static bool IsValidHandLandmarkCandidateWorker(List<NormalizedLandmark> landmarks)
     {
         if (landmarks == null || landmarks.Count < LandmarkCount)
         {
@@ -4770,24 +5507,16 @@ public class AirWeavingController : MonoBehaviour
             return false;
         }
 
-        float rawPalmScale = 0.5f * (LandmarkDist2D(l0, l9) + LandmarkDist2D(l5, l17));
-        return rawPalmScale >= MinCandidateRawPalmScale;
+        float dx09 = l0.x - l9.x;
+        float dy09 = l0.y - l9.y;
+        float dx517 = l5.x - l17.x;
+        float dy517 = l5.y - l17.y;
+        double d09 = Math.Sqrt((dx09 * dx09) + (dy09 * dy09));
+        double d517 = Math.Sqrt((dx517 * dx517) + (dy517 * dy517));
+        return (0.5 * (d09 + d517)) >= MinCandidateRawPalmScale;
     }
 
-    private List<Landmark> TryGetWorldLandmarks(int sourceIndex)
-    {
-        if (cachedResult.handWorldLandmarks == null
-            || sourceIndex < 0
-            || sourceIndex >= cachedResult.handWorldLandmarks.Count)
-        {
-            return null;
-        }
-
-        List<Landmark> worldLms = cachedResult.handWorldLandmarks[sourceIndex].landmarks;
-        return (worldLms != null && worldLms.Count >= LandmarkCount) ? worldLms : null;
-    }
-
-    private TrackedHandedness ExtractHandedness(int sourceIndex)
+    private TrackedHandedness ExtractHandednessWorker(int sourceIndex)
     {
         if (cachedResult.handedness == null || sourceIndex < 0 || sourceIndex >= cachedResult.handedness.Count)
         {
@@ -4855,29 +5584,6 @@ public class AirWeavingController : MonoBehaviour
 
         withinGate = dist <= HandAssociationMaxDistNorm;
         return dist;
-    }
-
-    private void EnsurePixelBuffersAllocated(int camW, int camH, int targetW, int targetH)
-    {
-        if (rawWebcamPixels == null || lastCamWidth != camW || lastCamHeight != camH)
-        {
-            rawWebcamPixels = new Color32[camW * camH];
-            lastCamWidth = camW;
-            lastCamHeight = camH;
-        }
-
-        int requiredBytes = targetW * targetH * 4;
-        if (!nativeWorkPixels.IsCreated || workWidth != targetW || workHeight != targetH || nativeWorkPixels.Length != requiredBytes)
-        {
-            if (nativeWorkPixels.IsCreated)
-            {
-                nativeWorkPixels.Dispose();
-            }
-
-            nativeWorkPixels = new NativeArray<byte>(requiredBytes, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            workWidth = targetW;
-            workHeight = targetH;
-        }
     }
 
     private void EnsureDownscaleLutBuilt(
@@ -4995,22 +5701,24 @@ public class AirWeavingController : MonoBehaviour
     }
 
     /// <summary>
-    /// Downscale 2-tap diagonal berbasis 1D LUT &amp; tulis 32-bit Zero-GC (tanpa float/switch/clamp di loop terdalam)
-    /// untuk inferensi cepat 288px CPU Android dengan tepi jari tetap anti-aliasing.
+    /// Konversi RGBA32-&gt;Srgb (3 byte/piksel) + rotasi/mirror 1D-LUT di Worker Thread (0 panggilan API UnityEngine, Zero-GC):
+    /// - Jalur GPU Readback (<c>useTwoTap = false</c>): 1-tap langsung (downscale bilinear sudah dikerjakan Adreno 710 GPU).
+    /// - Jalur Fallback GetPixels32 (<c>useTwoTap = true</c>): 2-tap diagonal anti-aliasing untuk tepi jari tetap halus.
     /// </summary>
-    private void FillUprightMirroredRgbaBuffer(
+    private void FillWorkerRgbBufferFromRgba(
+        NativeArray<byte> srcRgba,
+        NativeArray<byte> dstRgb,
         int srcW,
         int srcH,
         int dstW,
         int dstH,
         int rotAngle,
         bool vMirror,
-        bool hMirror)
+        bool hMirror,
+        bool useTwoTap)
     {
         EnsureDownscaleLutBuilt(srcW, srcH, dstW, dstH, rotAngle, vMirror, hMirror);
 
-        NativeArray<Color32> dstColors = nativeWorkPixels.Reinterpret<Color32>(1);
-        Color32[] srcPixels = rawWebcamPixels;
         int[] lutX0 = downscaleLutX0;
         int[] lutX1 = downscaleLutX1;
         int[] lutY0 = downscaleLutY0;
@@ -5019,37 +5727,67 @@ public class AirWeavingController : MonoBehaviour
 
         if (rotAngle != 90 && rotAngle != 270)
         {
-            for (int dy = 0; dy < dstH; dy++)
+            if (!useTwoTap)
             {
-                int row0 = lutY0[dy];
-                int row1 = lutY1[dy];
-                for (int dx = 0; dx < dstW; dx++)
+                for (int dy = 0; dy < dstH; dy++)
                 {
-                    Color32 c00 = srcPixels[row0 + lutX0[dx]];
-                    Color32 c11 = srcPixels[row1 + lutX1[dx]];
-                    dstColors[dstIdx++] = new Color32(
-                        (byte)((c00.r + c11.r + 1) >> 1),
-                        (byte)((c00.g + c11.g + 1) >> 1),
-                        (byte)((c00.b + c11.b + 1) >> 1),
-                        255);
+                    int row0 = lutY0[dy];
+                    for (int dx = 0; dx < dstW; dx++)
+                    {
+                        int s0 = (row0 + lutX0[dx]) << 2;
+                        dstRgb[dstIdx++] = srcRgba[s0];
+                        dstRgb[dstIdx++] = srcRgba[s0 + 1];
+                        dstRgb[dstIdx++] = srcRgba[s0 + 2];
+                    }
+                }
+            }
+            else
+            {
+                for (int dy = 0; dy < dstH; dy++)
+                {
+                    int row0 = lutY0[dy];
+                    int row1 = lutY1[dy];
+                    for (int dx = 0; dx < dstW; dx++)
+                    {
+                        int s0 = (row0 + lutX0[dx]) << 2;
+                        int s1 = (row1 + lutX1[dx]) << 2;
+                        dstRgb[dstIdx++] = (byte)((srcRgba[s0] + srcRgba[s1] + 1) >> 1);
+                        dstRgb[dstIdx++] = (byte)((srcRgba[s0 + 1] + srcRgba[s1 + 1] + 1) >> 1);
+                        dstRgb[dstIdx++] = (byte)((srcRgba[s0 + 2] + srcRgba[s1 + 2] + 1) >> 1);
+                    }
                 }
             }
         }
         else
         {
-            for (int dy = 0; dy < dstH; dy++)
+            if (!useTwoTap)
             {
-                int col0 = lutX0[dy];
-                int col1 = lutX1[dy];
-                for (int dx = 0; dx < dstW; dx++)
+                for (int dy = 0; dy < dstH; dy++)
                 {
-                    Color32 c00 = srcPixels[lutY0[dx] + col0];
-                    Color32 c11 = srcPixels[lutY1[dx] + col1];
-                    dstColors[dstIdx++] = new Color32(
-                        (byte)((c00.r + c11.r + 1) >> 1),
-                        (byte)((c00.g + c11.g + 1) >> 1),
-                        (byte)((c00.b + c11.b + 1) >> 1),
-                        255);
+                    int col0 = lutX0[dy];
+                    for (int dx = 0; dx < dstW; dx++)
+                    {
+                        int s0 = (lutY0[dx] + col0) << 2;
+                        dstRgb[dstIdx++] = srcRgba[s0];
+                        dstRgb[dstIdx++] = srcRgba[s0 + 1];
+                        dstRgb[dstIdx++] = srcRgba[s0 + 2];
+                    }
+                }
+            }
+            else
+            {
+                for (int dy = 0; dy < dstH; dy++)
+                {
+                    int col0 = lutX0[dy];
+                    int col1 = lutX1[dy];
+                    for (int dx = 0; dx < dstW; dx++)
+                    {
+                        int s0 = (lutY0[dx] + col0) << 2;
+                        int s1 = (lutY1[dx] + col1) << 2;
+                        dstRgb[dstIdx++] = (byte)((srcRgba[s0] + srcRgba[s1] + 1) >> 1);
+                        dstRgb[dstIdx++] = (byte)((srcRgba[s0 + 1] + srcRgba[s1 + 1] + 1) >> 1);
+                        dstRgb[dstIdx++] = (byte)((srcRgba[s0 + 2] + srcRgba[s1 + 2] + 1) >> 1);
+                    }
                 }
             }
         }
@@ -5081,6 +5819,63 @@ public class AirWeavingController : MonoBehaviour
         lastSecondaryFilterTimestampMs = 0;
     }
 
+    private bool ShouldFreezeDepthBaselineForSlot(int handSlot)
+    {
+        if (IsAnyTwoHandModeActive || isCarryPanActive)
+        {
+            return true;
+        }
+
+        if (activeInteractionMode != ActiveInteractionMode.Idle && activeInteractionHandSlot == handSlot)
+        {
+            return true;
+        }
+
+        if (inputPushHoverTargetBySlot[handSlot] != null || inputADwellTimers[handSlot] > 0f || inputBDwellTimers[handSlot] > 0f)
+        {
+            return true;
+        }
+
+        AirWeavingHandGestureDetector det = GetHandDetector(handSlot);
+        return det.IsFistActive || det.IsPinchActive || det.IsPreFistCurling || det.IsPrePinchClosing;
+    }
+
+    private void ProjectHandLandmarksVolumetric3D(
+        List<NormalizedLandmark> landmarks,
+        AirWeavingHandGestureDetector detector,
+        Camera mainCam,
+        Vector3[] outWorldLandmarks)
+    {
+        Transform camTransform = mainCam.transform;
+        float nearClip = mainCam != null ? mainCam.nearClipPlane : 0.15f;
+        float minSafeDepth = Mathf.Max(MinHandRigCameraDepth, nearClip + HandNearClipMinOffsetMeters);
+        float maxSafeDepth = VideoQuadDepth - HandMaxBehindVideoQuadMarginMeters;
+
+        float stageRefDepth = stageController != null ? stageController.CurrentStageDepthZ : WorkbenchDepth;
+        float neutralHandDepth = Mathf.Clamp(
+            stageRefDepth - SingleHandNeutralHoverFrontOffset,
+            minSafeDepth,
+            Mathf.Max(minSafeDepth, maxSafeDepth - 0.50f));
+        float baseHandCamDepth = Mathf.Clamp(
+            neutralHandDepth + (detector.DepthLogDelta * SingleHandDepthMetersPerLog),
+            minSafeDepth,
+            maxSafeDepth);
+
+        // Skala kedalaman volumetrik relatif jari (-lm.z -> jari yang dijulurkan ke kamera menonjol maju ke papan 3D)
+        float volumetricZScale = DepthParallaxScale * Mathf.Clamp(baseHandCamDepth / WorkbenchDepth, 0.45f, 1.80f);
+
+        for (int i = 0; i < LandmarkCount; i++)
+        {
+            NormalizedLandmark lm = landmarks[i];
+            float relForwardZ = -Mathf.Clamp(lm.z, -0.18f, 0.18f);
+            float localZ = Mathf.Clamp(baseHandCamDepth + (relForwardZ * volumetricZScale), minSafeDepth, maxSafeDepth);
+            float rayDepthRatio = localZ / VideoQuadDepth;
+            float localX = (lm.x - 0.5f) * currentVideoDisplayWidth * rayDepthRatio;
+            float localY = (0.5f - lm.y) * currentVideoDisplayHeight * rayDepthRatio;
+            outWorldLandmarks[i] = camTransform.TransformPoint(new Vector3(localX, localY, localZ));
+        }
+    }
+
     private void UpdateHandVisualsFromLandmarks(
         List<NormalizedLandmark> landmarks,
         List<Landmark> worldLandmarks,
@@ -5096,25 +5891,12 @@ public class AirWeavingController : MonoBehaviour
             handGestureDetector.RestartEntryWarmup();
         }
 
-        // Perbarui Rigid Metacarpal Palm Span tepat 1x per frame inferensi (tidak dipanggil ulang di UpdateFromLandmarks)
-        float filteredPalmSpan = handGestureDetector.UpdateRigidPalmSpanOnly(landmarks, sampleDt, camAspect);
-        float handDepthScale = Mathf.Pow(
-            Mathf.Max(0.055f, filteredPalmSpan) / AirWeavingHandGestureDetector.DefaultComfortPalmSpan,
-            HandCursorDepthTrackGain);
-        float baseHandCamDepth = Mathf.Clamp((WorkbenchDepth - 0.14f) * handDepthScale, MinHandRigCameraDepth, MaxHandRigCameraDepth);
+        // Perbarui Rigid Metacarpal Palm Span + Baseline Adaptif Monocular Z-Depth tepat 1x per frame inferensi
+        bool freezeBaseline = ShouldFreezeDepthBaselineForSlot(0);
+        handGestureDetector.UpdateRigidPalmSpanOnly(landmarks, sampleDt, camAspect, freezeBaseline);
 
-        // Proyeksikan 21 titik mentah dunia tanpa tumpukan filter ganda; One-Euro 3D tunggal dijalankan di
-        // AirWeavingHologramVisual (21 titik visual skeleton) & AirWeavingHandGestureDetector (telapak, Pinch #4-#8, telunjuk #8).
-        for (int i = 0; i < LandmarkCount; i++)
-        {
-            NormalizedLandmark lm = landmarks[i];
-            float clampedZ = Mathf.Clamp(lm.z, -0.25f, 0.25f);
-            float localZ = Mathf.Clamp(baseHandCamDepth + (clampedZ * DepthParallaxScale), 0.75f, 6.20f);
-            float rayDepthRatio = localZ / VideoQuadDepth;
-            float localX = (lm.x - 0.5f) * currentVideoDisplayWidth * rayDepthRatio;
-            float localY = (0.5f - lm.y) * currentVideoDisplayHeight * rayDepthRatio;
-            rawLandmarksWorld[i] = camTransform.TransformPoint(new Vector3(localX, localY, localZ));
-        }
+        // Proyeksikan 21 titik mentah volumetrik 3D (palmScale logaritmik + -lm.z relatif + clamp aman nearClip..VideoQuad)
+        ProjectHandLandmarksVolumetric3D(landmarks, handGestureDetector, mainCam, rawLandmarksWorld);
 
         hologramVisual?.PushHandSkeletonSample(0, rawLandmarksWorld, sampleDt, freshEntry: justAppeared);
 
@@ -5184,23 +5966,11 @@ public class AirWeavingController : MonoBehaviour
             secondaryHandGestureDetector.RestartEntryWarmup();
         }
 
-        // Perbarui Rigid Metacarpal Palm Span tepat 1x per frame inferensi
-        float secFilteredSpan = secondaryHandGestureDetector.UpdateRigidPalmSpanOnly(landmarks, sampleDt, camAspect);
-        float secDepthScale = Mathf.Pow(
-            Mathf.Max(0.055f, secFilteredSpan) / AirWeavingHandGestureDetector.DefaultComfortPalmSpan,
-            HandCursorDepthTrackGain);
-        float baseSecCamDepth = Mathf.Clamp((WorkbenchDepth - 0.14f) * secDepthScale, MinHandRigCameraDepth, MaxHandRigCameraDepth);
+        // Perbarui Rigid Metacarpal Palm Span + Baseline Adaptif Monocular Z-Depth tepat 1x per frame inferensi
+        bool freezeBaseline = ShouldFreezeDepthBaselineForSlot(1);
+        secondaryHandGestureDetector.UpdateRigidPalmSpanOnly(landmarks, sampleDt, camAspect, freezeBaseline);
 
-        for (int i = 0; i < LandmarkCount; i++)
-        {
-            NormalizedLandmark lm = landmarks[i];
-            float clampedZ = Mathf.Clamp(lm.z, -0.25f, 0.25f);
-            float localZ = Mathf.Clamp(baseSecCamDepth + (clampedZ * DepthParallaxScale), 0.75f, 6.20f);
-            float rayDepthRatio = localZ / VideoQuadDepth;
-            float localX = (lm.x - 0.5f) * currentVideoDisplayWidth * rayDepthRatio;
-            float localY = (0.5f - lm.y) * currentVideoDisplayHeight * rayDepthRatio;
-            secondaryRawLandmarksWorld[i] = camTransform.TransformPoint(new Vector3(localX, localY, localZ));
-        }
+        ProjectHandLandmarksVolumetric3D(landmarks, secondaryHandGestureDetector, mainCam, secondaryRawLandmarksWorld);
 
         hologramVisual?.PushHandSkeletonSample(1, secondaryRawLandmarksWorld, sampleDt, freshEntry: justAppeared);
 
@@ -5853,14 +6623,26 @@ public class AirWeavingController : MonoBehaviour
         GateNode secPortFocusedNode = (canShowHover && cableRouter != null) ? cableRouter.SecondaryHoveredPortNode : null;
         bool inputAHovered = canShowHover && (hoveredInputNode == inputANode || secondaryHoveredInputNode == inputANode);
         bool inputBHovered = canShowHover && (hoveredInputNode == inputBNode || secondaryHoveredInputNode == inputBNode);
+        float inputAPushProg = 0f;
+        float inputBPushProg = 0f;
+        if (inputAHovered)
+        {
+            if (inputPushHoverTargetBySlot[0] == inputANode) inputAPushProg = Mathf.Max(inputAPushProg, inputPushProgressBySlot[0]);
+            if (inputPushHoverTargetBySlot[1] == inputANode) inputAPushProg = Mathf.Max(inputAPushProg, inputPushProgressBySlot[1]);
+        }
+        if (inputBHovered)
+        {
+            if (inputPushHoverTargetBySlot[0] == inputBNode) inputBPushProg = Mathf.Max(inputBPushProg, inputPushProgressBySlot[0]);
+            if (inputPushHoverTargetBySlot[1] == inputBNode) inputBPushProg = Mathf.Max(inputBPushProg, inputPushProgressBySlot[1]);
+        }
         AirWeavingHologramVisual.NodeHoloState inputAState = inputAHovered
             ? AirWeavingHologramVisual.NodeHoloState.BodyHovered
             : AirWeavingHologramVisual.NodeHoloState.Idle;
         AirWeavingHologramVisual.NodeHoloState inputBState = inputBHovered
             ? AirWeavingHologramVisual.NodeHoloState.BodyHovered
             : AirWeavingHologramVisual.NodeHoloState.Idle;
-        hologramVisual.UpdateNodeFrame(0, camT, inputANode, true, false, false, inputAState, stageRoot);
-        hologramVisual.UpdateNodeFrame(1, camT, inputBNode, false, true, false, inputBState, stageRoot);
+        hologramVisual.UpdateNodeFrame(0, camT, inputANode, true, false, false, inputAState, stageRoot, inputAPushProg);
+        hologramVisual.UpdateNodeFrame(1, camT, inputBNode, false, true, false, inputBState, stageRoot, inputBPushProg);
         hologramVisual.UpdateNodeFrame(2, camT, outputNode, false, false, true, AirWeavingHologramVisual.NodeHoloState.Idle, stageRoot);
         if (lightingAndShaderRig != null)
         {
@@ -6038,6 +6820,43 @@ public class AirWeavingController : MonoBehaviour
             otherCableInGrace,
             otherCableGraceNorm,
             dt);
+
+        // Garis proyeksi vertikal tipis (drop-line) + cincin bayangan di grid untuk persepsi kedalaman Z monokular 3D;
+        // otomatis tersembunyi saat mode 2 tangan (Orbit/Zoom/FreePan/Reset), Carry-Pan, overlay UI, atau sedang menggenggam gerbang.
+        bool allowCursorDropLines = !overlayOpen && !isVerifying && !twoHandVisualActive && !isCarryPanActive;
+        bool showSlot0Drop = allowCursorDropLines
+                             && isHandDetected
+                             && !lockedOtherThanSlot0
+                             && !(isGrabbingGate && activeInteractionHandSlot == 0)
+                             && !circleSummoners[0].IsActive;
+        Vector3 slot0DropWorldPos = slot0PortHovering
+            ? ((primaryCableSlot == 0 && cableRouter != null && cableRouter.AssistedPinchWorldPosition != Vector3.zero)
+                ? cableRouter.AssistedPinchWorldPosition
+                : handGestureDetector.PinchPointWorldPosition)
+            : (handGestureDetector.IsIndexSwitchPoseValid
+                ? handGestureDetector.IndexTipWorldPosition
+                : handGestureDetector.PalmCursorWorldPosition);
+        bool slot0ContactActive = handGestureDetector.IsFistActive
+                                  || handGestureDetector.IsPinchActive
+                                  || inputPushProgressBySlot[0] >= 0.70f;
+        hologramVisual.UpdateCursorDepthProjection(0, stageRoot, showSlot0Drop, slot0DropWorldPos, slot0ContactActive);
+
+        bool showSlot1Drop = allowCursorDropLines
+                             && isSecondaryHandDetected
+                             && !lockedOtherThanSlot1
+                             && !(isGrabbingGate && activeInteractionHandSlot == 1)
+                             && !circleSummoners[1].IsActive;
+        Vector3 slot1DropWorldPos = slot1PortHovering
+            ? ((primaryCableSlot == 1 && cableRouter != null && cableRouter.AssistedPinchWorldPosition != Vector3.zero)
+                ? cableRouter.AssistedPinchWorldPosition
+                : secondaryHandGestureDetector.PinchPointWorldPosition)
+            : (secondaryHandGestureDetector.IsIndexSwitchPoseValid
+                ? secondaryHandGestureDetector.IndexTipWorldPosition
+                : secondaryHandGestureDetector.PalmCursorWorldPosition);
+        bool slot1ContactActive = secondaryHandGestureDetector.IsFistActive
+                                  || secondaryHandGestureDetector.IsPinchActive
+                                  || inputPushProgressBySlot[1] >= 0.70f;
+        hologramVisual.UpdateCursorDepthProjection(1, stageRoot, showSlot1Drop, slot1DropWorldPos, slot1ContactActive);
 
         // Jangkar visual link 2 tangan selalu terkunci langsung pada posisi 3D tangan pengguna di seluruh bidang layar (global)
         Vector3 handAWorld = (IsTwoHandFistResetCharging || (IsTwoHandFreePanActive && !twoHandFreePanPrimaryIsPinch))
@@ -7362,6 +8181,7 @@ public class AirWeavingController : MonoBehaviour
         ResetLandmarkOneEuroFilters();
         ResetSecondaryLandmarkOneEuroFilters();
         ResetExclusiveArbiterAndTwoHandState();
+        ResetInputTouchState();
         handGestureDetector.Reset();
         secondaryHandGestureDetector.Reset();
 
@@ -7410,8 +8230,31 @@ public class AirWeavingController : MonoBehaviour
 
     private void ShutdownNativeAndCameraImmediate()
     {
-        DisposeHandLandmarkerOnly();
+        // Urutan shutdown deterministik anti-SIGABRT:
+        // 1. stopRequested = true -> signal event -> workerThread.Join(1500)
+        bool workerExitedCleanly = StopInferenceWorkerThread();
 
+        // 2. Pastikan seluruh AsyncGPUReadback yang sedang berjalan selesai sebelum membebaskan RenderTexture / NativeArray
+        if (gpuReadbackInFlight)
+        {
+            try
+            {
+                AsyncGPUReadback.WaitAllRequests();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AirWeavingController] AsyncGPUReadback wait warning: {ex.Message}");
+            }
+            gpuReadbackInFlight = false;
+        }
+
+        // 3. Bebaskan HandLandmarker native hanya setelah worker thread berhenti penuh
+        if (workerExitedCleanly)
+        {
+            DisposeHandLandmarkerOnly();
+        }
+
+        // 4. Hentikan & hancurkan WebCamTexture
         if (webCamTexture != null)
         {
             try
@@ -7435,10 +8278,40 @@ public class AirWeavingController : MonoBehaviour
             webCamTexture = null;
         }
 
-        if (nativeWorkPixels.IsCreated)
+        // 5. Bebaskan RenderTexture downscale GPU
+        if (inferenceRenderTexture != null)
         {
-            nativeWorkPixels.Dispose();
+            inferenceRenderTexture.Release();
+            Destroy(inferenceRenderTexture);
+            inferenceRenderTexture = null;
         }
+
+        // 6. Bebaskan seluruh NativeArray triple-buffer RGBA & buffer RGB worker
+        if (workerExitedCleanly)
+        {
+            for (int i = 0; i < inputRgbaSlots.Length; i++)
+            {
+                if (inputRgbaSlots[i].IsCreated)
+                {
+                    inputRgbaSlots[i].Dispose();
+                }
+            }
+            if (workerRgbPixels.IsCreated)
+            {
+                workerRgbPixels.Dispose();
+            }
+        }
+
+        inputSlotWidth = 0;
+        inputSlotHeight = 0;
+        workerRgbWidth = 0;
+        workerRgbHeight = 0;
+        hasPendingWorkerFrame = false;
+        workerIsProcessingFrame = false;
+        latestResultSequence = 0;
+        consumedResultSequence = 0;
+        asyncGpuReadbackErrorCount = 0;
+
         rawWebcamPixels = null;
         downscaleLutX0 = null;
         downscaleLutX1 = null;
@@ -7450,12 +8323,11 @@ public class AirWeavingController : MonoBehaviour
         lutDstH = 0;
         lutRotAngle = -1;
         lastVideoQuadCamW = -1;
-        workWidth = 0;
-        workHeight = 0;
         lastCamWidth = 0;
         lastCamHeight = 0;
 
-        if (protobufLogHandlerActive)
+        // 7. Reset Protobuf native log handler paling akhir setelah seluruh native resource MediaPipe dibersihkan
+        if (workerExitedCleanly && protobufLogHandlerActive)
         {
             try
             {
