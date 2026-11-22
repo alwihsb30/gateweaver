@@ -73,6 +73,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         public Vector3 lastPos;
         public bool lastIsFist;
         public bool lastIsTargetingPort;
+        public bool lastIsCarryPan;
         public float lastMeanCurlRatio;
 
         public void ResetImmediate()
@@ -82,6 +83,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             lastPos = Vector3.zero;
             lastIsFist = false;
             lastIsTargetingPort = false;
+            lastIsCarryPan = false;
             lastMeanCurlRatio = 1.4f;
         }
     }
@@ -688,7 +690,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         float meanCurlRatio,
         bool isInOcclusionGrace = false,
         float graceNormalized = 0f,
-        float dt = 0.016f)
+        float dt = 0.016f,
+        bool isCarryPanMode = false)
     {
         RenderPalmReticle(
             camT,
@@ -701,6 +704,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             isInOcclusionGrace,
             graceNormalized,
             dt,
+            isCarryPanMode,
             ref primaryReticleFade,
             reticleOuterRenderer,
             reticleOuterMat,
@@ -725,7 +729,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         float meanCurlRatio,
         bool isInOcclusionGrace = false,
         float graceNormalized = 0f,
-        float dt = 0.016f)
+        float dt = 0.016f,
+        bool isCarryPanMode = false)
     {
         RenderPalmReticle(
             camT,
@@ -738,6 +743,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             isInOcclusionGrace,
             graceNormalized,
             dt,
+            isCarryPanMode,
             ref secondaryReticleFade,
             secondaryReticleOuterRenderer,
             secondaryReticleOuterMat,
@@ -760,6 +766,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         bool isInOcclusionGrace,
         float graceNormalized,
         float dt,
+        bool isCarryPanMode,
         ref ReticleFadeState fadeState,
         LineRenderer outerLr,
         Material outerMat,
@@ -782,6 +789,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             fadeState.lastPos = palmWorldPos;
             fadeState.lastIsFist = isFistActive;
             fadeState.lastIsTargetingPort = isTargetingPort;
+            fadeState.lastIsCarryPan = isCarryPanMode;
             fadeState.lastMeanCurlRatio = meanCurlRatio;
         }
 
@@ -819,18 +827,40 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         Vector3 center = fadeState.lastPos - (camT.forward * 0.14f);
 
         float openFrac = Mathf.Clamp01((fadeState.lastMeanCurlRatio - 0.78f) / 0.75f);
-        float outerRadius = fadeState.lastIsFist ? 0.036f : Mathf.Lerp(0.044f, 0.074f, openFrac);
-        float innerRadius = fadeState.lastIsFist ? 0.015f : 0.018f;
-        float crossHalf = fadeState.lastIsFist ? 0.022f : 0.030f;
+        float outerRadius;
+        float innerRadius;
+        float crossHalf;
+        float outerWidth;
+        float innerWidth;
+        Color baseColor;
 
-        Color baseColor = fadeState.lastIsFist
-            ? ReticleFistColor
-            : (fadeState.lastIsTargetingPort ? ReticlePortAimColor : ReticleOpenColor);
+        if (fadeState.lastIsCarryPan)
+        {
+            float carryPulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 8.5f));
+            baseColor = TwoHandFreePanGoldColor;
+            outerRadius = 0.044f + (0.005f * carryPulse);
+            innerRadius = 0.017f;
+            crossHalf = 0.026f;
+            outerWidth = 0.012f;
+            innerWidth = 0.0085f;
+        }
+        else
+        {
+            outerRadius = fadeState.lastIsFist ? 0.036f : Mathf.Lerp(0.044f, 0.074f, openFrac);
+            innerRadius = fadeState.lastIsFist ? 0.015f : 0.018f;
+            crossHalf = fadeState.lastIsFist ? 0.022f : 0.030f;
+            outerWidth = fadeState.lastIsFist ? 0.013f : 0.009f;
+            innerWidth = fadeState.lastIsFist ? 0.009f : 0.006f;
+            baseColor = fadeState.lastIsFist
+                ? ReticleFistColor
+                : (fadeState.lastIsTargetingPort ? ReticlePortAimColor : ReticleOpenColor);
+        }
+
         Color color = new Color(baseColor.r, baseColor.g, baseColor.b, baseColor.a * fadeState.alpha);
         Color coreCol = new Color(ReticleCoreWhiteColor.r, ReticleCoreWhiteColor.g, ReticleCoreWhiteColor.b, ReticleCoreWhiteColor.a * fadeState.alpha);
 
-        DrawReticleCircle(outerLr, outerMat, center, right, up, outerRadius, color, fadeState.lastIsFist ? 0.013f : 0.009f);
-        DrawReticleCircle(innerLr, innerMat, center - (camT.forward * 0.004f), right, up, innerRadius, coreCol, fadeState.lastIsFist ? 0.009f : 0.006f);
+        DrawReticleCircle(outerLr, outerMat, center, right, up, outerRadius, color, outerWidth);
+        DrawReticleCircle(innerLr, innerMat, center - (camT.forward * 0.004f), right, up, innerRadius, coreCol, innerWidth);
         if (crossHLr != null && crossVLr != null)
         {
             if (crossMat != null) crossMat.color = coreCol;

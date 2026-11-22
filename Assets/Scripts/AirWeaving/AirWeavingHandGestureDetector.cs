@@ -252,12 +252,12 @@ public struct OneEuroFilter3D
 
 public sealed class AirWeavingHandGestureDetector
 {
-    // Quality Gate: edge deadzone longgar [0.015, 0.985] agar gestur di pinggir layar & 2-tangan global tetap lengket
+    // Quality Gate: edge deadzone longgar [0.015, 0.985] & skala telapak jarak jauh (0.032) agar tangan jauh tetap lolos
     private const float EdgeDeadzoneMin = 0.015f;
     private const float EdgeDeadzoneMax = 0.985f;
-    private const float MinValidRawPalmScale2D = 0.045f;
+    private const float MinValidRawPalmScale2D = 0.032f;
     private const float MinValidPalmSpan3DMeters = 0.035f;
-    private const float MinPalmScaleClamp = 0.055f;
+    private const float MinPalmScaleClamp = 0.045f;
     private const float HandEntryWarmupSeconds = 0.080f;
     private const float MetricEmaTauSeconds = 0.020f;
     private const float DefaultReferenceDepth = 3.82f;
@@ -274,7 +274,7 @@ public sealed class AirWeavingHandGestureDetector
 
     // Parameter True 3D Hand Depth Tracking berbasis Rigid Metacarpal Palm Span (Tahap 4.7 v8.0)
     public const float DefaultComfortPalmSpan = 0.172f;
-    private const float MinRigidPalmSpanClamp = 0.048f;
+    private const float MinRigidPalmSpanClamp = 0.030f;
     private const float MaxRigidPalmSpanClamp = 0.620f;
     private const float PalmSpanOneEuroMinCutoff = 1.15f;
     private const float PalmSpanOneEuroBeta = 0.08f;
@@ -309,13 +309,14 @@ public sealed class AirWeavingHandGestureDetector
     private const float FistExitFastSeconds = 0.115f;
     private const float SlowReleaseSpeedThreshold = 1.50f;
     private const float FastReleaseSpeedThreshold = 2.50f;
-    private const float OcclusionGraceSeconds = 0.110f;
-    private const float StickyOcclusionGraceSeconds = 0.120f;
+    private const float OcclusionGraceSeconds = 0.080f;
+    private const float StickyOcclusionGraceSeconds = 0.200f;
     private const float PreFistLatchMaxSeconds = 0.060f;
 
     // Ambang Kanal Kabel & Free-View (Pinch Hibrida 3D + 2D Aspect-Compensated, anti Z-occlusion, santai tanpa pose "OK")
     private const float PinchEnterRatio = 0.48f;
     private const float PinchExitRatio = 0.62f;
+    private const float PinchCableStickyExitRatio = 0.75f;
     public const float PinchReleaseIntentRatio = 0.56f;
     private const float PrePinchSuppressSummonRatio = 0.54f;
     private const float PinchDipProximityWeight = 1.15f;
@@ -325,7 +326,9 @@ public sealed class AirWeavingHandGestureDetector
     private const float PinchEnterDebounceSeconds = 0.035f;
     private const float PinchExitSlowSeconds = 0.045f;
     private const float PinchExitFastSeconds = 0.095f;
-    private const float PinchOcclusionGraceSeconds = 0.110f;
+    private const float PinchCableStickyExitDebounceSeconds = 0.095f;
+    private const float PinchOcclusionGraceSeconds = 0.080f;
+    private const float PinchStickyOcclusionGraceSeconds = 0.200f;
     private const float PrePinchLatchMaxSeconds = 0.055f;
 
     // Ambang Ibu Jari 3D (Open-5 Bloom, NAND jempol lipat, NOT jempol kuat)
@@ -420,6 +423,7 @@ public sealed class AirWeavingHandGestureDetector
     private bool isPinchActive = false;
     private bool pinchJustStarted = false;
     private bool pinchJustEnded = false;
+    private bool pinchEndedByTrackingLoss = false;
     private float pinchEnterHoldTimer = 0f;
     private float pinchExitHoldTimer = 0f;
     private float pinchOcclusionGraceTimer = 0f;
@@ -477,6 +481,7 @@ public sealed class AirWeavingHandGestureDetector
     public bool IsPinchActive => isPinchActive;
     public bool PinchJustStarted => pinchJustStarted;
     public bool PinchJustEnded => pinchJustEnded;
+    public bool PinchEndedByTrackingLoss => pinchEndedByTrackingLoss;
     public bool IsPrePinchClosing => isPrePinchClosing;
     public bool IsFormingPinchIntent => isPinchActive || isPrePinchGuardActive || isPrePinchClosing;
     public bool IsPinchReleaseIntent => currentPinchRatio > PinchReleaseIntentRatio;
@@ -552,6 +557,7 @@ public sealed class AirWeavingHandGestureDetector
         isPinchActive = false;
         pinchJustStarted = false;
         pinchJustEnded = false;
+        pinchEndedByTrackingLoss = false;
         pinchEnterHoldTimer = 0f;
         pinchExitHoldTimer = 0f;
         pinchOcclusionGraceTimer = 0f;
@@ -622,6 +628,21 @@ public sealed class AirWeavingHandGestureDetector
         palmSpanOneEuroFilter.Reset();
         ResetScalarEmaFilters();
         ResetCursorFilters();
+    }
+
+    /// <summary>
+    /// Mengurangi timer occlusion grace internal sesuai durasi grace yang sudah dihabiskan di level slot tangan
+    /// (Stage 1) agar total occlusion grace tetap tepat (~200 ms saat membawa objek) dan tidak bertumpuk ganda. Zero-GC.
+    /// </summary>
+    public void ConsumeExternalGraceSeconds(float waitedSeconds)
+    {
+        if (waitedSeconds <= 0f)
+        {
+            return;
+        }
+
+        occlusionGraceTimer = Mathf.Max(0f, occlusionGraceTimer - waitedSeconds);
+        pinchOcclusionGraceTimer = Mathf.Max(0f, pinchOcclusionGraceTimer - waitedSeconds);
     }
 
     private void ResetScalarEmaFilters()
@@ -1103,6 +1124,9 @@ public sealed class AirWeavingHandGestureDetector
             return;
         }
 
+        Matrix4x4 worldToCam = cachedProjectionCamTransform.worldToLocalMatrix;
+        float refDepth = cachedProjectionRefDepth;
+
         Vector3 filteredPalm = palmCursorFilter.CurrentValue;
         Vector3 filteredPinch = pinchPointFilter.CurrentValue;
         Vector3 filteredIndex = indexTipFilter.CurrentValue;
@@ -1110,33 +1134,37 @@ public sealed class AirWeavingHandGestureDetector
         Vector3 filteredSummonTip = activeSummonTipFilter.CurrentValue;
 
         PalmCursorWorldPosition = filteredPalm;
-        PalmCursorLocalXY = ProjectWorldToRefRayPlane(cachedProjectionCamTransform, filteredPalm, cachedProjectionRefDepth);
+        PalmCursorLocalXY = ProjectWorldToRefRayPlaneMatrix(ref worldToCam, filteredPalm, refDepth);
 
         PinchPointWorldPosition = filteredPinch;
-        PinchPointLocalXY = ProjectWorldToRefRayPlane(cachedProjectionCamTransform, filteredPinch, cachedProjectionRefDepth);
+        PinchPointLocalXY = ProjectWorldToRefRayPlaneMatrix(ref worldToCam, filteredPinch, refDepth);
 
         IndexTipWorldPosition = filteredIndex;
-        IndexTipLocalXY = ProjectWorldToRefRayPlane(cachedProjectionCamTransform, filteredIndex, cachedProjectionRefDepth);
+        IndexTipLocalXY = ProjectWorldToRefRayPlaneMatrix(ref worldToCam, filteredIndex, refDepth);
 
-        ThumbTipLocalXY = ProjectWorldToRefRayPlane(cachedProjectionCamTransform, filteredThumb, cachedProjectionRefDepth);
-        ActiveSummonTipLocalXY = ProjectWorldToRefRayPlane(cachedProjectionCamTransform, filteredSummonTip, cachedProjectionRefDepth);
+        ThumbTipLocalXY = ProjectWorldToRefRayPlaneMatrix(ref worldToCam, filteredThumb, refDepth);
+        ActiveSummonTipLocalXY = ProjectWorldToRefRayPlaneMatrix(ref worldToCam, filteredSummonTip, refDepth);
     }
 
     /// <summary>
     /// Memproses warm-up 80 ms, kemajuan One-Euro 3D kursor per-frame render (<c>dt</c>), hysteresis 3D,
-    /// enter debounce ganda, asymmetric exit debounce, sticky-hold, &amp; occlusion grace untuk kanal Pinch &amp; Fist. Zero-GC.
+    /// enter debounce ganda, asymmetric exit debounce, CableDrag sticky lock (<c>&gt; 0.75f</c>, <c>95 ms</c>),
+    /// jeda timer saat frame drop, &amp; occlusion grace ~200 ms. Zero-GC.
     /// </summary>
     public void TickTemporalState(
         float dt,
         bool isHandDetected,
         bool isFistStickyHoldActive = false,
         bool isPinchStickyHoldActive = false,
-        bool relaxEdgeDeadzoneForTwoHand = false)
+        bool relaxEdgeDeadzoneForTwoHand = false,
+        bool isCableDragStickyActive = false,
+        bool isSlotMissingFrame = false)
     {
         fistJustStarted = false;
         fistJustEnded = false;
         pinchJustStarted = false;
         pinchJustEnded = false;
+        pinchEndedByTrackingLoss = false;
 
         if (dt <= 0.0001f)
         {
@@ -1156,13 +1184,24 @@ public sealed class AirWeavingHandGestureDetector
                 enterHoldTimer = 0f;
                 pinchEnterHoldTimer = 0f;
             }
-            else if (entryWarmupTimer > 0f)
+            else if (!isSlotMissingFrame && entryWarmupTimer > 0f)
             {
                 entryWarmupTimer = Mathf.Max(0f, entryWarmupTimer - dt);
             }
 
-            occlusionGraceTimer = isFistStickyHoldActive ? StickyOcclusionGraceSeconds : OcclusionGraceSeconds;
-            pinchOcclusionGraceTimer = PinchOcclusionGraceSeconds;
+            if (!isSlotMissingFrame)
+            {
+                occlusionGraceTimer = isFistStickyHoldActive ? StickyOcclusionGraceSeconds : OcclusionGraceSeconds;
+                pinchOcclusionGraceTimer = (isCableDragStickyActive || isPinchStickyHoldActive)
+                    ? PinchStickyOcclusionGraceSeconds
+                    : PinchOcclusionGraceSeconds;
+            }
+            else
+            {
+                // Selama tangan dalam jendela frame-drop grace (Stage 1), jeda timer enter/exit agar 1 frame landmark
+                // terdistorsi sesaat sebelum tangan hilang tidak memicu lepas gerbang atau commit kabel palsu.
+                return;
+            }
         }
         else
         {
@@ -1202,6 +1241,7 @@ public sealed class AirWeavingHandGestureDetector
                 {
                     isPinchActive = false;
                     pinchJustEnded = true;
+                    pinchEndedByTrackingLoss = true;
                     pinchExitHoldTimer = 0f;
                 }
             }
@@ -1267,17 +1307,33 @@ public sealed class AirWeavingHandGestureDetector
             isPrePinchClosing = false;
             pinchEnterHoldTimer = 0f;
 
-            if (rawPinchExitCondition)
+            // CableDrag Sticky Lock (terisolasi dari mode 2-tangan): wajib membuka lebar (> 0.75f) stabil >= 95 ms
+            // agar kabel tidak putus di tengah jalan akibat 1-2 frame jitter saat bergerak pelan maupun cepat.
+            bool pinchExitMet = isCableDragStickyActive
+                ? (currentPinchRatio > PinchCableStickyExitRatio)
+                : rawPinchExitCondition;
+
+            if (pinchExitMet)
             {
-                float speedT = Mathf.Clamp01((PinchSpeedUnitsPerSec - SlowReleaseSpeedThreshold) / (FastReleaseSpeedThreshold - SlowReleaseSpeedThreshold));
-                float requiredExit = isPinchStickyHoldActive
-                    ? Mathf.Lerp(PinchExitSlowSeconds, PinchExitFastSeconds, speedT)
-                    : PinchExitSlowSeconds;
+                float requiredExit;
+                if (isCableDragStickyActive)
+                {
+                    requiredExit = PinchCableStickyExitDebounceSeconds;
+                }
+                else
+                {
+                    float speedT = Mathf.Clamp01((PinchSpeedUnitsPerSec - SlowReleaseSpeedThreshold) / (FastReleaseSpeedThreshold - SlowReleaseSpeedThreshold));
+                    requiredExit = isPinchStickyHoldActive
+                        ? Mathf.Lerp(PinchExitSlowSeconds, PinchExitFastSeconds, speedT)
+                        : PinchExitSlowSeconds;
+                }
+
                 pinchExitHoldTimer += dt;
                 if (pinchExitHoldTimer >= requiredExit)
                 {
                     isPinchActive = false;
                     pinchJustEnded = true;
+                    pinchEndedByTrackingLoss = false;
                     pinchExitHoldTimer = 0f;
                 }
             }
@@ -1417,6 +1473,14 @@ public sealed class AirWeavingHandGestureDetector
     private static Vector2 ProjectWorldToRefRayPlane(Transform camTransform, Vector3 worldPos, float referenceDepth)
     {
         Vector3 camLocal = camTransform.InverseTransformPoint(worldPos);
+        float safeZ = Mathf.Max(0.35f, camLocal.z);
+        float scale = referenceDepth / safeZ;
+        return new Vector2(camLocal.x * scale, camLocal.y * scale);
+    }
+
+    private static Vector2 ProjectWorldToRefRayPlaneMatrix(ref Matrix4x4 worldToCam, Vector3 worldPos, float referenceDepth)
+    {
+        Vector3 camLocal = worldToCam.MultiplyPoint3x4(worldPos);
         float safeZ = Mathf.Max(0.35f, camLocal.z);
         float scale = referenceDepth / safeZ;
         return new Vector2(camLocal.x * scale, camLocal.y * scale);

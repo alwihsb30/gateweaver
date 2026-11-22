@@ -69,12 +69,12 @@ public class AirWeavingController : MonoBehaviour
     private const float MinNearClipSafeOffsetMeters = 0.28f;
 
     // Parameter Kontrol 2 Tangan Full Free-View 6-DoF Focus-Point Orbit 360° + Ultra-Wide Zoom 0.18x..15x + True Z-Axis Push/Pull
-    private const float TwoHandOrbitYawDegPerUnit = 60.0f;
-    private const float TwoHandOrbitPitchDegPerUnit = 60.0f;
-    private const float TwoHandOrbitMaxAxisDeltaPerFrameDeg = 12.0f;
-    private const float TwoHandOrbitRollGain = 0.65f;
+    private const float TwoHandOrbitYawDegPerUnit = 98.0f;
+    private const float TwoHandOrbitPitchDegPerUnit = 98.0f;
+    private const float TwoHandOrbitMaxAxisDeltaPerFrameDeg = 16.0f;
+    private const float TwoHandOrbitRollGain = 0.82f;
     private const float TwoHandOrbitRollEmaRate = 18.0f;
-    private const float TwoHandOrbitRollMaxDeltaPerFrameDeg = 10.0f;
+    private const float TwoHandOrbitRollMaxDeltaPerFrameDeg = 12.0f;
     private const float TwoHandRollMinSepDist = 0.16f;
     private const float TwoHandRollFullSepDist = 0.46f;
     private const float TwoHandMinPalmScale = AirWeavingStageController.MinSafePalmScale;
@@ -82,15 +82,15 @@ public class AirWeavingController : MonoBehaviour
     private const float TwoHandAvgPalmOneEuroBeta = 0.45f;
     private const float TwoHandAvgPalmOneEuroDCutoff = 1.00f;
     private const float TwoHandAvgPalmOneEuroVelScale = 18.0f;
-    private const float TwoHandZoomSensitivity = 1.15f;
+    private const float TwoHandZoomSensitivity = 1.55f;
     private const float TwoHandZoomDistEmaRate = 14.0f;
     private const float TwoHandZoomNormSpanSoftFloor = 1.25f;
     private const float TwoHandZoomNormSpanMinFloor = 0.50f;
     private const float TwoHandZoomNormSpanInitialFloor = 0.85f;
     private const float TwoHandZoomRatioMicroDeadzone = 0.025f;
-    private const float TwoHandZoomMaxLogStepPerFrame = 0.085f;
-    private const float TwoHandFreePanXYGain = 0.96f;
-    private const float TwoHandFreePanMaxDeltaXYPerFrame = 0.26f;
+    private const float TwoHandZoomMaxLogStepPerFrame = 0.115f;
+    private const float TwoHandFreePanXYGain = 1.50f;
+    private const float TwoHandFreePanMaxDeltaXYPerFrame = 0.38f;
     private const float TwoHandOrbitConfirmHoldSeconds = 0.040f;
     private const float TwoHandOrbitHoldMaxPinchRatio = 0.66f;
     private const float TwoHandFreePanHoldMinFistBendDeg = 78.0f;
@@ -100,6 +100,23 @@ public class AirWeavingController : MonoBehaviour
     private const float TwoHandIntentGraceMaxSeconds = 0.220f;
     private const float TwoHandSingleHandUpgradeWindowSeconds = 0.190f;
     private const float TwoHandFistResetHoldSeconds = 0.55f;
+
+    // Parameter Carry-Pan Tangan Kedua (simetris 1 Pinch + 1 Fist pasca > 190 ms) & Auto Edge-Pan 1 Tangan (Zero-GC)
+    private const float CarryPanConfirmHoldSeconds = 0.055f;
+    private const float CarryPanXYGain = TwoHandFreePanXYGain;
+    private const float CarryPanMaxDeltaXYPerFrame = TwoHandFreePanMaxDeltaXYPerFrame;
+    private const float CarryPanFistHoldMinBendDeg = 70.0f;
+    private const float CarryPanFistReleaseFreezeMaxBendDeg = 76.0f;
+    private const float CarryPanPalmOneEuroMinCutoff = 2.20f;
+    private const float CarryPanPalmOneEuroBeta = 0.45f;
+    private const float CarryPanPalmOneEuroDCutoff = 1.00f;
+    private const float CarryPanPalmOneEuroVelScale = 16.0f;
+
+    private const float EdgePanStripFraction = 0.12f;
+    private const float EdgePanDwellSeconds = 0.095f;
+    private const float EdgePanRampInSeconds = 0.110f;
+    private const float EdgePanMaxSpeedAtRefDepth = 2.85f;
+    private const float EdgePanCableReleasePauseRatio = 0.64f;
 
     // Parameter Quality Gate, Stabilisasi Dual-Hand, Exclusive Gesture Arbiter, & Confidence Jarak Jauh MediaPipe (Tahap 5.5+)
     private const float MediaPipeMinHandDetectionConfidence = 0.40f;
@@ -163,7 +180,7 @@ public class AirWeavingController : MonoBehaviour
     private const float InputAirTapDwellSeconds = 0.105f;
     private const float InputAirTapCooldownSeconds = 0.40f;
     private const float InputTouchRippleDuration = 0.34f;
-    private const float ParkReturnThresholdY = 0.86f;
+    private const float ParkReturnThresholdY = 1.12f;
     private const float ParkSlotSnapRadius = 0.38f;
     private const float HandFrameStaleTimeoutSeconds = 0.35f;
 
@@ -189,20 +206,20 @@ public class AirWeavingController : MonoBehaviour
     private const float AirDrawFadeDurationSeconds = 0.35f;
     private const float AirDrawPostSpawnCooldownSeconds = 0.55f;
 
-    // Koordinat meja hologram horizontal XZ 1.5x khusus Mode Udara (dipasangkan dengan DefaultZoomScale = 0.74f agar gerbang lega & mudah diraih)
+    // Koordinat meja hologram horizontal XZ 2.0x khusus Mode Udara (dipasangkan dengan DefaultZoomScale = 0.58f & screen-space hitbox floor)
     // (X = kiri-kanan, Y pada konstanta di bawah = kedalaman Z depan-belakang meja)
-    private const float InputTerminalBaseX = -1.89f;
-    private const float InputATerminalY = 0.24f;
-    private const float InputBTerminalY = -0.87f;
-    private const float OutputTerminalBaseX = 1.92f;
-    private const float OutputTerminalY = -0.27f;
-    private const float ParkingRackY = 1.23f;
-    private const float AssemblyMinBaseX = -1.11f;
-    private const float AssemblyMaxBaseX = 1.14f;
-    private const float AssemblyMinY = -1.17f;
-    private const float AssemblyMaxY = 0.69f;
+    private const float InputTerminalBaseX = -2.52f;
+    private const float InputATerminalY = 0.32f;
+    private const float InputBTerminalY = -1.16f;
+    private const float OutputTerminalBaseX = 2.56f;
+    private const float OutputTerminalY = -0.36f;
+    private const float ParkingRackY = 1.64f;
+    private const float AssemblyMinBaseX = -1.48f;
+    private const float AssemblyMaxBaseX = 1.52f;
+    private const float AssemblyMinY = -1.56f;
+    private const float AssemblyMaxY = 0.92f;
 
-    private static readonly float[] ParkingSlotBaseX = { -1.14f, -0.57f, 0.00f, 0.57f, 1.14f };
+    private static readonly float[] ParkingSlotBaseX = { -1.52f, -0.76f, 0.00f, 0.76f, 1.52f };
     private static readonly NodeType[] ParkingSlotOrder =
     {
         NodeType.AND,
@@ -467,6 +484,26 @@ public class AirWeavingController : MonoBehaviour
     private Vector2 twoHandPanPrevMidpointXY = Vector2.zero;
     private bool wasTwoHandPanReleaseFrozen = false;
     private OneEuroFilter1D twoHandAvgPalmScaleFilter;
+
+    // Sub-state Carry-Pan Tangan Kedua (ortogonal terhadap CableDrag/GateGrab agar 0% mengganggu sticky lock Tangan 1)
+    private bool isCarryPanActive = false;
+    private int carryPanHandSlot = -1;
+    private bool carryPanUsesFist = true;
+    private float carryPanConfirmTimer = 0f;
+    private Vector2 carryPanPrevHandXY = Vector2.zero;
+    private bool wasCarryPanReleaseFrozen = false;
+    private bool wasCarryPanOcclusionPaused = false;
+    private OneEuroFilter1D carryPanPalmScaleFilter;
+
+    // State Auto Edge-Pan 1 Tangan (aktif hanya saat CableDrag/GateGrab stabil & Carry-Pan tidak aktif)
+    private bool isAutoEdgePanActive = false;
+    private float edgePanDwellTimer = 0f;
+
+    // Kompensasi kedalaman GateGrab saat panggung digeser X/Y/Z oleh Carry-Pan / Auto Edge-Pan
+    private float grabStageDepthCompMeters = 0f;
+    private Vector3 lastGrabStagePanOffset = Vector3.zero;
+    private bool hasLastGrabStagePanOffset = false;
+
     private float grabStartPalmSpan = AirWeavingHandGestureDetector.DefaultComfortPalmSpan;
     private float grabStartCameraDepth = WorkbenchDepth;
     private bool preGrabWasPlaced = false;
@@ -918,12 +955,16 @@ public class AirWeavingController : MonoBehaviour
                                    || activeInteractionMode == ActiveInteractionMode.TwoHandReset;
         bool isTwoHandPinchSticky = activeInteractionMode == ActiveInteractionMode.TwoHandOrbitZoom
                                     || activeInteractionMode == ActiveInteractionMode.TwoHandFreePan;
+        bool isCarryPanFistSlot0 = isCarryPanActive && carryPanUsesFist && carryPanHandSlot == 0;
+        bool isCarryPanFistSlot1 = isCarryPanActive && carryPanUsesFist && carryPanHandSlot == 1;
+        bool isCarryPanPinchSlot0 = isCarryPanActive && !carryPanUsesFist && carryPanHandSlot == 0;
+        bool isCarryPanPinchSlot1 = isCarryPanActive && !carryPanUsesFist && carryPanHandSlot == 1;
 
-        bool isFistStickyDrag = isTwoHandFistSticky || (isSingleHandFistSticky && activeInteractionHandSlot == 0);
-        bool isPinchStickyDrag = isTwoHandPinchSticky || (isSingleHandPinchSticky && activeInteractionHandSlot == 0);
+        bool isFistStickyDrag = isTwoHandFistSticky || (isSingleHandFistSticky && activeInteractionHandSlot == 0) || isCarryPanFistSlot0;
+        bool isPinchStickyDrag = isTwoHandPinchSticky || (isSingleHandPinchSticky && activeInteractionHandSlot == 0) || isCarryPanPinchSlot0;
         bool isPrimaryCableDragSticky = isSingleHandPinchSticky && activeInteractionHandSlot == 0;
-        bool isSecFistStickyDrag = isTwoHandFistSticky || (isSingleHandFistSticky && activeInteractionHandSlot == 1);
-        bool isSecPinchStickyDrag = isTwoHandPinchSticky || (isSingleHandPinchSticky && activeInteractionHandSlot == 1);
+        bool isSecFistStickyDrag = isTwoHandFistSticky || (isSingleHandFistSticky && activeInteractionHandSlot == 1) || isCarryPanFistSlot1;
+        bool isSecPinchStickyDrag = isTwoHandPinchSticky || (isSingleHandPinchSticky && activeInteractionHandSlot == 1) || isCarryPanPinchSlot1;
         bool isSecondaryCableDragSticky = isSingleHandPinchSticky && activeInteractionHandSlot == 1;
         bool twoHandsVisibleForEdgeRelax = isHandDetected && isSecondaryHandDetected;
         handGestureDetector.TickTemporalState(
@@ -943,6 +984,7 @@ public class AirWeavingController : MonoBehaviour
             isSecondaryCableDragSticky,
             secondaryMissedLastInference);
         UpdateTwoHandStageManipulation(mainCam, dt);
+        UpdateSingleHandAutoEdgePan(mainCam, dt);
         if (stageController != null)
         {
             bool hasStageParallaxHand = IsAnyHandDetected;
@@ -1568,6 +1610,36 @@ public class AirWeavingController : MonoBehaviour
         }
     }
 
+    private void ResetCarryPanState(bool brakeStageWithoutCoast)
+    {
+        bool wasActive = isCarryPanActive;
+        isCarryPanActive = false;
+        carryPanHandSlot = -1;
+        carryPanUsesFist = true;
+        carryPanConfirmTimer = 0f;
+        carryPanPrevHandXY = Vector2.zero;
+        wasCarryPanReleaseFrozen = false;
+        wasCarryPanOcclusionPaused = false;
+        carryPanPalmScaleFilter.Reset();
+
+        if (wasActive && brakeStageWithoutCoast)
+        {
+            stageController?.EndCarryPanWithoutCoast();
+        }
+    }
+
+    private void ResetAutoEdgePanState(bool brakeStageImmediate)
+    {
+        bool wasActive = isAutoEdgePanActive;
+        isAutoEdgePanActive = false;
+        edgePanDwellTimer = 0f;
+
+        if (wasActive && brakeStageImmediate)
+        {
+            stageController?.BrakeEdgePanImmediate();
+        }
+    }
+
     private void ResetExclusiveArbiterAndTwoHandState()
     {
         activeInteractionMode = ActiveInteractionMode.Idle;
@@ -1584,6 +1656,11 @@ public class AirWeavingController : MonoBehaviour
         wasTwoHandOrbitReleaseFrozen = false;
         wasTwoHandPanReleaseFrozen = false;
         twoHandAvgPalmScaleFilter.Reset();
+        ResetCarryPanState(brakeStageWithoutCoast: false);
+        ResetAutoEdgePanState(brakeStageImmediate: false);
+        grabStageDepthCompMeters = 0f;
+        lastGrabStagePanOffset = Vector3.zero;
+        hasLastGrabStagePanOffset = false;
         stageController?.SetTwoHandManipulationState(false);
     }
 
@@ -1603,13 +1680,26 @@ public class AirWeavingController : MonoBehaviour
         wasTwoHandOrbitReleaseFrozen = false;
         wasTwoHandPanReleaseFrozen = false;
         twoHandAvgPalmScaleFilter.Reset();
-        stageController?.SetTwoHandManipulationState(false);
+        bool hadCarryPan = isCarryPanActive;
+        ResetCarryPanState(brakeStageWithoutCoast: hadCarryPan);
+        ResetAutoEdgePanState(brakeStageImmediate: isAutoEdgePanActive);
+        if (!hadCarryPan)
+        {
+            stageController?.SetTwoHandManipulationState(false);
+        }
     }
 
     private void ExitInteractionMode(ActiveInteractionMode expectedMode, bool triggerNeutralCooldown)
     {
         if (activeInteractionMode == expectedMode)
         {
+            if (expectedMode == ActiveInteractionMode.CableDrag || expectedMode == ActiveInteractionMode.GateGrab)
+            {
+                ResetCarryPanState(brakeStageWithoutCoast: isCarryPanActive);
+                ResetAutoEdgePanState(brakeStageImmediate: isAutoEdgePanActive);
+                grabStageDepthCompMeters = 0f;
+                hasLastGrabStagePanOffset = false;
+            }
             activeInteractionMode = ActiveInteractionMode.Idle;
             activeInteractionHandSlot = -1;
             singleHandModeEnteredTime = -10f;
@@ -1626,6 +1716,11 @@ public class AirWeavingController : MonoBehaviour
     /// </summary>
     private void RevertSingleHandForTwoHandUpgrade(Camera mainCam)
     {
+        ResetCarryPanState(brakeStageWithoutCoast: false);
+        ResetAutoEdgePanState(brakeStageImmediate: false);
+        grabStageDepthCompMeters = 0f;
+        hasLastGrabStagePanOffset = false;
+
         if (activeInteractionMode == ActiveInteractionMode.CableDrag)
         {
             cableRouter?.RevertActiveDragForTwoHandUpgrade(circuitManager);
@@ -1677,7 +1772,8 @@ public class AirWeavingController : MonoBehaviour
     /// Kontrol 2 Tangan Full Free-View 6-DoF Global di Seluruh Layar Kamera (Tahap 5.5+ Zero-GC):
     /// - 100% bebas lokasi: bekerja di ruang kosong mana pun, pinggir layar, maupun di atas hologram/objek.
     /// - Prioritas 2-tangan anti-bajak: jeda pra-niat saat kedua tangan mulai membentuk gestur 2 tangan + upgrade mulus
-    ///   dari aksi 1-tangan yang baru mulai &lt;= 190 ms; setelah &gt; 190 ms aksi 1-tangan tetap terkunci aman oleh Arbiter.
+    ///   dari aksi 1-tangan yang baru mulai &lt;= 190 ms; setelah &gt; 190 ms aksi 1-tangan tetap terkunci aman oleh Arbiter
+    ///   dan membuka sub-mode simetris Carry-Pan Tangan Kedua (CableDrag+Fist / GateGrab+Pinch).
     /// - Tidak pernah membatalkan mode 2 tangan yang sudah aktif hanya karena salah satu tangan mendekati tepi layar.
     /// - Both Hands Pinch: Orbit 360° Quaternion Arcball + Roll + Zoom.
     /// - Free Air-Pan 3D: 1 Pinch + 1 Fist (dengan hold hysteresis &amp; Anti-Kick Release Gate).
@@ -1694,6 +1790,8 @@ public class AirWeavingController : MonoBehaviour
             {
                 ExitInteractionMode(activeInteractionMode, triggerNeutralCooldown: false);
             }
+            bool hadCarryPanOverlay = isCarryPanActive;
+            ResetCarryPanState(brakeStageWithoutCoast: hadCarryPanOverlay);
             twoHandOrbitConfirmTimer = 0f;
             twoHandFreePanConfirmTimer = 0f;
             twoHandIntentPendingTimer = 0f;
@@ -1701,7 +1799,10 @@ public class AirWeavingController : MonoBehaviour
             twoHandFistResetLatched = false;
             wasTwoHandOrbitReleaseFrozen = false;
             wasTwoHandPanReleaseFrozen = false;
-            stageController?.SetTwoHandManipulationState(false);
+            if (!hadCarryPanOverlay)
+            {
+                stageController?.SetTwoHandManipulationState(false);
+            }
             return;
         }
 
@@ -1712,6 +1813,9 @@ public class AirWeavingController : MonoBehaviour
             {
                 ExitInteractionMode(activeInteractionMode, triggerNeutralCooldown: true);
             }
+            // Jika Tangan 2 hilang saat Carry-Pan aktif: akhiri Carry-Pan bersih TANPA mengganggu sticky lock Tangan 1
+            bool hadCarryPanLost = isCarryPanActive;
+            ResetCarryPanState(brakeStageWithoutCoast: hadCarryPanLost);
             twoHandOrbitConfirmTimer = 0f;
             twoHandFreePanConfirmTimer = 0f;
             twoHandIntentPendingTimer = 0f;
@@ -1719,7 +1823,10 @@ public class AirWeavingController : MonoBehaviour
             twoHandFistResetLatched = false;
             wasTwoHandOrbitReleaseFrozen = false;
             wasTwoHandPanReleaseFrozen = false;
-            stageController?.SetTwoHandManipulationState(false);
+            if (!hadCarryPanLost)
+            {
+                stageController?.SetTwoHandManipulationState(false);
+            }
             return;
         }
 
@@ -1736,8 +1843,9 @@ public class AirWeavingController : MonoBehaviour
         bool bothPureFists = primaryPureFist && secondaryPureFist;
 
         // Kunci Eksklusif Arbiter: lindungi aksi 1-tangan yang sedang berlangsung;
-        // namun jika aksi 1-tangan BARU saja mulai (<= 190 ms) & kedua tangan jelas sudah membentuk pose 2 tangan penuh,
-        // upgrade mulus ke mode 2 tangan agar tidak kalah cepat saat pengguna mencubit/mengepal dekat objek.
+        // - <= 190 ms: upgrade mulus ke mode 2 tangan global (Orbit/FreePan) agar tidak kalah cepat dekat objek.
+        // - > 190 ms: aksi 1-tangan (CableDrag/GateGrab) terkunci penuh, dan Tangan 2 dapat mengaktifkan sub-state
+        //   Carry-Pan simetris (CableDrag + Fist / GateGrab + Pinch) tanpa pernah memutus Tangan 1 atau memicu Both Fist.
         bool lockedBySingleHandMode = activeInteractionMode != ActiveInteractionMode.Idle && !IsAnyTwoHandModeActive;
         if (lockedBySingleHandMode)
         {
@@ -1761,9 +1869,34 @@ public class AirWeavingController : MonoBehaviour
                 twoHandFistResetLatched = false;
                 wasTwoHandOrbitReleaseFrozen = false;
                 wasTwoHandPanReleaseFrozen = false;
-                stageController?.SetTwoHandManipulationState(false);
+
+                bool eligibleForCarryPan = singleHandElapsed > TwoHandSingleHandUpgradeWindowSeconds
+                                           && (activeInteractionHandSlot == 0 || activeInteractionHandSlot == 1)
+                                           && ((activeInteractionMode == ActiveInteractionMode.CableDrag
+                                                && cableRouter != null
+                                                && cableRouter.IsDraggingCable)
+                                               || (activeInteractionMode == ActiveInteractionMode.GateGrab
+                                                   && grabbedGateSlotIndex >= 0
+                                                   && grabbedGateSlotIndex < gateSlots.Count));
+                if (eligibleForCarryPan)
+                {
+                    UpdateCarryPanHelper(dt);
+                }
+                else
+                {
+                    bool hadCarryPan = isCarryPanActive;
+                    ResetCarryPanState(brakeStageWithoutCoast: hadCarryPan);
+                    if (!hadCarryPan)
+                    {
+                        stageController?.SetTwoHandManipulationState(false);
+                    }
+                }
                 return;
             }
+        }
+        else if (isCarryPanActive || carryPanConfirmTimer > 0f)
+        {
+            ResetCarryPanState(brakeStageWithoutCoast: isCarryPanActive);
         }
 
         // 1. Kelanjutan mode 2-tangan yang SUDAH terkunci (kebal tepi layar & dilarang loncat paksa antar-mode 2-tangan)
@@ -2165,6 +2298,326 @@ public class AirWeavingController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Menyaring <c>FilteredPalmSpan</c> 1 tangan Tangan 2 dengan One-Euro 1D lebih tenang untuk Carry-Pan Z
+    /// agar geseran X/Y biasa atau kemiringan pergelangan tidak memicu goyangan kedalaman palsu. Zero-GC.
+    /// </summary>
+    private float SampleSmoothedCarryPanPalmScale(AirWeavingHandGestureDetector helperDet, float dt, bool resetFilter)
+    {
+        float rawPalmSpan = Mathf.Clamp(helperDet.FilteredPalmSpan, TwoHandMinPalmScale, 0.620f);
+        if (resetFilter)
+        {
+            carryPanPalmScaleFilter.Reset();
+        }
+
+        float safeDt = Mathf.Clamp(dt, 0.001f, 0.050f);
+        float smoothed = carryPanPalmScaleFilter.Filter(
+            rawPalmSpan,
+            safeDt,
+            CarryPanPalmOneEuroMinCutoff,
+            CarryPanPalmOneEuroBeta,
+            CarryPanPalmOneEuroDCutoff,
+            CarryPanPalmOneEuroVelScale);
+        return Mathf.Clamp(smoothed, TwoHandMinPalmScale, 0.620f);
+    }
+
+    /// <summary>
+    /// Mengelola sub-state simetris Carry-Pan Tangan Kedua (1 Pinch + 1 Fist pasca &gt; 190 ms):
+    /// - CableDrag stabil (Tangan 1 Pinch) + Tangan 2 Fist -> Carry-Pan X/Y/Z.
+    /// - GateGrab stabil (Tangan 1 Fist) + Tangan 2 Pinch -> Carry-Pan X/Y/Z (0% bentrok Both Fist).
+    /// Masuk/keluarnya Tangan 2 tidak pernah menyentuh activeInteractionMode maupun sticky lock Tangan 1. Zero-GC.
+    /// </summary>
+    private void UpdateCarryPanHelper(float dt)
+    {
+        int ownerSlot = activeInteractionHandSlot;
+        int helperSlot = 1 - ownerSlot;
+        AirWeavingHandGestureDetector ownerDet = GetHandDetector(ownerSlot);
+        AirWeavingHandGestureDetector helperDet = GetHandDetector(helperSlot);
+        bool helperMissed = helperSlot == 0 ? primaryMissedLastInference : secondaryMissedLastInference;
+        bool wantHelperFist = activeInteractionMode == ActiveInteractionMode.CableDrag;
+
+        // Jika Tangan 1 baru saja melepas carry pada frame ini, tutup Carry-Pan bersih sebelum commit/drop Tangan 1
+        bool ownerStillHolding = wantHelperFist ? ownerDet.IsPinchActive : ownerDet.IsFistActive;
+        if (!ownerStillHolding)
+        {
+            bool hadCarryPan = isCarryPanActive;
+            ResetCarryPanState(brakeStageWithoutCoast: hadCarryPan);
+            if (!hadCarryPan)
+            {
+                stageController?.SetTwoHandManipulationState(false);
+            }
+            return;
+        }
+
+        if (isCarryPanActive)
+        {
+            if (carryPanHandSlot != helperSlot || carryPanUsesFist != wantHelperFist)
+            {
+                ResetCarryPanState(brakeStageWithoutCoast: true);
+                return;
+            }
+
+            bool holdHelperOk;
+            if (carryPanUsesFist)
+            {
+                holdHelperOk = !helperDet.IsPinchActive
+                               && (helperDet.IsFistActive
+                                   || (helperDet.MeanWeightedBendDeg >= CarryPanFistHoldMinBendDeg
+                                       && helperDet.FoldedFingerCount >= 2));
+            }
+            else
+            {
+                holdHelperOk = !helperDet.IsFistActive
+                               && (helperDet.IsPinchActive
+                                   || helperDet.PinchRatio < TwoHandOrbitHoldMaxPinchRatio);
+            }
+
+            if (holdHelperOk)
+            {
+                StepCarryPan(helperDet, carryPanUsesFist, helperMissed, dt, isStarting: false);
+                return;
+            }
+
+            ResetCarryPanState(brakeStageWithoutCoast: true);
+            return;
+        }
+
+        bool helperPoseMatches = wantHelperFist
+            ? (helperDet.IsFistActive && !helperDet.IsPinchActive)
+            : (helperDet.IsPinchActive && !helperDet.IsFistActive);
+
+        if (!helperMissed && helperDet.IsTwoHandQualityGatePassing && helperPoseMatches)
+        {
+            carryPanConfirmTimer += dt;
+            if (carryPanConfirmTimer >= CarryPanConfirmHoldSeconds)
+            {
+                carryPanConfirmTimer = 0f;
+                isCarryPanActive = true;
+                carryPanHandSlot = helperSlot;
+                carryPanUsesFist = wantHelperFist;
+                ResetAutoEdgePanState(brakeStageImmediate: false);
+                StepCarryPan(helperDet, carryPanUsesFist, helperMissed: false, dt, isStarting: true);
+                return;
+            }
+        }
+        else
+        {
+            carryPanConfirmTimer = 0f;
+        }
+
+        stageController?.SetTwoHandManipulationState(false);
+    }
+
+    private void StepCarryPan(
+        AirWeavingHandGestureDetector helperDet,
+        bool usesFist,
+        bool helperMissed,
+        float dt,
+        bool isStarting)
+    {
+        Vector2 curHelperXY = usesFist ? helperDet.PalmCursorLocalXY : helperDet.PinchPointLocalXY;
+        float safeDt = Mathf.Clamp(dt, 0.001f, 0.050f);
+        float helperPalmScale = SampleSmoothedCarryPanPalmScale(helperDet, safeDt, resetFilter: isStarting);
+
+        if (isStarting)
+        {
+            carryPanPrevHandXY = curHelperXY;
+            wasCarryPanReleaseFrozen = false;
+            wasCarryPanOcclusionPaused = false;
+            stageController?.BeginTwoHandManipulationAnchor(helperPalmScale, useFocusPointOrbit: false, focalMidpointCameraXY: curHelperXY);
+            return;
+        }
+
+        // 1. Kedipan occlusion singkat (helperMissed): jeda injeksi delta sementara TANPA ReanchorTwoHandDepth()
+        //    agar progres tarikan mundur Z tidak pernah terhapus saat tangan kembali terdeteksi.
+        if (helperMissed)
+        {
+            wasCarryPanOcclusionPaused = true;
+            stageController?.SetTwoHandReleaseFreeze(true);
+            return;
+        }
+
+        // 2. Anti-Kick Release Gate murni (hanya saat Tangan 2 benar-benar mulai membuka gestur):
+        //    Untuk Fist di Carry-Pan, gunakan ambang longgar (< 76° atau <= 1 jari) agar kepalan yang mengecil saat mundur tidak palsu ter-freeze.
+        bool releaseIntentFreeze;
+        if (usesFist)
+        {
+            releaseIntentFreeze = !helperDet.IsFistActive
+                                  || helperDet.MeanWeightedBendDeg < CarryPanFistReleaseFreezeMaxBendDeg
+                                  || helperDet.FoldedFingerCount <= 1;
+        }
+        else
+        {
+            releaseIntentFreeze = !helperDet.IsPinchActive
+                                  || helperDet.PinchRatio > TwoHandPinchReleaseFreezeRatio
+                                  || helperDet.IsPinchReleaseIntent;
+        }
+
+        if (releaseIntentFreeze)
+        {
+            wasCarryPanReleaseFrozen = true;
+            stageController?.SetTwoHandReleaseFreeze(true);
+            return;
+        }
+
+        if (wasCarryPanReleaseFrozen)
+        {
+            wasCarryPanReleaseFrozen = false;
+            wasCarryPanOcclusionPaused = false;
+            carryPanPrevHandXY = curHelperXY;
+            stageController?.ReanchorTwoHandDepth(helperPalmScale, refreshOrbitFocus: false, focalMidpointCameraXY: curHelperXY);
+            stageController?.SetTwoHandReleaseFreeze(false);
+            return;
+        }
+
+        if (wasCarryPanOcclusionPaused)
+        {
+            wasCarryPanOcclusionPaused = false;
+            // Sejajarkan XY saja agar tidak menyentak pasca frame drop, tetapi pertahankan jangkar Z asli agar gerak mundur tetap mulus
+            carryPanPrevHandXY = curHelperXY;
+        }
+
+        stageController?.SetTwoHandReleaseFreeze(false);
+
+        // Direct manipulation 100% konsisten dengan TwoHandFreePan:
+        // tarik Tangan 2 ke kiri -> targetPanOffset.x berkurang (tarik sisi kanan papan masuk layar);
+        // mundurkan Tangan 2 menjauhi kamera -> palmScale mengecil -> targetPanOffset.z bertambah (objek belakang kamera maju ke depan).
+        float stageDepthRatio = stageController != null
+            ? Mathf.Clamp(stageController.CurrentStageDepthZ / WorkbenchDepth, 0.30f, 2.55f)
+            : 1f;
+        Vector2 panDeltaXY = (curHelperXY - carryPanPrevHandXY) * (CarryPanXYGain * stageDepthRatio);
+        float maxDeltaXY = CarryPanMaxDeltaXYPerFrame * Mathf.Clamp(stageDepthRatio, 0.50f, 2.55f);
+        float panDeltaMag = panDeltaXY.magnitude;
+        if (panDeltaMag > maxDeltaXY)
+        {
+            panDeltaXY *= maxDeltaXY / panDeltaMag;
+        }
+        carryPanPrevHandXY = curHelperXY;
+
+        stageController?.ApplyCarryPan(panDeltaXY, helperPalmScale, safeDt);
+    }
+
+    /// <summary>
+    /// Auto Edge-Pan 1 Tangan saat CableDrag atau GateGrab stabil (&gt; 190 ms) &amp; Carry-Pan tidak aktif:
+    /// - Strip tepi 12% kiri/kanan/atas/bawah dalam koordinat viewport frustum kamera (aman rasio 16:9 &amp; 20:9).
+    /// - Dwell 95 ms + ramp-in 110 ms + kecepatan kuadratik halus terkalibrasi CurrentStageDepthZ &amp; OBB pan bounds.
+    /// - Panggung bergeser berlawanan arah tepi kursor (kursor kanan -> papan geser kiri; kursor atas -> papan turun).
+    /// - Pengaman Anti-Kabur Wajib: otomatis pause + BrakeEdgePanImmediate saat kabel snapped ke soket,
+    ///   Tangan 1 occlusion grace (missedLastInference), atau mulai membuka gestur. Zero-GC.
+    /// </summary>
+    private void UpdateSingleHandAutoEdgePan(Camera mainCam, float dt)
+    {
+        bool overlayOrVerify = IsAnyUiOverlayOpen || (levelManager != null && levelManager.IsVerifying);
+        if (overlayOrVerify
+            || mainCam == null
+            || stageController == null
+            || isCarryPanActive
+            || carryPanConfirmTimer > 0f
+            || IsAnyTwoHandModeActive)
+        {
+            ResetAutoEdgePanState(brakeStageImmediate: isAutoEdgePanActive && !isCarryPanActive && !IsAnyTwoHandModeActive);
+            return;
+        }
+
+        bool isCarryingCable = activeInteractionMode == ActiveInteractionMode.CableDrag
+                               && cableRouter != null
+                               && cableRouter.IsDraggingCable;
+        bool isCarryingGate = activeInteractionMode == ActiveInteractionMode.GateGrab
+                              && grabbedGateSlotIndex >= 0
+                              && grabbedGateSlotIndex < gateSlots.Count;
+        if ((!isCarryingCable && !isCarryingGate) || (activeInteractionHandSlot != 0 && activeInteractionHandSlot != 1))
+        {
+            ResetAutoEdgePanState(brakeStageImmediate: isAutoEdgePanActive);
+            return;
+        }
+
+        float singleHandElapsed = Time.unscaledTime - singleHandModeEnteredTime;
+        if (singleHandElapsed <= TwoHandSingleHandUpgradeWindowSeconds)
+        {
+            ResetAutoEdgePanState(brakeStageImmediate: false);
+            return;
+        }
+
+        int ownerSlot = activeInteractionHandSlot;
+        bool ownerDetected = IsHandSlotDetected(ownerSlot);
+        bool ownerMissed = ownerSlot == 0 ? primaryMissedLastInference : secondaryMissedLastInference;
+        AirWeavingHandGestureDetector ownerDet = GetHandDetector(ownerSlot);
+
+        bool pausedBySnap = isCarryingCable && cableRouter.IsSnappedTargetPort;
+        bool pausedByOcclusion = !ownerDetected || ownerMissed;
+        bool pausedByReleaseIntent = isCarryingCable
+            ? (!ownerDet.IsPinchActive || ownerDet.PinchRatio > EdgePanCableReleasePauseRatio)
+            : (!ownerDet.IsFistActive || ownerDet.MeanWeightedBendDeg < TwoHandFistReleaseFreezeMaxBendDeg);
+
+        if (pausedBySnap || pausedByOcclusion || pausedByReleaseIntent)
+        {
+            ResetAutoEdgePanState(brakeStageImmediate: isAutoEdgePanActive);
+            return;
+        }
+
+        Vector2 cursorRayXY = isCarryingCable ? ownerDet.PinchPointLocalXY : ownerDet.PalmCursorLocalXY;
+        float halfFovRad = mainCam.fieldOfView * 0.5f * Mathf.Deg2Rad;
+        float aspect = mainCam.aspect > 0.1f ? mainCam.aspect : (16f / 9f);
+        float frustumHalfH = WorkbenchDepth * Mathf.Tan(halfFovRad);
+        float frustumHalfW = frustumHalfH * aspect;
+        if (frustumHalfH <= 0.01f || frustumHalfW <= 0.01f)
+        {
+            ResetAutoEdgePanState(brakeStageImmediate: isAutoEdgePanActive);
+            return;
+        }
+
+        float viewportX = 0.5f + (0.5f * Mathf.Clamp(cursorRayXY.x / frustumHalfW, -1f, 1f));
+        float viewportY = 0.5f + (0.5f * Mathf.Clamp(cursorRayXY.y / frustumHalfH, -1f, 1f));
+
+        float rawPushX = 0f;
+        if (viewportX < EdgePanStripFraction)
+        {
+            rawPushX = -Mathf.Clamp01((EdgePanStripFraction - viewportX) / EdgePanStripFraction);
+        }
+        else if (viewportX > (1f - EdgePanStripFraction))
+        {
+            rawPushX = Mathf.Clamp01((viewportX - (1f - EdgePanStripFraction)) / EdgePanStripFraction);
+        }
+
+        float rawPushY = 0f;
+        if (viewportY < EdgePanStripFraction)
+        {
+            rawPushY = -Mathf.Clamp01((EdgePanStripFraction - viewportY) / EdgePanStripFraction);
+        }
+        else if (viewportY > (1f - EdgePanStripFraction))
+        {
+            rawPushY = Mathf.Clamp01((viewportY - (1f - EdgePanStripFraction)) / EdgePanStripFraction);
+        }
+
+        Vector2 rawEdgePush = new Vector2(rawPushX, rawPushY);
+        float edgeMag = rawEdgePush.magnitude;
+        if (edgeMag <= 0.005f)
+        {
+            ResetAutoEdgePanState(brakeStageImmediate: isAutoEdgePanActive);
+            return;
+        }
+
+        float safeDt = Mathf.Clamp(dt, 0.0005f, 0.050f);
+        edgePanDwellTimer += safeDt;
+        if (edgePanDwellTimer < EdgePanDwellSeconds)
+        {
+            isAutoEdgePanActive = false;
+            return;
+        }
+
+        float rampT = Mathf.Clamp01((edgePanDwellTimer - EdgePanDwellSeconds) / EdgePanRampInSeconds);
+        float clampedMag = Mathf.Min(1f, edgeMag);
+        Vector2 quadPush = (rawEdgePush / edgeMag) * (clampedMag * clampedMag);
+        float stageDepthRatio = Mathf.Clamp(stageController.CurrentStageDepthZ / WorkbenchDepth, 0.30f, 2.55f);
+        float panSpeed = EdgePanMaxSpeedAtRefDepth * stageDepthRatio * rampT;
+
+        // Panggung bergeser berlawanan arah tepi kursor:
+        // kursor kanan (quadPush.x > 0) -> panDeltaXY.x < 0 (papan ke kiri); kursor atas (quadPush.y > 0) -> panDeltaXY.y < 0 (papan turun)
+        Vector2 panDeltaXY = -quadPush * (panSpeed * safeDt);
+        stageController.ApplyContinuousEdgePanXY(panDeltaXY);
+        isAutoEdgePanActive = true;
+    }
+
     private void UpdateWorkbenchInteractions(Camera mainCam, float dt)
     {
         float aspectScale = ComputeHorizontalAspectScale(mainCam);
@@ -2243,7 +2696,53 @@ public class AirWeavingController : MonoBehaviour
                     // Tangan didorong maju ke arah layar (PalmSpan membesar) -> targetCamDepth bertambah (objek terdorong masuk ke dalam meja)
                     float currentFilteredPalmSpan = Mathf.Max(0.055f, grabDetector.FilteredPalmSpan);
                     float spanDepthRatio = Mathf.Pow(currentFilteredPalmSpan / Mathf.Max(0.055f, grabStartPalmSpan), FistGrabDepthGain);
-                    float targetCamDepth = Mathf.Clamp(grabStartCameraDepth * spanDepthRatio, MinGrabCameraDepth, MaxGrabCameraDepth);
+                    float baseGrabDepth = grabStartCameraDepth * spanDepthRatio;
+
+                    // Kompensasi kedalaman mulus saat panggung bergeser X/Y/Z oleh Carry-Pan atau Auto Edge-Pan
+                    // agar gerbang tetap menempel di bawah kepalan Tangan 1 tanpa melompat vertikal/kedalaman
+                    if (stageController != null)
+                    {
+                        Vector3 curStagePan = stageController.CurrentPanOffset;
+                        if (!hasLastGrabStagePanOffset)
+                        {
+                            lastGrabStagePanOffset = curStagePan;
+                            hasLastGrabStagePanOffset = true;
+                        }
+                        else
+                        {
+                            Vector3 deltaStagePan = curStagePan - lastGrabStagePanOffset;
+                            lastGrabStagePanOffset = curStagePan;
+                            if (deltaStagePan.sqrMagnitude > 1e-8f)
+                            {
+                                Transform stageRootForComp = stageController.StageRoot;
+                                float depthCompDelta;
+                                if (stageRootForComp != null)
+                                {
+                                    Vector3 rayDirCam = camT.InverseTransformDirection(handRayDir);
+                                    Vector3 planeNormalCam = camT.InverseTransformDirection(stageRootForComp.up);
+                                    float denom = Vector3.Dot(rayDirCam, planeNormalCam);
+                                    if (Mathf.Abs(denom) > 0.22f)
+                                    {
+                                        depthCompDelta = Mathf.Clamp(Vector3.Dot(deltaStagePan, planeNormalCam) / denom, -0.80f, 0.80f);
+                                    }
+                                    else
+                                    {
+                                        depthCompDelta = Mathf.Clamp(deltaStagePan.z, -0.80f, 0.80f);
+                                    }
+                                }
+                                else
+                                {
+                                    depthCompDelta = Mathf.Clamp(deltaStagePan.z, -0.80f, 0.80f);
+                                }
+                                grabStageDepthCompMeters = Mathf.Clamp(
+                                    grabStageDepthCompMeters + depthCompDelta,
+                                    MinGrabCameraDepth - baseGrabDepth,
+                                    MaxGrabCameraDepth - baseGrabDepth);
+                            }
+                        }
+                    }
+
+                    float targetCamDepth = Mathf.Clamp(baseGrabDepth + grabStageDepthCompMeters, MinGrabCameraDepth, MaxGrabCameraDepth);
                     Vector3 targetWorldPos = camPos + (handRayDir * targetCamDepth);
 
                     Transform stageRoot = stageController != null ? stageController.StageRoot : null;
@@ -2545,6 +3044,17 @@ public class AirWeavingController : MonoBehaviour
         else
         {
             grabStartCameraDepth = WorkbenchDepth;
+        }
+        grabStageDepthCompMeters = 0f;
+        if (stageController != null)
+        {
+            lastGrabStagePanOffset = stageController.CurrentPanOffset;
+            hasLastGrabStagePanOffset = true;
+        }
+        else
+        {
+            lastGrabStagePanOffset = Vector3.zero;
+            hasLastGrabStagePanOffset = false;
         }
         grabbed.isPlacedOnWorkbench = true;
         grabbed.coastVelocityXY = Vector2.zero;
@@ -5380,53 +5890,68 @@ public class AirWeavingController : MonoBehaviour
         bool slot1PortHovering = (primaryCableSlot == 1 && (hoveringPrimaryPort || draggingCable))
                                  || (otherCableSlot == 1 && hoveringSecondaryPort);
 
-        bool lockedOtherThanSlot0 = activeInteractionMode != ActiveInteractionMode.Idle && activeInteractionHandSlot != 0;
-        bool lockedOtherThanSlot1 = activeInteractionMode != ActiveInteractionMode.Idle && activeInteractionHandSlot != 1;
+        bool isSlot0CarryPan = isCarryPanActive && carryPanHandSlot == 0 && !overlayOpen && !isVerifying && !twoHandVisualActive;
+        bool isSlot1CarryPan = isCarryPanActive && carryPanHandSlot == 1 && !overlayOpen && !isVerifying && !twoHandVisualActive;
 
-        // Saat Idle, tampilkan reticle aktif untuk KEDUA tangan (slot 0 DAN slot 1) agar pengguna tahu kiri & kanan sama-sama siap pakai
-        bool hideSlot0Reticle = overlayOpen
-                                || isVerifying
-                                || twoHandVisualActive
-                                || lockedOtherThanSlot0
-                                || (isGrabbingGate && activeInteractionHandSlot == 0)
-                                || slot0PortHovering
-                                || hoveredGateSlotIndex >= 0
-                                || hoveredInputNode != null
-                                || circleSummoners[0].IsActive;
+        bool lockedOtherThanSlot0 = activeInteractionMode != ActiveInteractionMode.Idle && activeInteractionHandSlot != 0 && !isSlot0CarryPan;
+        bool lockedOtherThanSlot1 = activeInteractionMode != ActiveInteractionMode.Idle && activeInteractionHandSlot != 1 && !isSlot1CarryPan;
 
-        bool hideSlot1Reticle = overlayOpen
-                                || isVerifying
-                                || twoHandVisualActive
-                                || lockedOtherThanSlot1
-                                || (isGrabbingGate && activeInteractionHandSlot == 1)
-                                || slot1PortHovering
-                                || secondaryHoveredGateSlotIndex >= 0
-                                || secondaryHoveredInputNode != null
-                                || circleSummoners[1].IsActive;
+        // Saat Idle, tampilkan reticle aktif untuk KEDUA tangan (slot 0 DAN slot 1) agar pengguna tahu kiri & kanan sama-sama siap pakai;
+        // saat Carry-Pan aktif, tampilkan reticle emas pada Tangan 2 tanpa menyembunyikan indikator kabel/gerbang Tangan 1.
+        bool hideSlot0Reticle = !isSlot0CarryPan
+                                && (overlayOpen
+                                    || isVerifying
+                                    || twoHandVisualActive
+                                    || lockedOtherThanSlot0
+                                    || (isGrabbingGate && activeInteractionHandSlot == 0)
+                                    || slot0PortHovering
+                                    || hoveredGateSlotIndex >= 0
+                                    || hoveredInputNode != null
+                                    || circleSummoners[0].IsActive);
+
+        bool hideSlot1Reticle = !isSlot1CarryPan
+                                && (overlayOpen
+                                    || isVerifying
+                                    || twoHandVisualActive
+                                    || lockedOtherThanSlot1
+                                    || (isGrabbingGate && activeInteractionHandSlot == 1)
+                                    || slot1PortHovering
+                                    || secondaryHoveredGateSlotIndex >= 0
+                                    || secondaryHoveredInputNode != null
+                                    || circleSummoners[1].IsActive);
+
+        Vector3 slot0ReticleWorldPos = (isSlot0CarryPan && !carryPanUsesFist)
+            ? handGestureDetector.PinchPointWorldPosition
+            : handGestureDetector.PalmCursorWorldPosition;
+        Vector3 slot1ReticleWorldPos = (isSlot1CarryPan && !carryPanUsesFist)
+            ? secondaryHandGestureDetector.PinchPointWorldPosition
+            : secondaryHandGestureDetector.PalmCursorWorldPosition;
 
         hologramVisual.UpdatePalmReticle(
             camT,
             isHandDetected,
             hideSlot0Reticle,
-            handGestureDetector.PalmCursorWorldPosition,
+            slot0ReticleWorldPos,
             handGestureDetector.IsFistActive,
             slot0PortHovering,
             handGestureDetector.MeanCurlRatio,
             primaryMissedLastInference,
             primaryGraceNorm,
-            dt);
+            dt,
+            isCarryPanMode: isSlot0CarryPan);
 
         hologramVisual.UpdateSecondaryPalmReticle(
             camT,
             isSecondaryHandDetected,
             hideSlot1Reticle,
-            secondaryHandGestureDetector.PalmCursorWorldPosition,
+            slot1ReticleWorldPos,
             secondaryHandGestureDetector.IsFistActive,
             slot1PortHovering,
             secondaryHandGestureDetector.MeanCurlRatio,
             secondaryMissedLastInference,
             secondaryGraceNorm,
-            dt);
+            dt,
+            isCarryPanMode: isSlot1CarryPan);
 
         // Indikator cincin cubit presisi untuk tangan kabel aktif (baik slot 0 maupun slot 1) & tangan kedua bila ikut hover port saat Idle
         bool hasPrimaryCableHand = primaryCableSlot >= 0 && IsHandSlotDetected(primaryCableSlot);

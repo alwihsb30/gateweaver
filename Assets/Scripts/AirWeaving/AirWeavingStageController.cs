@@ -2,10 +2,10 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Pengendali Ruang Meja Hologram 3D Horizontal (GateWeaver AR v8.0 Tahap 5.5+ Focus-Point Orbit, Ultra-Wide Zoom 0.18x–15x, &amp; Lapangan 2x):
-/// - Pivot 3D <c>HologramStageRoot</c> di depan <c>Camera.main</c> dengan bidang meja horizontal nyata 2x lebih luas
+/// Pengendali Ruang Meja Hologram 3D Horizontal (GateWeaver AR v8.0 Tahap 5.5+ Focus-Point Orbit, Ultra-Wide Zoom 0.18x–15x, &amp; Lapangan 2.0x):
+/// - Pivot 3D <c>HologramStageRoot</c> di depan <c>Camera.main</c> dengan bidang meja horizontal nyata 2.0x lebih luas
 ///   (bidang <c>XZ</c> lokal, normal atas meja = <c>+Y</c> / <c>stageRoot.up</c>) pada kemiringan bawaan <c>DefaultElevationPitchDeg = 36°</c>
-///   dan framing awal <c>DefaultZoomScale = 0.52x</c> sehingga seluruh lapangan 2x langsung muat utuh di frame kamera.
+///   dan framing awal <c>DefaultZoomScale = 0.58f</c> sehingga seluruh lapangan 2.0x (termasuk Output kanan &amp; rak NOT) muat utuh dengan margin nyaman.
 /// - 100% bebas kontrol Mouse / Touchscreen di Mode Udara: Focus-Point Orbit Quaternion Arcball 360° mengelilingi titik yang sedang diamati,
 ///   Ultra-Wide Air-Zoom multiplikatif/logaritmik (0.18x..15.0x) tepat menuju titik fokus, Free Air-Pan 3D berbasis OBB dinamis bebas mentok,
 ///   True Z-Axis Push/Pull terpisah dari Zoom, Inertial Coasting berbasis poros fokus anti-kick, dan Reset Panggung mulus.
@@ -18,8 +18,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
     public const float DefaultElevationPitchDeg = 36.0f;
     private static readonly Quaternion DefaultBaseTiltRotation = Quaternion.Euler(-DefaultElevationPitchDeg, 0f, 0f);
 
-    // Framing awal 0.74x memuat utuh lapangan hologram 1.5x dengan ukuran gerbang lega; Ultra-Wide Zoom 0.18x..15.0x
-    public const float DefaultZoomScale = 0.74f;
+    // Framing awal 0.58x memuat utuh lapangan hologram 2.0x (termasuk Output kanan & rak NOT); Ultra-Wide Zoom 0.18x..15.0x
+    public const float DefaultZoomScale = 0.58f;
     public const float MinZoomScale = 0.18f;
     public const float MaxZoomScale = 15.0f;
 
@@ -33,7 +33,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
     public const float MaxPanDepthPushFartherZ = 5.68f;
 
     public const float ReferencePalmScale = AirWeavingHandGestureDetector.DefaultComfortPalmSpan;
-    public const float MinSafePalmScale = 0.055f;
+    public const float MinSafePalmScale = 0.030f;
     private const float MaxSafePalmScale = 0.620f;
 
     public const float MaxParallaxYawDeg = 7.0f;
@@ -53,12 +53,15 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private const float PanSpringOmega = 14.0f;
     private const float ParallaxSpringOmega = 7.5f;
 
-    // Parameter True Z-Axis Push/Pull 2 Tangan (terpisah dari Zoom skala & Anchor 2D; estDepth = ReferencePalmScale / avgPalmScale)
+    // Parameter True Z-Axis Push/Pull Logaritmik Simetris (terpisah dari Zoom skala & Anchor 2D; log(curEstDepth / anchorEstDepth))
     private const float TwoHandDepthMinDeadzone = 0.018f;
     private const float TwoHandDepthRelativeDeadzone = 0.022f;
-    public const float TwoHandOrbitDepthGainMeters = 4.40f;
-    public const float TwoHandFreePanDepthGainMeters = 4.65f;
-    private const float MaxTwoHandDepthSpeedMetersPerSec = 6.20f;
+    public const float TwoHandOrbitDepthGainMeters = 6.00f;
+    public const float TwoHandFreePanDepthGainMeters = 6.00f;
+    private const float CarryPanDepthMinDeadzone = 0.020f;
+    private const float CarryPanDepthRelativeDeadzone = 0.024f;
+    public const float CarryPanDepthGainMeters = 6.00f;
+    private const float MaxTwoHandDepthSpeedMetersPerSec = 7.50f;
 
     // Parameter Inertial Coasting Quaternion Anti-Kick (ring-buffer tertunda 55-130 ms + deadzone lepas tenang terpisah XY vs Z + zoom logaritmik)
     private const float StageCoastDamping = 6.2f;
@@ -79,8 +82,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private const float CoastReleasePanDeadzoneUnitsPerSec = 0.20f;
     private const float CoastReleaseDepthDeadzoneMetersPerSec = 0.32f;
 
-    private const int GridInternalVerticalLines = 11;
-    private const int GridInternalHorizontalLines = 9;
+    private const int GridInternalVerticalLines = 17;
+    private const int GridInternalHorizontalLines = 13;
     private const int GridTotalLineCount = GridInternalVerticalLines + GridInternalHorizontalLines;
     private const float GridNormalHalfWidth = 0.0020f;
     private const float GridCenterAxisHalfWidth = 0.0032f;
@@ -128,7 +131,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private Material floorDeckQuadMat;
     private readonly Vector3[] floorDeckVerticesBuffer = new Vector3[9];
 
-    // Grid proyeksi internal 11x9 digabung menjadi 1 static ribbon Mesh (Cull Off, 1 draw call, 0 CPU per frame)
+    // Grid proyeksi internal 17x13 digabung menjadi 1 static ribbon Mesh (Cull Off, 1 draw call, 0 CPU per frame)
     private MeshFilter floorGridRibbonMeshFilter;
     private MeshRenderer floorGridRibbonRenderer;
     private Mesh floorGridRibbonMesh;
@@ -189,7 +192,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     private float targetZoomScale = DefaultZoomScale;
     private float currentZoomScale = DefaultZoomScale;
-    private float currentLogZoom = -0.30110509f; // Mathf.Log(DefaultZoomScale = 0.74f)
+    private float currentLogZoom = -0.54472718f; // Mathf.Log(DefaultZoomScale = 0.58f)
     private float velocityLogZoom = 0f;
 
     private Vector3 targetPanOffset = Vector3.zero;
@@ -240,14 +243,14 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     private bool isInitialized = false;
     private float lastBuiltGridAspectScale = -1f;
-    private float deckMinX = -2.31f;
-    private float deckMaxX = 2.43f;
-    private float deckMinZ = -1.44f;
-    private float deckMaxZ = 1.65f;
-    private float deckHalfW = 2.37f;
-    private float deckHalfZ = 1.545f;
-    private float deckCenterX = 0.06f;
-    private float deckCenterZ = 0.105f;
+    private float deckMinX = -3.08f;
+    private float deckMaxX = 3.24f;
+    private float deckMinZ = -1.92f;
+    private float deckMaxZ = 2.20f;
+    private float deckHalfW = 3.16f;
+    private float deckHalfZ = 2.06f;
+    private float deckCenterX = 0.08f;
+    private float deckCenterZ = 0.14f;
     private const float DeckMinY = 0.00f;
     private const float DeckMaxY = 0.45f;
 
@@ -350,7 +353,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
             cornerBracketRenderers[c] = CreateLocalLine($"HoloStage_CornerBracket_{c}", floorVisualGroupObj.transform, 3, loop: false, width: 0.0085f, cornerBracketMat);
         }
 
-        // 5. Grid Proyeksi Sci-Fi Internal 11x9 sebagai 1 Static Ribbon Mesh (Cull Off Sprites/Default + vertex colors)
+        // 5. Grid Proyeksi Sci-Fi Internal 17x13 sebagai 1 Static Ribbon Mesh (Cull Off Sprites/Default + vertex colors)
         GameObject gridObj = new GameObject("HoloStage_FloorGridRibbon");
         gridObj.transform.SetParent(floorVisualGroupObj.transform, false);
         floorGridRibbonMeshFilter = gridObj.AddComponent<MeshFilter>();
@@ -409,13 +412,13 @@ public sealed class AirWeavingStageController : MonoBehaviour
         {
             RebuildStaticFloorGridGeometry(
                 ComputeAspectScale(mainCam),
-                assemblyMinBaseX: -1.11f,
-                assemblyMaxBaseX: 1.14f,
-                assemblyMinZ: -1.17f,
-                assemblyMaxZ: 0.69f,
-                inputBaseX: -1.89f,
-                outputBaseX: 1.92f,
-                parkingRackZ: 1.23f);
+                assemblyMinBaseX: -1.48f,
+                assemblyMaxBaseX: 1.52f,
+                assemblyMinZ: -1.56f,
+                assemblyMaxZ: 0.92f,
+                inputBaseX: -2.52f,
+                outputBaseX: 2.56f,
+                parkingRackZ: 1.64f);
         }
         HideImmediate();
     }
@@ -784,7 +787,12 @@ public sealed class AirWeavingStageController : MonoBehaviour
         prevManipFocusCam = ComputeCurrentManipFocusCam();
     }
 
-    private void ApplyAnchoredDepthPushPull(float avgPalmScale, float depthGainMeters, float dt)
+    private void ApplyAnchoredDepthPushPull(
+        float avgPalmScale,
+        float depthGainMeters,
+        float dt,
+        float minDeadzone = TwoHandDepthMinDeadzone,
+        float relativeDeadzone = TwoHandDepthRelativeDeadzone)
     {
         float curEstDepth = ComputeEstimatedDepth(avgPalmScale);
         float refDepth = Mathf.Max(0.50f, lastKnownWorkbenchDepth);
@@ -799,31 +807,41 @@ public sealed class AirWeavingStageController : MonoBehaviour
             return;
         }
 
-        // Tangan maju mendekati lensa -> avgPalmScale membesar -> curEstDepth mengecil -> deltaDepth negatif -> Z mengecil (hologram mendekat ke kamera)
-        // Tangan mundur menjauhi lensa -> avgPalmScale mengecil -> curEstDepth membesar -> deltaDepth positif -> Z membesar (hologram menjauh dari kamera)
-        float rawDeltaDepth = curEstDepth - twoHandAnchorEstDepth;
-        float depthDeadzone = Mathf.Max(TwoHandDepthMinDeadzone, twoHandAnchorEstDepth * TwoHandDepthRelativeDeadzone);
-        float effectiveDeltaDepth = 0f;
-        float absDeltaDepth = Mathf.Abs(rawDeltaDepth);
-        if (absDeltaDepth > depthDeadzone)
+        // Skala logaritmik simetris: log(curEstDepth / anchorEstDepth) == log(anchorPalmScale / curPalmScale)
+        // 100% simetris maju vs mundur pada jarak tangan dekat, sedang, maupun jauh (far-range hingga MinSafePalmScale = 0.030f):
+        // - Tangan maju mendekati lensa -> palmScale membesar -> curEstDepth mengecil -> rawLogDelta negatif -> Z mengecil (mendekat)
+        // - Tangan mundur menjauhi lensa -> palmScale mengecil -> curEstDepth membesar -> rawLogDelta positif -> Z membesar (menjauh)
+        float safeAnchorEst = Mathf.Max(0.05f, twoHandAnchorEstDepth);
+        float safeCurEst = Mathf.Max(0.05f, curEstDepth);
+        float rawLogDelta = Mathf.Log(safeCurEst / safeAnchorEst);
+        float depthDeadzone = Mathf.Max(minDeadzone, relativeDeadzone);
+        float effectiveLogDelta = 0f;
+        float absLogDelta = Mathf.Abs(rawLogDelta);
+        if (absLogDelta > depthDeadzone)
         {
-            effectiveDeltaDepth = rawDeltaDepth - (Mathf.Sign(rawDeltaDepth) * depthDeadzone);
+            effectiveLogDelta = rawLogDelta - (Mathf.Sign(rawLogDelta) * depthDeadzone);
         }
 
-        float rawDesiredFocusZ = twoHandAnchorFocusZ + (effectiveDeltaDepth * depthGainMeters);
-        float clampedDesiredFocusZ = Mathf.Clamp(rawDesiredFocusZ, dynamicMinStageDepthZ, dynamicMaxStageDepthZ);
+        // Turunkan batas fokus Z langsung dari OBB [dynamicMinPanZ..dynamicMaxPanZ] agar saat sebagian papan berada di belakang kamera
+        // (sedangkan titik fokus observasi jatuh di bagian belakang papan), tarikan mundur tetap bebas membawa seluruh papan ke depan lensa.
+        float focusZOffset = curFocusCam.z - (refDepth + targetPanOffset.z);
+        float minAllowedFocusZ = Mathf.Max(0.40f, refDepth + dynamicMinPanZ + focusZOffset);
+        float maxAllowedFocusZ = Mathf.Max(minAllowedFocusZ + 0.50f, refDepth + dynamicMaxPanZ + focusZOffset);
 
-        // Cegah overhang menempel di batas dekat (1.15m) / jauh (9.50m) agar gerakan balik langsung terasa responsif
+        float rawDesiredFocusZ = twoHandAnchorFocusZ + (effectiveLogDelta * depthGainMeters);
+        float clampedDesiredFocusZ = Mathf.Clamp(rawDesiredFocusZ, minAllowedFocusZ, maxAllowedFocusZ);
+
+        // Cegah overhang menempel di batas dekat / jauh agar gerakan balik langsung terasa responsif
         float safeGain = Mathf.Max(0.10f, depthGainMeters);
-        if (rawDesiredFocusZ < dynamicMinStageDepthZ)
+        if (rawDesiredFocusZ < minAllowedFocusZ)
         {
-            float overhangDepth = (dynamicMinStageDepthZ - rawDesiredFocusZ) / safeGain;
-            twoHandAnchorEstDepth = Mathf.Max(0.20f, twoHandAnchorEstDepth - overhangDepth);
+            float overhangLog = (minAllowedFocusZ - rawDesiredFocusZ) / safeGain;
+            twoHandAnchorEstDepth = Mathf.Clamp(safeAnchorEst * Mathf.Exp(-overhangLog), 0.15f, 12.0f);
         }
-        else if (rawDesiredFocusZ > dynamicMaxStageDepthZ)
+        else if (rawDesiredFocusZ > maxAllowedFocusZ)
         {
-            float overhangDepth = (rawDesiredFocusZ - dynamicMaxStageDepthZ) / safeGain;
-            twoHandAnchorEstDepth += overhangDepth;
+            float overhangLog = (rawDesiredFocusZ - maxAllowedFocusZ) / safeGain;
+            twoHandAnchorEstDepth = Mathf.Clamp(safeAnchorEst * Mathf.Exp(overhangLog), 0.15f, 12.0f);
         }
 
         float safeDt = Mathf.Clamp(dt, 0.001f, 0.050f);
@@ -984,6 +1002,94 @@ public sealed class AirWeavingStageController : MonoBehaviour
         targetPanOffset.x = Mathf.Clamp(targetPanOffset.x + panDeltaXY.x, dynamicMinPanX, dynamicMaxPanX);
         targetPanOffset.y = Mathf.Clamp(targetPanOffset.y + panDeltaXY.y, dynamicMinPanY, dynamicMaxPanY);
         targetPanOffset.z = Mathf.Clamp(targetPanOffset.z, dynamicMinPanZ, dynamicMaxPanZ);
+    }
+
+    /// <summary>
+    /// Menerapkan Carry-Pan Tangan Kedua (saat Tangan 1 mengunci CableDrag/GateGrab): direct manipulation X/Y
+    /// serta True Z-Axis Push/Pull 1 tangan dengan deadzone kedalaman lebih tenang (anti-goyangan Z palsu saat geser X/Y). Zero-GC.
+    /// </summary>
+    public void ApplyCarryPan(Vector2 panDeltaXY, float singleHandPalmScale, float dt = 0.016f)
+    {
+        isTwoHandManipulationActive = true;
+        if (isTwoHandReleaseFrozen)
+        {
+            return;
+        }
+
+        if (hasActiveOrbitFocus)
+        {
+            hasActiveOrbitFocus = false;
+            orbitFocusLocal = Vector3.zero;
+        }
+
+        RefreshDynamicPanBounds(lastKnownMainCam, lastKnownWorkbenchDepth, targetZoomScale, targetPanOffset.z);
+        if (singleHandPalmScale > 0f)
+        {
+            ApplyAnchoredDepthPushPull(
+                singleHandPalmScale,
+                CarryPanDepthGainMeters,
+                dt,
+                CarryPanDepthMinDeadzone,
+                CarryPanDepthRelativeDeadzone);
+        }
+
+        RefreshDynamicPanBounds(lastKnownMainCam, lastKnownWorkbenchDepth, targetZoomScale, targetPanOffset.z);
+        targetPanOffset.x = Mathf.Clamp(targetPanOffset.x + panDeltaXY.x, dynamicMinPanX, dynamicMaxPanX);
+        targetPanOffset.y = Mathf.Clamp(targetPanOffset.y + panDeltaXY.y, dynamicMinPanY, dynamicMaxPanY);
+        targetPanOffset.z = Mathf.Clamp(targetPanOffset.z, dynamicMinPanZ, dynamicMaxPanZ);
+    }
+
+    /// <summary>
+    /// Mengakhiri Carry-Pan Tangan Kedua secara presisi tanpa inertial coasting maupun hentakan,
+    /// mengunci posisi panggung tepat di tempat agar bidikan soket/gerbang Tangan 1 tetap diam stabil. Zero-GC.
+    /// </summary>
+    public void EndCarryPanWithoutCoast()
+    {
+        isTwoHandManipulationActive = false;
+        wasTwoHandManipulationActive = false;
+        hasTwoHandDepthAnchor = false;
+        ClearInertialCoastVelocities();
+        targetPanOffset = currentPanOffset;
+        velocityPanOffset = Vector3.zero;
+        currentFocusCamVelocity = Vector3.zero;
+    }
+
+    /// <summary>
+    /// Menerapkan Auto Edge-Pan 1 tangan kontinu pada bidang X/Y terkalibrasi OBB pan bounds
+    /// tanpa memicu mode manipulasi 2 tangan maupun mereset poros Focus-Point Orbit aktif. Zero-GC.
+    /// </summary>
+    public void ApplyContinuousEdgePanXY(Vector2 panDeltaXY)
+    {
+        if (isTwoHandManipulationActive)
+        {
+            return;
+        }
+
+        ClearInertialCoastVelocities();
+        RefreshDynamicPanBounds(lastKnownMainCam, lastKnownWorkbenchDepth, targetZoomScale, targetPanOffset.z);
+        targetPanOffset.x = Mathf.Clamp(targetPanOffset.x + panDeltaXY.x, dynamicMinPanX, dynamicMaxPanX);
+        targetPanOffset.y = Mathf.Clamp(targetPanOffset.y + panDeltaXY.y, dynamicMinPanY, dynamicMaxPanY);
+    }
+
+    /// <summary>
+    /// Menghentikan sisa gerak pegas X/Y Auto Edge-Pan seketika saat pause (kabel snap ke soket / occlusion grace / keluar strip)
+    /// agar soket di tepi layar tidak merayap menjauh saat hendak dicolok. Zero-GC.
+    /// </summary>
+    public void BrakeEdgePanImmediate()
+    {
+        if (isTwoHandManipulationActive)
+        {
+            return;
+        }
+
+        targetPanOffset.x = currentPanOffset.x;
+        targetPanOffset.y = currentPanOffset.y;
+        velocityPanOffset.x = 0f;
+        velocityPanOffset.y = 0f;
+        currentFocusCamVelocity.x = 0f;
+        currentFocusCamVelocity.y = 0f;
+        coastPanVelocity.x = 0f;
+        coastPanVelocity.y = 0f;
     }
 
     private void CommitAntiKickCoastOnRelease(float nowTime)
@@ -1920,12 +2026,12 @@ public sealed class AirWeavingStageController : MonoBehaviour
         float arenaFrontZ = assemblyMinZ - 0.16f;
         float arenaBackZ = assemblyMaxZ + 0.16f;
 
-        // Batas Dek Meja Hologram Utuh 1.5x (mencakup Sayap Input Kiri, Zona Rakit Tengah, Sayap Output Kanan + Truth Pod, & Teras Rak Parkir Belakang)
-        float deckLeftX = Mathf.Min(inputBaseX - 0.42f, assemblyMinBaseX - 0.90f) * aspectScale;
-        float deckRightX = Mathf.Max(outputBaseX + 0.51f, assemblyMaxBaseX + 0.96f) * aspectScale;
-        float deckFrontZ = assemblyMinZ - 0.27f;
-        float deckBackZ = parkingRackZ + 0.42f;
-        float deckChamfer = 0.36f;
+        // Batas Dek Meja Hologram Utuh 2.0x (mencakup Sayap Input Kiri, Zona Rakit Tengah, Sayap Output Kanan + Truth Pod, & Teras Rak Parkir Belakang)
+        float deckLeftX = Mathf.Min(inputBaseX - 0.56f, assemblyMinBaseX - 1.20f) * aspectScale;
+        float deckRightX = Mathf.Max(outputBaseX + 0.68f, assemblyMaxBaseX + 1.28f) * aspectScale;
+        float deckFrontZ = assemblyMinZ - 0.36f;
+        float deckBackZ = parkingRackZ + 0.56f;
+        float deckChamfer = 0.48f;
 
         // Simpan bounding box dek untuk clamping Focus-Point Orbit & perhitungan OBB Dynamic Pan Bounds
         deckMinX = deckLeftX;
@@ -1952,7 +2058,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
             outerBorderShadowRenderer.SetPositions(borderLoopBuffer);
         }
 
-        float arenaChamfer = 0.16f;
+        float arenaChamfer = 0.20f;
         FillChamferedTableXZRectLoop(borderLoopBuffer, arenaLeftX, arenaRightX, arenaFrontZ, arenaBackZ, arenaChamfer, StageFloorLocalY + 0.001f);
         if (innerArenaBorderRenderer != null)
         {
@@ -1960,8 +2066,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
         }
 
         // 3. 4 Siku Sudut Zona Rakit Dipertegas di Permukaan Meja XZ
-        float armX = 0.24f * aspectScale;
-        float armZ = 0.24f;
+        float armX = 0.31f * aspectScale;
+        float armZ = 0.31f;
         float cornerY = StageFloorLocalY + 0.0025f;
         float shadowY = StageFloorLocalY + 0.0015f;
 
@@ -1975,41 +2081,41 @@ public sealed class AirWeavingStageController : MonoBehaviour
         SetLocalTableCornerBracket(cornerBracketRenderers[2], arenaRightX, arenaBackZ - armZ, arenaRightX, arenaBackZ, arenaRightX - armX, arenaBackZ, cornerY);
         SetLocalTableCornerBracket(cornerBracketRenderers[3], arenaLeftX + armX, arenaBackZ, arenaLeftX, arenaBackZ, arenaLeftX, arenaBackZ - armZ, cornerY);
 
-        // 4. Garis Grid Proyeksi Internal 11x9 sebagai 1 Static Ribbon Mesh (Cull Off, 1 draw call, 0 beban CPU per frame)
+        // 4. Garis Grid Proyeksi Internal 17x13 sebagai 1 Static Ribbon Mesh (Cull Off, 1 draw call, 0 beban CPU per frame)
         float gridY = StageFloorLocalY + 0.001f;
         RebuildFloorGridRibbonMesh(deckLeftX, deckRightX, deckFrontZ, deckBackZ, deckChamfer, gridY);
 
-        // 5. Dermaga Sayap Terminal Input (Kiri), Sayap Output (Kanan), & Teras Rak Parkir (Belakang Meja) 1.5x rata di permukaan dek XZ
-        float inBayOuterX = (inputBaseX - 0.30f) * aspectScale;
+        // 5. Dermaga Sayap Terminal Input (Kiri), Sayap Output (Kanan), & Teras Rak Parkir (Belakang Meja) 2.0x rata di permukaan dek XZ
+        float inBayOuterX = (inputBaseX - 0.40f) * aspectScale;
         float inBayInnerX = arenaLeftX - (0.08f * aspectScale);
         if (wingGuideRenderers[0] != null)
         {
             wingGuideRenderers[0].SetPosition(0, new Vector3(inBayInnerX, gridY, arenaBackZ - 0.08f));
-            wingGuideRenderers[0].SetPosition(1, new Vector3(inBayOuterX, gridY, arenaBackZ - 0.16f));
+            wingGuideRenderers[0].SetPosition(1, new Vector3(inBayOuterX, gridY, arenaBackZ - 0.20f));
             wingGuideRenderers[0].SetPosition(2, new Vector3(inBayOuterX, gridY, arenaFrontZ + 0.08f));
             wingGuideRenderers[0].SetPosition(3, new Vector3(inBayInnerX, gridY, arenaFrontZ + 0.04f));
         }
 
         float outBayInnerX = arenaRightX + (0.08f * aspectScale);
-        float outBayOuterX = (outputBaseX + 0.36f) * aspectScale;
+        float outBayOuterX = (outputBaseX + 0.48f) * aspectScale;
         if (wingGuideRenderers[1] != null)
         {
-            wingGuideRenderers[1].SetPosition(0, new Vector3(outBayInnerX, gridY, arenaBackZ - 0.10f));
-            wingGuideRenderers[1].SetPosition(1, new Vector3(outBayOuterX, gridY, arenaBackZ - 0.18f));
-            wingGuideRenderers[1].SetPosition(2, new Vector3(outBayOuterX, gridY, arenaFrontZ + 0.10f));
-            wingGuideRenderers[1].SetPosition(3, new Vector3(outBayInnerX, gridY, arenaFrontZ + 0.06f));
+            wingGuideRenderers[1].SetPosition(0, new Vector3(outBayInnerX, gridY, arenaBackZ - 0.12f));
+            wingGuideRenderers[1].SetPosition(1, new Vector3(outBayOuterX, gridY, arenaBackZ - 0.24f));
+            wingGuideRenderers[1].SetPosition(2, new Vector3(outBayOuterX, gridY, arenaFrontZ + 0.12f));
+            wingGuideRenderers[1].SetPosition(3, new Vector3(outBayInnerX, gridY, arenaFrontZ + 0.08f));
         }
 
-        float rackFrontZ = arenaBackZ + 0.08f;
-        float rackBackZ = parkingRackZ + 0.30f;
-        float rackLeftX = -1.44f * aspectScale;
-        float rackRightX = 1.44f * aspectScale;
+        float rackFrontZ = arenaBackZ + 0.10f;
+        float rackBackZ = parkingRackZ + 0.40f;
+        float rackLeftX = -1.92f * aspectScale;
+        float rackRightX = 1.92f * aspectScale;
         if (wingGuideRenderers[2] != null)
         {
             wingGuideRenderers[2].SetPosition(0, new Vector3(rackLeftX, gridY, rackFrontZ));
             wingGuideRenderers[2].SetPosition(1, new Vector3(rackRightX, gridY, rackFrontZ));
-            wingGuideRenderers[2].SetPosition(2, new Vector3(rackRightX - (0.12f * aspectScale), gridY, rackBackZ));
-            wingGuideRenderers[2].SetPosition(3, new Vector3(rackLeftX + (0.12f * aspectScale), gridY, rackBackZ));
+            wingGuideRenderers[2].SetPosition(2, new Vector3(rackRightX - (0.16f * aspectScale), gridY, rackBackZ));
+            wingGuideRenderers[2].SetPosition(3, new Vector3(rackLeftX + (0.16f * aspectScale), gridY, rackBackZ));
         }
     }
 
@@ -2035,7 +2141,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
         {
             bool isCenter = v == (GridInternalVerticalLines / 2);
             float frac = (v + 1f) / (GridInternalVerticalLines + 1f);
-            float gx = Mathf.Lerp(deckLeftX + 0.12f, deckRightX - 0.12f, frac);
+            float gx = Mathf.Lerp(deckLeftX + 0.14f, deckRightX - 0.14f, frac);
             float chamferInsetZ = ComputeOctagonZInsetAtX(gx, deckLeftX, deckRightX, deckChamfer);
             float z0 = deckFrontZ + chamferInsetZ + 0.025f;
             float z1 = deckBackZ - chamferInsetZ - 0.025f;
@@ -2059,7 +2165,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
         {
             bool isCenter = h == (GridInternalHorizontalLines / 2);
             float frac = (h + 1f) / (GridInternalHorizontalLines + 1f);
-            float gz = Mathf.Lerp(deckFrontZ + 0.12f, deckBackZ - 0.12f, frac);
+            float gz = Mathf.Lerp(deckFrontZ + 0.14f, deckBackZ - 0.14f, frac);
             float chamferInsetX = ComputeOctagonXInsetAtZ(gz, deckFrontZ, deckBackZ, deckChamfer);
             float x0 = deckLeftX + chamferInsetX + 0.025f;
             float x1 = deckRightX - chamferInsetX - 0.025f;
