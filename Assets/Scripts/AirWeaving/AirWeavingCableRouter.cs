@@ -19,14 +19,15 @@ using UnityEngine;
 /// </summary>
 public sealed class AirWeavingCableRouter : MonoBehaviour
 {
-    public const float PortOutHitRadius = 0.225f;
-    public const float PortInHitRadius = 0.185f;
-    private const float MinPortScreenSpaceHitboxScale = 0.78f;
+    public const float PortOutHitRadius = 0.230f;
+    public const float PortInHitRadius = 0.215f;
+    public const float PortSingleInHitRadius = 0.225f;
+    private const float MinPortScreenSpaceHitboxScale = 0.85f;
     private const float SnapMagnetRadius = 0.285f;
     private const float GateAutoSnapRadius = 0.340f;
     private const float SnapHysteresisUnlockRadius = 0.380f;
     private const float SnapTargetSwitchRatio = 0.720f;
-    private const float SnapReleaseIntentFreezeRatio = 0.64f;
+    private const float SnapReleaseIntentFreezeRatio = 0.70f;
     private const float SnapReleaseLatchSeconds = 0.300f;
     private const float SnapReleaseMaxEscapeDist = 0.460f;
     private const float HoverMagnetRadius = 0.300f;
@@ -150,6 +151,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     {
         public GateNode node;
         public bool isOutput;
+        public bool isSingleInput;
         public int slotIndex;
         public Vector2 nodeLocalXY;
         public Vector2 handleLocalXY;
@@ -339,6 +341,15 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         return Mathf.Lerp(0.32f, 1.0f, t);
     }
 
+    private static float GetPortBaseHitRadius(in ActivePortEntry p)
+    {
+        if (p.isOutput)
+        {
+            return PortOutHitRadius;
+        }
+        return p.isSingleInput ? PortSingleInHitRadius : PortInHitRadius;
+    }
+
     /// <summary>
     /// Mengembalikan jarak ternormalisasi (0..1 di dalam hit radius port, &lt;1.6 dalam zona magnet, atau float.MaxValue)
     /// terhadap port aktif terdekat untuk arbitrer ambidextrous 2 tangan. Zero-GC.
@@ -361,7 +372,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 continue;
             }
             float portScale = p.apparentScale > 0.01f ? p.apparentScale : fallbackScale;
-            float hitRadius = (p.isOutput ? PortOutHitRadius : PortInHitRadius) * portScale;
+            float hitRadius = GetPortBaseHitRadius(in p) * portScale;
             float magnetLimit = HoverMagnetRadius * portScale;
             float dist = Vector2.Distance(cursorLocalXY, p.handleLocalXY);
             if (dist <= Mathf.Max(hitRadius, magnetLimit))
@@ -861,8 +872,19 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         else
         {
             isHoveringInvalidTargetDuringDrag = false;
-            Vector2 queryXY = (pinchJustStarted && allowBeginDrag) ? assistedStabilizedPinchXY : assistedLivePinchXY;
-            hoveredPortIndex = FindNearestPortIndex(queryXY, fallbackHitRadiusScale);
+            if (pinchJustStarted && allowBeginDrag)
+            {
+                // Periksa titik pra-cubit terstabilisasi terlebih dahulu, lalu fallback ke titik live agar cubitan saat mendekati port tidak meleset
+                hoveredPortIndex = FindNearestPortIndex(assistedStabilizedPinchXY, fallbackHitRadiusScale);
+                if (hoveredPortIndex < 0)
+                {
+                    hoveredPortIndex = FindNearestPortIndex(assistedLivePinchXY, fallbackHitRadiusScale);
+                }
+            }
+            else
+            {
+                hoveredPortIndex = FindNearestPortIndex(assistedLivePinchXY, fallbackHitRadiusScale);
+            }
 
             if (pinchJustStarted && allowBeginDrag && hoveredPortIndex >= 0 && hoveredPortIndex < activePorts.Count)
             {
@@ -1274,6 +1296,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             {
                 node = node,
                 isOutput = true,
+                isSingleInput = false,
                 slotIndex = 0,
                 nodeLocalXY = nodeRayXY,
                 handleLocalXY = handleRayXY,
@@ -1311,6 +1334,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             {
                 node = node,
                 isOutput = false,
+                isSingleInput = maxInputs == 1,
                 slotIndex = 0,
                 nodeLocalXY = nodeRayXY,
                 handleLocalXY = handleRayXY,
@@ -1346,6 +1370,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
             {
                 node = node,
                 isOutput = false,
+                isSingleInput = false,
                 slotIndex = 1,
                 nodeLocalXY = nodeRayXY,
                 handleLocalXY = handleRayXY,
@@ -1496,7 +1521,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private int FindNearestPortIndex(Vector2 cursorXY, float hitRadiusScale)
     {
         int bestIdx = -1;
-        float bestNormDist = 1.0001f;
+        float bestDist = float.MaxValue;
 
         for (int i = 0; i < activePorts.Count; i++)
         {
@@ -1506,16 +1531,12 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
                 continue;
             }
             float portScale = p.apparentScale > 0.01f ? p.apparentScale : hitRadiusScale;
-            float radius = (p.isOutput ? PortOutHitRadius : PortInHitRadius) * portScale;
+            float radius = GetPortBaseHitRadius(in p) * portScale;
             float dist = Vector2.Distance(cursorXY, p.handleLocalXY);
-            if (dist <= radius)
+            if (dist <= radius && dist < bestDist)
             {
-                float normDist = dist / radius;
-                if (normDist < bestNormDist)
-                {
-                    bestNormDist = normDist;
-                    bestIdx = i;
-                }
+                bestDist = dist;
+                bestIdx = i;
             }
         }
 

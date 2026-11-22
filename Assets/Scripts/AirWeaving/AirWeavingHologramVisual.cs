@@ -43,6 +43,21 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private const float ReticleFadeOutRate = 11.0f;
     private const float FadeDisableEpsilon = 0.015f;
 
+    // Kompensasi jarak kamera konstan (constant angular/screen-space size) agar reticle kursor tetap kecil & presisi
+    // pada semua sudut orbit 360° & kedalaman zoom dekat/jauh tanpa mewarisi skala HologramStageRoot.
+    private const float ReticleReferenceCameraDistance = 3.13f;
+    private const float ReticleMinDistanceScale = 0.18f;
+    private const float ReticleMaxDistanceScale = 2.40f;
+    private const float ReticleBaseForwardBias = 0.14f;
+    private const float PinchBaseForwardBias = 0.145f;
+    private const float ReticleMinForwardBias = 0.025f;
+    private const float ReticleMaxForwardBias = 0.24f;
+    private const float ReticleNearClipSafetyDepth = 0.32f;
+    private const float ReticleCrossBaseWidth = 0.0055f;
+    private const float CursorFloorShadowRefDistance = 3.82f;
+    private const float CursorFloorShadowMinDistScale = 0.22f;
+    private const float CursorFloorShadowMaxDistScale = 2.40f;
+
     private static readonly Color InputACyanHoverColor = new Color(0.38f, 0.96f, 1.00f, 0.96f);
     private static readonly Color InputBGoldHoverColor = new Color(1.00f, 0.88f, 0.30f, 0.96f);
     private static readonly Color GateBodyHoverColor = new Color(0.42f, 0.98f, 1.00f, 0.92f);
@@ -193,6 +208,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
 
         rootObj = new GameObject("AR_AirWeavingHologramHUD");
         rootObj.transform.SetParent(transform, false);
+        rootObj.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+        rootObj.transform.localScale = Vector3.one;
 
         for (int i = 0; i < AuraSegments; i++)
         {
@@ -869,9 +886,12 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             return;
         }
 
+        EnsureHudRootIsolatedScale();
+
         Vector3 right = camT.right;
         Vector3 up = camT.up;
-        Vector3 center = fadeState.lastPos - (camT.forward * 0.14f);
+        Vector3 forward = camT.forward;
+        float distScale = ComputeReticleDistanceScale(camT, fadeState.lastPos, ReticleBaseForwardBias, out Vector3 center);
 
         float openFrac = Mathf.Clamp01((fadeState.lastMeanCurlRatio - 0.78f) / 0.75f);
         float outerRadius;
@@ -885,39 +905,42 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         {
             float carryPulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 8.5f));
             baseColor = TwoHandFreePanGoldColor;
-            outerRadius = 0.044f + (0.005f * carryPulse);
-            innerRadius = 0.017f;
-            crossHalf = 0.026f;
-            outerWidth = 0.012f;
-            innerWidth = 0.0085f;
+            outerRadius = (0.044f + (0.005f * carryPulse)) * distScale;
+            innerRadius = 0.017f * distScale;
+            crossHalf = 0.026f * distScale;
+            outerWidth = 0.012f * distScale;
+            innerWidth = 0.0085f * distScale;
         }
         else
         {
-            outerRadius = fadeState.lastIsFist ? 0.036f : Mathf.Lerp(0.044f, 0.074f, openFrac);
-            innerRadius = fadeState.lastIsFist ? 0.015f : 0.018f;
-            crossHalf = fadeState.lastIsFist ? 0.022f : 0.030f;
-            outerWidth = fadeState.lastIsFist ? 0.013f : 0.009f;
-            innerWidth = fadeState.lastIsFist ? 0.009f : 0.006f;
+            outerRadius = (fadeState.lastIsFist ? 0.036f : Mathf.Lerp(0.044f, 0.074f, openFrac)) * distScale;
+            innerRadius = (fadeState.lastIsFist ? 0.015f : 0.018f) * distScale;
+            crossHalf = (fadeState.lastIsFist ? 0.022f : 0.030f) * distScale;
+            outerWidth = (fadeState.lastIsFist ? 0.013f : 0.009f) * distScale;
+            innerWidth = (fadeState.lastIsFist ? 0.009f : 0.006f) * distScale;
             baseColor = fadeState.lastIsFist
                 ? ReticleFistColor
                 : (fadeState.lastIsTargetingPort ? ReticlePortAimColor : ReticleOpenColor);
         }
 
+        float crossWidth = ReticleCrossBaseWidth * distScale;
         Color color = new Color(baseColor.r, baseColor.g, baseColor.b, baseColor.a * fadeState.alpha);
         Color coreCol = new Color(ReticleCoreWhiteColor.r, ReticleCoreWhiteColor.g, ReticleCoreWhiteColor.b, ReticleCoreWhiteColor.a * fadeState.alpha);
 
         DrawReticleCircle(outerLr, outerMat, center, right, up, outerRadius, color, outerWidth);
-        DrawReticleCircle(innerLr, innerMat, center - (camT.forward * 0.004f), right, up, innerRadius, coreCol, innerWidth);
+        DrawReticleCircle(innerLr, innerMat, center - (forward * (0.004f * distScale)), right, up, innerRadius, coreCol, innerWidth);
         if (crossHLr != null && crossVLr != null)
         {
             if (crossMat != null) crossMat.color = coreCol;
-            Vector3 crossCenter = center - (camT.forward * 0.006f);
+            Vector3 crossCenter = center - (forward * (0.006f * distScale));
             crossHLr.enabled = true;
+            crossHLr.widthMultiplier = crossWidth;
             crossHLr.startColor = coreCol;
             crossHLr.endColor = coreCol;
             crossHLr.SetPosition(0, crossCenter - (right * crossHalf));
             crossHLr.SetPosition(1, crossCenter + (right * crossHalf));
             crossVLr.enabled = true;
+            crossVLr.widthMultiplier = crossWidth;
             crossVLr.startColor = coreCol;
             crossVLr.endColor = coreCol;
             crossVLr.SetPosition(0, crossCenter - (up * crossHalf));
@@ -1049,20 +1072,25 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             return;
         }
 
+        EnsureHudRootIsolatedScale();
+
         Vector3 right = camT.right;
         Vector3 up = camT.up;
-        Vector3 center = fadeState.lastPos - (camT.forward * 0.145f);
+        Vector3 forward = camT.forward;
+        float distScale = ComputeReticleDistanceScale(camT, fadeState.lastPos, PinchBaseForwardBias, out Vector3 center);
         float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 8.0f));
-        float outerR = fadeState.lastIsPinchActive ? (0.020f + (0.003f * pulse)) : 0.032f;
-        float coreR = fadeState.lastIsPinchActive ? 0.0085f : 0.0065f;
+        float outerR = (fadeState.lastIsPinchActive ? (0.020f + (0.003f * pulse)) : 0.032f) * distScale;
+        float coreR = (fadeState.lastIsPinchActive ? 0.0085f : 0.0065f) * distScale;
+        float ringWidth = (fadeState.lastIsPinchActive ? 0.011f : 0.0085f) * distScale;
+        float coreWidth = 0.007f * distScale;
         Color baseRingCol = fadeState.lastIsSnapped
             ? PinchSnappedColor
             : (fadeState.lastIsPinchActive ? PinchActiveDragColor : PinchHoverColor);
         Color ringCol = new Color(baseRingCol.r, baseRingCol.g, baseRingCol.b, baseRingCol.a * fadeState.alpha);
         Color coreCol = new Color(ReticleCoreWhiteColor.r, ReticleCoreWhiteColor.g, ReticleCoreWhiteColor.b, ReticleCoreWhiteColor.a * fadeState.alpha);
 
-        DrawPinchCircle(ringLr, ringMat, center, right, up, outerR, ringCol, fadeState.lastIsPinchActive ? 0.011f : 0.0085f);
-        DrawPinchCircle(coreLr, coreMat, center - (camT.forward * 0.004f), right, up, coreR, coreCol, 0.007f);
+        DrawPinchCircle(ringLr, ringMat, center, right, up, outerR, ringCol, ringWidth);
+        DrawPinchCircle(coreLr, coreMat, center - (forward * (0.004f * distScale)), right, up, coreR, coreCol, coreWidth);
     }
 
     /// <summary>
@@ -1090,12 +1118,16 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
             return;
         }
 
+        EnsureHudRootIsolatedScale();
+
         Vector3 right = camT.right;
         Vector3 up = camT.up;
         Vector3 forward = camT.forward;
-        Vector3 posA = primaryHandWorldPos - (forward * 0.14f);
-        Vector3 posB = secondaryHandWorldPos - (forward * 0.14f);
+        float scaleA = ComputeReticleDistanceScale(camT, primaryHandWorldPos, ReticleBaseForwardBias, out Vector3 posA);
+        float scaleB = ComputeReticleDistanceScale(camT, secondaryHandWorldPos, ReticleBaseForwardBias, out Vector3 posB);
         Vector3 midPos = (posA + posB) * 0.5f;
+        float midDistToCam = Vector3.Distance(camT.position, midPos);
+        float scaleMid = Mathf.Clamp(midDistToCam / ReticleReferenceCameraDistance, ReticleMinDistanceScale, ReticleMaxDistanceScale);
 
         float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 8.5f));
         Color mainCol = isFistResetMode
@@ -1115,16 +1147,56 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
                 twoHandBeamMat.color = mainCol;
             }
             twoHandBeamRenderer.enabled = true;
-            twoHandBeamRenderer.widthMultiplier = (isFistResetMode || isFreePanMode) ? 0.0095f : 0.0075f;
+            twoHandBeamRenderer.widthMultiplier = ((isFistResetMode || isFreePanMode) ? 0.0095f : 0.0075f) * scaleMid;
             twoHandBeamRenderer.startColor = mainCol;
             twoHandBeamRenderer.endColor = mainCol;
             twoHandBeamRenderer.SetPosition(0, posA);
             twoHandBeamRenderer.SetPosition(1, posB);
         }
 
-        DrawPinchCircle(twoHandAnchorARenderer, twoHandAnchorMat, posA, right, up, anchorR, mainCol, 0.010f);
-        DrawPinchCircle(twoHandAnchorBRenderer, twoHandAnchorMat, posB, right, up, anchorR, mainCol, 0.010f);
-        DrawReticleCircle(twoHandCenterRingRenderer, twoHandCenterMat, midPos - (forward * 0.005f), right, up, centerR, (isFistResetMode || isFreePanMode) ? mainCol : ReticleCoreWhiteColor, 0.0085f);
+        DrawPinchCircle(twoHandAnchorARenderer, twoHandAnchorMat, posA, right, up, anchorR * scaleA, mainCol, 0.010f * scaleA);
+        DrawPinchCircle(twoHandAnchorBRenderer, twoHandAnchorMat, posB, right, up, anchorR * scaleB, mainCol, 0.010f * scaleB);
+        DrawReticleCircle(twoHandCenterRingRenderer, twoHandCenterMat, midPos - (forward * (0.005f * scaleMid)), right, up, centerR * scaleMid, (isFistResetMode || isFreePanMode) ? mainCol : ReticleCoreWhiteColor, 0.0085f * scaleMid);
+    }
+
+    private void EnsureHudRootIsolatedScale()
+    {
+        if (rootObj == null)
+        {
+            return;
+        }
+
+        Transform rt = rootObj.transform;
+        if (rt.parent != transform)
+        {
+            rt.SetParent(transform, false);
+        }
+        if (rt.localScale != Vector3.one)
+        {
+            rt.localScale = Vector3.one;
+        }
+    }
+
+    private static float ComputeReticleDistanceScale(
+        Transform camT,
+        Vector3 worldPos,
+        float baseForwardBias,
+        out Vector3 biasedCenter)
+    {
+        Vector3 camPos = camT.position;
+        Vector3 camForward = camT.forward;
+        float rawDistToCam = Vector3.Distance(camPos, worldPos);
+        float roughScale = Mathf.Clamp(rawDistToCam / ReticleReferenceCameraDistance, ReticleMinDistanceScale, ReticleMaxDistanceScale);
+        float forwardBias = Mathf.Clamp(baseForwardBias * roughScale, ReticleMinForwardBias, ReticleMaxForwardBias);
+        float maxSafeBias = Mathf.Max(0f, rawDistToCam - ReticleNearClipSafetyDepth);
+        if (forwardBias > maxSafeBias)
+        {
+            forwardBias = maxSafeBias;
+        }
+
+        biasedCenter = worldPos - (camForward * forwardBias);
+        float distanceToMainCamera = Vector3.Distance(camPos, biasedCenter);
+        return Mathf.Clamp(distanceToMainCamera / ReticleReferenceCameraDistance, ReticleMinDistanceScale, ReticleMaxDistanceScale);
     }
 
     /// <summary>
@@ -1137,7 +1209,8 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         Transform stageRoot,
         bool visible,
         Vector3 cursorWorldPos,
-        bool isActiveContactGesture)
+        bool isActiveContactGesture,
+        Transform camT = null)
     {
         if (!isInitialized || handSlot < 0 || handSlot > 1)
         {
@@ -1166,18 +1239,20 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         float absElevY = Mathf.Abs(signedElevY);
         float heightNorm = Mathf.Clamp01(absElevY / 1.40f);
 
-        float stageScale = Mathf.Clamp(stageRoot.lossyScale.x, 0.18f, 6.0f);
-        float widthScale = Mathf.Clamp(stageScale, 0.48f, 2.20f);
+        // Kompensasi jarak kamera agar cincin proyeksi lantai kursor tidak membengkak saat panggung di-zoom dekat (0.18x..15x)
+        float distScale = camT != null
+            ? Mathf.Clamp(Vector3.Distance(camT.position, floorWorldPos) / CursorFloorShadowRefDistance, CursorFloorShadowMinDistScale, CursorFloorShadowMaxDistScale)
+            : Mathf.Clamp(stageRoot.lossyScale.x, 0.22f, 1.35f);
         bool nearDeckContact = signedElevY <= 0.06f;
 
         Color baseCol = (isActiveContactGesture || nearDeckContact)
             ? DropLineContactColor
             : (handSlot == 0 ? DropLinePrimaryColor : DropLineSecondaryColor);
 
-        float ringRadius = Mathf.Lerp(0.055f, 0.145f, heightNorm) * stageScale;
+        float ringRadius = Mathf.Lerp(0.036f, 0.092f, heightNorm) * distScale;
         float ringAlpha = Mathf.Lerp(0.84f, 0.24f, heightNorm);
         Color ringCol = new Color(baseCol.r, baseCol.g, baseCol.b, ringAlpha);
-        float ringWidth = Mathf.Lerp(0.0062f, 0.0036f, heightNorm) * widthScale;
+        float ringWidth = Mathf.Lerp(0.0044f, 0.0026f, heightNorm) * distScale;
 
         LineRenderer shadowLr = cursorShadowRings[handSlot];
         Material shadowMat = cursorShadowRingMats[handSlot];
@@ -1216,7 +1291,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
                     dropMat.color = Color.white;
                 }
                 dropLr.enabled = true;
-                dropLr.widthMultiplier = 0.0036f * widthScale;
+                dropLr.widthMultiplier = 0.0028f * distScale;
                 dropLr.startColor = topCol;
                 dropLr.endColor = botCol;
                 dropLr.SetPosition(0, cursorWorldPos);

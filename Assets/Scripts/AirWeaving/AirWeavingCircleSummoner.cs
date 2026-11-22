@@ -23,34 +23,36 @@ public sealed class AirWeavingCircleSummoner
     public const int MaxTrailPoints = 72;
 
     private const int PoseVoteWindow = 5;
-    private const int PoseVoteMajorityThreshold = 4;
-    private const int MinTrailPointsForCharge = 8;
-    private const float MinPointSpacing = 0.020f;
-    private const float MinTotalArcLengthForStartVisual = 0.18f;
-    private const float MinTotalArcLengthForReady = 0.42f;
-    private const float MinCircleRadius = 0.085f;
+    private const int PoseVoteMajorityThreshold = 3;
+    private const int MinTrailPointsForCharge = 6;
+    private const float MinPointSpacing = 0.018f;
+    private const float MinTotalArcLengthForStartVisual = 0.13f;
+    private const float MinTotalArcLengthForReady = 0.30f;
+    private const float MinCircleRadius = 0.062f;
     private const float MaxCircleRadius = 0.650f;
-    private const float StartVisualAngleDegrees = 85f;
-    private const float PoseLockAngleDegrees = 100f;
+    private const float StartVisualAngleDegrees = 75f;
+    private const float PoseLockAngleDegrees = 90f;
     private const float ShapeCheckAngleDegrees = 135f;
-    private const float MinCircularityRatio = 0.46f;
-    private const float MinDirectionalCoherence = 0.72f;
-    private const float TargetSweepDegrees = 235f;
+    private const float MinCircularityRatio = 0.36f;
+    private const float MinDirectionalCoherence = 0.64f;
+    private const float TargetSweepDegrees = 205f;
     private const float MaxSingleTurnRadians = 2.356f; // 135 deg: lonjakan balik tajam dianggap zig-zag
 
-    private const float PoseConfirmHoldSeconds = 0.220f;
+    private const float PoseConfirmHoldSeconds = 0.160f;
     private const float PoseDropoutGraceSeconds = 0.140f;
-    private const float ChargeStallTimeoutSeconds = 0.60f;
-    private const float ChargeHandLostGraceSeconds = 0.22f;
+    private const float ChargePoseDropoutGraceSeconds = 0.280f;
+    private const float ChargeStallTimeoutSeconds = 0.65f;
+    private const float ChargeHandLostGraceSeconds = 0.24f;
     private const float ReadyWindowSeconds = 2.20f;
     private const float ReadyHandLostGraceSeconds = 0.28f;
-    private const float OpenFiveBloomDebounceSeconds = 0.075f;
+    private const float OpenFiveBloomDebounceSeconds = 0.060f;
     private const float PostSummonCooldownSeconds = 0.75f;
 
-    // Margin zona mulai summon dari Idle diperketat agar tidak melebar ke terminal Input/Output maupun Rak Parkir.
-    private const float StartZoneMarginX = 0.14f;
-    private const float StartZoneMarginBottomY = 0.12f;
-    private const float StartZoneMarginTopY = 0.32f;
+    // Margin zona mulai summon dari Idle: lindungi terminal Input/Output & Rak Parkir, namun beri ruang atas (+0.52)
+    // agar ujung telunjuk #8 pada pose OneFingerAnd yang teracung ke atas tidak keluar dari batas atas zona rakit.
+    private const float StartZoneMarginX = 0.18f;
+    private const float StartZoneMarginBottomY = 0.16f;
+    private const float StartZoneMarginTopY = 0.52f;
 
     private readonly Vector2[] trailPoints = new Vector2[MaxTrailPoints];
     private int trailCount = 0;
@@ -368,6 +370,7 @@ public sealed class AirWeavingCircleSummoner
 
         bool hasVotedChargingGate = TryMapPoseToGate(votedPose, out NodeType updatedGate);
         bool hasCurrentChargingGate = TryMapPoseToGate(currentPose, out _);
+        bool isPoseInDropout = false;
         if (hasVotedChargingGate || hasCurrentChargingGate)
         {
             poseDropoutTimer = 0f;
@@ -381,14 +384,16 @@ public sealed class AirWeavingCircleSummoner
         }
         else
         {
-            // Pose dropout grace 160 ms: pose jari berkedip sesaat di tengah putaran -> tahan progres sementara
+            // Toleransi kedip pose lebih lega (280 ms) setelah masuk fase Charging agar putaran AND (1 jari) / NOT (jempol)
+            // tidak rontok di tengah jalan; tetap rekam titik lintasan agar kurva tidak loncat saat pose pulih.
+            isPoseInDropout = true;
             poseDropoutTimer += dt;
-            if (poseDropoutTimer >= PoseDropoutGraceSeconds)
+            if (poseDropoutTimer >= ChargePoseDropoutGraceSeconds)
             {
                 CancelToIdle();
                 HasLivePoseIndicator = false;
+                return;
             }
-            return;
         }
 
         // Saat sudah Charging, jangan batalkan bila ujung jari melintas tepi papan; titik spawn tetap di-clamp aman ke AssemblyZone
@@ -419,8 +424,9 @@ public sealed class AirWeavingCircleSummoner
             accumulatedSweepDeg = cAbsDeg;
             chargeProgress = Mathf.Clamp01(cAbsDeg / TargetSweepDegrees);
 
-            // Evaluasi ketat jumlah titik, panjang goresan, radius, & circularity setelah sapuan penuh (>= 235°)
-            bool shapeOk = trailCount >= MinTrailPointsForCharge
+            // Evaluasi ketat jumlah titik, panjang goresan, radius, & circularity setelah sapuan penuh (>= 205°)
+            bool shapeOk = !isPoseInDropout
+                           && trailCount >= MinTrailPointsForCharge
                            && cTotalArcLength >= MinTotalArcLengthForReady
                            && cRad >= MinCircleRadius
                            && cCircularity >= MinCircularityRatio;
@@ -678,7 +684,7 @@ public sealed class AirWeavingCircleSummoner
             }
         }
 
-        // Vote jendela 5 frame: butuh >= 4/5 agar gerakan transisi jari alami tidak salah memicu summon
+        // Vote jendela 5 frame: butuh >= 3/5 agar gerakan transisi singkat tetap tertolak namun tahan 1-2 frame kedip saat memutar AND/NOT
         if (cAnd >= PoseVoteMajorityThreshold) return SummonHandPose.OneFingerAnd;
         if (cOr >= PoseVoteMajorityThreshold) return SummonHandPose.TwoFingersOr;
         if (cXor >= PoseVoteMajorityThreshold) return SummonHandPose.ThreeFingersXor;

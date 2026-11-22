@@ -100,9 +100,9 @@ public class AirWeavingController : MonoBehaviour
     private const float TwoHandFreePanXYGain = 1.50f;
     private const float TwoHandFreePanMaxDeltaXYPerFrame = 0.38f;
     private const float TwoHandOrbitConfirmHoldSeconds = 0.040f;
-    private const float TwoHandOrbitHoldMaxPinchRatio = 0.66f;
+    private const float TwoHandOrbitHoldMaxPinchRatio = 0.74f;
     private const float TwoHandFreePanHoldMinFistBendDeg = 78.0f;
-    private const float TwoHandPinchReleaseFreezeRatio = 0.50f;
+    private const float TwoHandPinchReleaseFreezeRatio = 0.60f;
     private const float TwoHandFistReleaseFreezeMaxBendDeg = 92.0f;
     private const float TwoHandFreePanConfirmHoldSeconds = 0.055f;
     private const float TwoHandIntentGraceMaxSeconds = 0.220f;
@@ -124,7 +124,7 @@ public class AirWeavingController : MonoBehaviour
     private const float EdgePanDwellSeconds = 0.095f;
     private const float EdgePanRampInSeconds = 0.110f;
     private const float EdgePanMaxSpeedAtRefDepth = 2.85f;
-    private const float EdgePanCableReleasePauseRatio = 0.64f;
+    private const float EdgePanCableReleasePauseRatio = 0.70f;
 
     // Parameter Quality Gate, Stabilisasi Dual-Hand, Exclusive Gesture Arbiter, & Confidence Jarak Jauh MediaPipe (Tahap 5.5+)
     private const float MediaPipeMinHandDetectionConfidence = 0.40f;
@@ -137,7 +137,8 @@ public class AirWeavingController : MonoBehaviour
     private const float HandFrameDropGraceSeconds = 0.120f;
     private const float HandCarryFrameDropGraceSeconds = 0.200f;
     private const float CrossGestureNeutralCooldownSeconds = 0.120f;
-    private const float CablePinchEnterMaxSpeed = 1.65f;
+    private const float CablePinchEnterMaxSpeed = 2.20f;
+    private const float PinchBeginGraceSeconds = 0.140f;
     private const float GateGrabEnterMaxSpeed = 1.85f;
     private const float InputSwitchEnterMaxSpeed = 1.65f;
 
@@ -192,8 +193,8 @@ public class AirWeavingController : MonoBehaviour
     private const float ParkedGateScale = 0.44f;
 
     // Parameter kompatibilitas Pinch lama (disimpan untuk fallback/referensi)
-    private const float PinchRatioActivateThreshold = 0.48f;
-    private const float PinchRatioReleaseThreshold = 0.62f;
+    private const float PinchRatioActivateThreshold = 0.56f;
+    private const float PinchRatioReleaseThreshold = 0.70f;
 
     // Radius akses lega + Screen-Space Minimum Hitbox Floor (Fist badan gerbang & sakelar Input A/B)
     private const float MinScreenSpaceHitboxScale = 0.82f;
@@ -498,6 +499,7 @@ public class AirWeavingController : MonoBehaviour
     private int activeInteractionHandSlot = -1;
     private int activeCableHoverHandSlot = -1;
     private float neutralCooldownTimer = 0f;
+    private readonly float[] pinchBeginGraceTimers = new float[2];
     private float singleHandModeEnteredTime = -10f;
     private float twoHandOrbitConfirmTimer = 0f;
     private float twoHandFreePanConfirmTimer = 0f;
@@ -1144,6 +1146,7 @@ public class AirWeavingController : MonoBehaviour
             twoHandsVisibleForEdgeRelax,
             isSecondaryCableDragSticky,
             secondaryMissedLastInference);
+        UpdatePinchBeginGraceTimers(dt);
         UpdateTwoHandStageManipulation(mainCam, dt);
         UpdateSingleHandAutoEdgePan(mainCam, dt);
         if (stageController != null)
@@ -1876,6 +1879,8 @@ public class AirWeavingController : MonoBehaviour
         activeInteractionMode = ActiveInteractionMode.Idle;
         activeInteractionHandSlot = -1;
         neutralCooldownTimer = 0f;
+        pinchBeginGraceTimers[0] = 0f;
+        pinchBeginGraceTimers[1] = 0f;
         singleHandModeEnteredTime = -10f;
         twoHandOrbitConfirmTimer = 0f;
         twoHandFreePanConfirmTimer = 0f;
@@ -3165,7 +3170,7 @@ public class AirWeavingController : MonoBehaviour
                                      && activeInteractionHandSlot >= 0
                                      && activeInteractionHandSlot != handSlot;
 
-            if (!slotDetected || det.IsPinchActive || lockedToOtherHand)
+            if (!slotDetected || det.IsPinchActive || det.IsFormingPinchIntent || lockedToOtherHand)
             {
                 if (!slotDetected)
                 {
@@ -3233,6 +3238,7 @@ public class AirWeavingController : MonoBehaviour
             bool canBeginGateGrab = activeInteractionMode == ActiveInteractionMode.Idle
                                     && neutralCooldownTimer <= 0f
                                     && !isTwoHandConfirming
+                                    && !det.IsFormingPinchIntent
                                     && det.IsQualityGatePassing
                                     && det.CursorSpeedUnitsPerSec <= GateGrabEnterMaxSpeed;
             if (canBeginGateGrab && det.FistJustStarted && slotHoveredGate >= 0 && slotHoveredGate < gateSlots.Count)
@@ -5651,6 +5657,7 @@ public class AirWeavingController : MonoBehaviour
         isIndexOnlyWandPose = false;
         hoveredGateSlotIndex = -1;
         hoveredInputNode = null;
+        pinchBeginGraceTimers[0] = 0f;
         inputADwellTimers[0] = 0f;
         inputBDwellTimers[0] = 0f;
         inputARequiresExitRearmBySlot[0] = false;
@@ -5676,6 +5683,7 @@ public class AirWeavingController : MonoBehaviour
         wasSecondaryHandDetected = false;
         secondaryHoveredGateSlotIndex = -1;
         secondaryHoveredInputNode = null;
+        pinchBeginGraceTimers[1] = 0f;
         inputADwellTimers[1] = 0f;
         inputBDwellTimers[1] = 0f;
         inputARequiresExitRearmBySlot[1] = false;
@@ -6565,6 +6573,36 @@ public class AirWeavingController : MonoBehaviour
         }
     }
 
+    private void UpdatePinchBeginGraceTimers(float dt)
+    {
+        if (IsAnyTwoHandModeActive || activeInteractionMode == ActiveInteractionMode.GateGrab)
+        {
+            pinchBeginGraceTimers[0] = 0f;
+            pinchBeginGraceTimers[1] = 0f;
+            return;
+        }
+
+        bool allowArmGrace = activeInteractionMode == ActiveInteractionMode.Idle
+                             || activeInteractionMode == ActiveInteractionMode.CircleSummon;
+        for (int s = 0; s < 2; s++)
+        {
+            bool detected = IsHandSlotDetected(s);
+            AirWeavingHandGestureDetector det = GetHandDetector(s);
+            if (!detected || !det.IsPinchActive || det.IsFistActive)
+            {
+                pinchBeginGraceTimers[s] = 0f;
+            }
+            else if (det.PinchJustStarted)
+            {
+                pinchBeginGraceTimers[s] = allowArmGrace ? PinchBeginGraceSeconds : 0f;
+            }
+            else if (pinchBeginGraceTimers[s] > 0f)
+            {
+                pinchBeginGraceTimers[s] = Mathf.Max(0f, pinchBeginGraceTimers[s] - dt);
+            }
+        }
+    }
+
     private void UpdateCableRouterInteraction(Camera mainCam)
     {
         if (cableRouter == null) return;
@@ -6573,6 +6611,29 @@ public class AirWeavingController : MonoBehaviour
 
         Transform stageRoot = stageController != null ? stageController.StageRoot : null;
         float stageZoom = stageController != null ? stageController.CurrentZoomScale : 1f;
+
+        // Cegah pose Summon AND (1 telunjuk) / NOT (jempol) yang baru mulai Charging memakan rising-edge Pinch tepat di atas port
+        if (activeInteractionMode == ActiveInteractionMode.CircleSummon
+            && (activeInteractionHandSlot == 0 || activeInteractionHandSlot == 1)
+            && circleSummoners[activeInteractionHandSlot].Stage == AirWeavingCircleSummoner.SummonStage.Charging)
+        {
+            int summonSlot = activeInteractionHandSlot;
+            AirWeavingHandGestureDetector summonDet = GetHandDetector(summonSlot);
+            bool summonPinchBegin = IsHandSlotDetected(summonSlot)
+                                    && !summonDet.IsFistActive
+                                    && (summonDet.PinchJustStarted || (summonDet.IsPinchActive && pinchBeginGraceTimers[summonSlot] > 0f));
+            if (summonPinchBegin)
+            {
+                float portDist = Mathf.Min(
+                    cableRouter.QueryNearestPortNormalizedDistance(summonDet.StabilizedPinchLocalXY, stageZoom),
+                    cableRouter.QueryNearestPortNormalizedDistance(summonDet.PinchPointLocalXY, stageZoom));
+                if (portDist <= 1.25f)
+                {
+                    ResetAllCircleSummoners();
+                    ExitInteractionMode(ActiveInteractionMode.CircleSummon, triggerNeutralCooldown: false);
+                }
+            }
+        }
 
         bool blockedByArbiter = (activeInteractionMode != ActiveInteractionMode.Idle && activeInteractionMode != ActiveInteractionMode.CableDrag)
                                 || (activeInteractionMode == ActiveInteractionMode.Idle && isTwoHandConfirming);
@@ -6593,26 +6654,34 @@ public class AirWeavingController : MonoBehaviour
             bool canStartBase = activeInteractionMode == ActiveInteractionMode.Idle
                                 && neutralCooldownTimer <= 0f
                                 && !isTwoHandConfirming;
+            bool slot0PinchBegin = handGestureDetector.PinchJustStarted
+                                   || (handGestureDetector.IsPinchActive && pinchBeginGraceTimers[0] > 0f);
+            bool slot1PinchBegin = secondaryHandGestureDetector.PinchJustStarted
+                                   || (secondaryHandGestureDetector.IsPinchActive && pinchBeginGraceTimers[1] > 0f);
             bool slot0CanBegin = slot0Avail
                                  && canStartBase
-                                 && handGestureDetector.PinchJustStarted
+                                 && slot0PinchBegin
                                  && handGestureDetector.IsQualityGatePassing
                                  && handGestureDetector.PinchSpeedUnitsPerSec <= CablePinchEnterMaxSpeed;
             bool slot1CanBegin = slot1Avail
                                  && canStartBase
-                                 && secondaryHandGestureDetector.PinchJustStarted
+                                 && slot1PinchBegin
                                  && secondaryHandGestureDetector.IsQualityGatePassing
                                  && secondaryHandGestureDetector.PinchSpeedUnitsPerSec <= CablePinchEnterMaxSpeed;
 
             float d0 = slot0Avail
-                ? cableRouter.QueryNearestPortNormalizedDistance(
-                    slot0CanBegin ? handGestureDetector.StabilizedPinchLocalXY : handGestureDetector.PinchPointLocalXY,
-                    stageZoom)
+                ? (slot0CanBegin
+                    ? Mathf.Min(
+                        cableRouter.QueryNearestPortNormalizedDistance(handGestureDetector.StabilizedPinchLocalXY, stageZoom),
+                        cableRouter.QueryNearestPortNormalizedDistance(handGestureDetector.PinchPointLocalXY, stageZoom))
+                    : cableRouter.QueryNearestPortNormalizedDistance(handGestureDetector.PinchPointLocalXY, stageZoom))
                 : float.MaxValue;
             float d1 = slot1Avail
-                ? cableRouter.QueryNearestPortNormalizedDistance(
-                    slot1CanBegin ? secondaryHandGestureDetector.StabilizedPinchLocalXY : secondaryHandGestureDetector.PinchPointLocalXY,
-                    stageZoom)
+                ? (slot1CanBegin
+                    ? Mathf.Min(
+                        cableRouter.QueryNearestPortNormalizedDistance(secondaryHandGestureDetector.StabilizedPinchLocalXY, stageZoom),
+                        cableRouter.QueryNearestPortNormalizedDistance(secondaryHandGestureDetector.PinchPointLocalXY, stageZoom))
+                    : cableRouter.QueryNearestPortNormalizedDistance(secondaryHandGestureDetector.PinchPointLocalXY, stageZoom))
                 : float.MaxValue;
 
             if (slot0CanBegin && !slot1CanBegin && d0 <= 1.25f)
@@ -6683,7 +6752,10 @@ public class AirWeavingController : MonoBehaviour
             : Vector2.zero;
 
         bool cablePinchActive = isDragOwned ? cableDet.IsPinchActive : (hasChosenHand && cableDet.IsPinchActive);
-        bool cablePinchJustStarted = hasChosenHand && !chosenSlotMissing && cableDet.PinchJustStarted;
+        bool chosenPinchGraceActive = chosenSlot >= 0 && chosenSlot < 2 && pinchBeginGraceTimers[chosenSlot] > 0f;
+        bool cablePinchJustStarted = hasChosenHand
+                                     && !chosenSlotMissing
+                                     && (cableDet.PinchJustStarted || (cableDet.IsPinchActive && chosenPinchGraceActive));
         bool cablePinchJustEnded = isDragOwned ? cableDet.PinchJustEnded : (hasChosenHand && cableDet.PinchJustEnded);
         bool isHandLiveTracking = hasChosenHand && !chosenSlotMissing;
 
@@ -6725,6 +6797,8 @@ public class AirWeavingController : MonoBehaviour
             activeInteractionHandSlot = chosenSlot >= 0 ? chosenSlot : 0;
             activeCableHoverHandSlot = activeInteractionHandSlot;
             singleHandModeEnteredTime = Time.unscaledTime;
+            pinchBeginGraceTimers[0] = 0f;
+            pinchBeginGraceTimers[1] = 0f;
         }
         else if (activeInteractionMode == ActiveInteractionMode.CableDrag && !cableRouter.IsDraggingCable)
         {
@@ -7038,7 +7112,7 @@ public class AirWeavingController : MonoBehaviour
         bool slot0ContactActive = handGestureDetector.IsFistActive
                                   || handGestureDetector.IsPinchActive
                                   || inputPushProgressBySlot[0] >= 0.70f;
-        hologramVisual.UpdateCursorDepthProjection(0, stageRoot, showSlot0Drop, slot0DropWorldPos, slot0ContactActive);
+        hologramVisual.UpdateCursorDepthProjection(0, stageRoot, showSlot0Drop, slot0DropWorldPos, slot0ContactActive, camT);
 
         bool showSlot1Drop = allowCursorDropLines
                              && isSecondaryHandDetected
@@ -7055,7 +7129,7 @@ public class AirWeavingController : MonoBehaviour
         bool slot1ContactActive = secondaryHandGestureDetector.IsFistActive
                                   || secondaryHandGestureDetector.IsPinchActive
                                   || inputPushProgressBySlot[1] >= 0.70f;
-        hologramVisual.UpdateCursorDepthProjection(1, stageRoot, showSlot1Drop, slot1DropWorldPos, slot1ContactActive);
+        hologramVisual.UpdateCursorDepthProjection(1, stageRoot, showSlot1Drop, slot1DropWorldPos, slot1ContactActive, camT);
 
         // Jangkar visual link 2 tangan selalu terkunci langsung pada posisi 3D tangan pengguna di seluruh bidang layar (global)
         Vector3 handAWorld = (IsTwoHandFistResetCharging || (IsTwoHandFreePanActive && !twoHandFreePanPrimaryIsPinch))
@@ -7114,13 +7188,15 @@ public class AirWeavingController : MonoBehaviour
             }
             else
             {
-                bool pinchOrFistBusy = det.IsPinchActive
-                                       || det.IsPrePinchSuppressingSummon
-                                       || det.IsFormingPinchIntent
-                                       || det.IsFormingFistIntent;
                 bool slotHoveringPort = (cableRouter != null)
                                         && ((activeCableHoverHandSlot == handSlot && cableRouter.IsHoveringPort)
                                             || (activeCableHoverHandSlot != handSlot && cableRouter.IsSecondaryHoveringPort));
+                // Guard pra-cubit hanya memblokir summon bila benar-benar dalam posisi cubit/di atas port kabel;
+                // pose tegas OneFingerAnd (telunjuk lurus) & ThumbOnlyNot (jempol terbentang) tidak diblokir pra-cubit.
+                bool pinchOrFistBusy = det.IsPinchActive
+                                       || det.IsPrePinchSuppressingSummon
+                                       || (slotHoveringPort && det.IsFormingPinchIntent)
+                                       || det.IsFormingFistIntent;
                 int slotHoveredGate = handSlot == 0 ? hoveredGateSlotIndex : secondaryHoveredGateSlotIndex;
                 GateNode slotHoveredInput = handSlot == 0 ? hoveredInputNode : secondaryHoveredInputNode;
                 bool inOutputZone = IsCursorInsideOutputPriorityZone(mainCam, det.PalmCursorWorldPosition, aspectScale, det);
