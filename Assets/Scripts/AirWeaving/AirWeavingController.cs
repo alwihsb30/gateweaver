@@ -731,11 +731,16 @@ public class AirWeavingController : MonoBehaviour
 
     private readonly List<SavedNodeLabelStyle> savedNodeLabelStyles = new List<SavedNodeLabelStyle>(12);
     private Transform cachedOutputTruthPodRootTransform;
+    private bool hasSavedOutputTruthPodTransform = false;
+    private Vector3 savedOutputTruthPodLocalPos = Vector3.zero;
+    private Quaternion savedOutputTruthPodLocalRot = Quaternion.identity;
+    private Vector3 savedOutputTruthPodLocalScale = Vector3.one;
     private Vector3 lastTruthPodWorldAnchor = Vector3.zero;
 
     private AirWeavingStageController stageController;
     private AirWeavingLightingAndShaderRig lightingAndShaderRig;
     private AirWeavingFloatingPropRig floatingPropRig;
+    private AirWeavingPedagogicalHud pedagogicalHud;
     private AirWeavingOutputTrigger outputTrigger;
     private AirWeavingHologramVisual hologramVisual;
     private AirWeavingCableRouter cableRouter;
@@ -744,6 +749,11 @@ public class AirWeavingController : MonoBehaviour
     private AirWeavingGestureGuide gestureGuide;
     private CompactHudMenuController cachedHudMenu;
     private CompactHudMenuController subscribedHudMenu;
+    private RectTransform cachedFeedbackTextRect;
+    private RectTransform cachedFeedbackBackdropRect;
+    private const float ToastBottomStripElevatedY = 94f;
+    private const float ToastPracticeElevatedY = 88f;
+    private const float ToastDefaultBottomY = 16f;
     private readonly AirWeavingHandGestureDetector handGestureDetector = new AirWeavingHandGestureDetector();
     private readonly AirWeavingHandGestureDetector secondaryHandGestureDetector = new AirWeavingHandGestureDetector();
     private readonly AirWeavingCircleSummoner[] circleSummoners =
@@ -1019,6 +1029,11 @@ public class AirWeavingController : MonoBehaviour
             SyncCableRouterVisualsAfterPoseUpdate(mainCam);
         }
 
+        if (pedagogicalHud != null)
+        {
+            pedagogicalHud.NotifyLevelOrWorkbenchReset(levelManager, inputANode, inputBNode, outputNode);
+        }
+
         SetHoverRingVisible(false);
     }
 
@@ -1219,10 +1234,118 @@ public class AirWeavingController : MonoBehaviour
         }
 
         UpdateAirWeavingLabelsAndTruthPodSpatialPose(mainCam);
+        UpdatePedagogicalHudVisuals(mainCam);
+    }
+
+    private void UpdatePedagogicalHudVisuals(Camera mainCam)
+    {
+        if (pedagogicalHud == null || mainCam == null)
+        {
+            return;
+        }
+
+        Transform stageRoot = stageController != null ? stageController.StageRoot : null;
+        float stageZoom = stageController != null ? stageController.CurrentZoomScale : AirWeavingStageController.DefaultZoomScale;
+        pedagogicalHud.TickLateVisuals(
+            mainCam,
+            stageRoot,
+            stageZoom,
+            isAirWeavingActive,
+            IsAnyUiOverlayOpen,
+            levelManager,
+            circuitManager,
+            cableRouter,
+            inputANode,
+            inputBNode,
+            outputNode,
+            activePlacedGatesBuffer,
+            debugPassedRowMask,
+            debugFailedRowMask);
+
+        SyncBottomToastElevationForAirMode(forceResetToDefault: false);
+    }
+
+    private void HandlePedagogicalBottomStripChanged(bool isExpanded)
+    {
+        _ = isExpanded;
+        SyncBottomToastElevationForAirMode(forceResetToDefault: !isAirWeavingActive);
+    }
+
+    /// <summary>
+    /// Mengangkat posisi toast/banner bawah ("Arahkan tangan ke kamera" &amp; feedback) tepat di atas Pita Bawah (y = 94px)
+    /// saat Pita Bawah Mode Udara terbuka, dan otomatis mengembalikan ke 16px saat dilipat atau kembali ke Mode Kartu v5. Zero-GC.
+    /// </summary>
+    private void SyncBottomToastElevationForAirMode(bool forceResetToDefault)
+    {
+        if (forceResetToDefault || !isAirWeavingActive)
+        {
+            if (cachedHudMenu != null)
+            {
+                cachedHudMenu.SetPracticePillBottomOffset(false);
+            }
+            return;
+        }
+
+        bool bottomStripOpen = pedagogicalHud != null && pedagogicalHud.IsBottomStripExpanded;
+        bool practiceActive = gestureGuide != null && gestureGuide.IsPracticeActive;
+
+        if (cachedHudMenu != null)
+        {
+            cachedHudMenu.SetPracticePillBottomOffset(bottomStripOpen || practiceActive);
+        }
+
+        if (txtFeedback == null)
+        {
+            return;
+        }
+
+        if (cachedFeedbackTextRect == null)
+        {
+            cachedFeedbackTextRect = txtFeedback.rectTransform;
+        }
+        if (cachedFeedbackBackdropRect == null && cachedFeedbackTextRect != null && cachedFeedbackTextRect.parent != null)
+        {
+            Transform bgTr = cachedFeedbackTextRect.parent.Find("Txt_Feedback_Backdrop");
+            if (bgTr != null)
+            {
+                cachedFeedbackBackdropRect = bgTr.GetComponent<RectTransform>();
+            }
+        }
+
+        float desiredBottomY = bottomStripOpen
+            ? ToastBottomStripElevatedY
+            : (practiceActive ? ToastPracticeElevatedY : ToastDefaultBottomY);
+
+        if (cachedFeedbackTextRect != null)
+        {
+            Vector2 fbPos = cachedFeedbackTextRect.anchoredPosition;
+            if (Mathf.Abs(fbPos.y - desiredBottomY) > 0.5f)
+            {
+                fbPos.y = desiredBottomY;
+                cachedFeedbackTextRect.anchoredPosition = fbPos;
+            }
+        }
+
+        if (cachedFeedbackBackdropRect != null)
+        {
+            float desiredBgY = desiredBottomY - 3f;
+            Vector2 bgPos = cachedFeedbackBackdropRect.anchoredPosition;
+            if (Mathf.Abs(bgPos.y - desiredBgY) > 0.5f)
+            {
+                bgPos.y = desiredBgY;
+                cachedFeedbackBackdropRect.anchoredPosition = bgPos;
+            }
+        }
     }
 
     private void OnDisable()
     {
+        if (pedagogicalHud != null)
+        {
+            pedagogicalHud.HideImmediate();
+        }
+        SyncBottomToastElevationForAirMode(forceResetToDefault: true);
+        RestoreSavedOutputTruthPodForCardMode();
         floatingPropRig?.DeactivateAndRestoreForCardMode();
         lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         ShutdownNativeAndCameraImmediate();
@@ -1259,6 +1382,14 @@ public class AirWeavingController : MonoBehaviour
         UnbindHudMenuEvents();
         cachedHudMenu = null;
         circuitManager?.SetManualRoutingMode(false);
+        if (pedagogicalHud != null)
+        {
+            pedagogicalHud.OnBottomStripExpandedChanged -= HandlePedagogicalBottomStripChanged;
+            pedagogicalHud.HideImmediate();
+        }
+        SyncBottomToastElevationForAirMode(forceResetToDefault: true);
+        cachedFeedbackTextRect = null;
+        cachedFeedbackBackdropRect = null;
         floatingPropRig?.DeactivateAndRestoreForCardMode();
         lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         RestoreAirWeavingLabelReadabilityStyles();
@@ -1481,6 +1612,10 @@ public class AirWeavingController : MonoBehaviour
         outputTrigger?.HideImmediate();
         hologramVisual?.HideImmediate();
         cableRouter?.HideImmediate();
+        if (pedagogicalHud != null)
+        {
+            pedagogicalHud.HideImmediate();
+        }
         ResetAllCircleSummoners();
         summonVisual?.HideImmediate();
 
@@ -1573,9 +1708,21 @@ public class AirWeavingController : MonoBehaviour
         UpdateWorkbenchGuideVisuals(mainCam);
         RefreshActivePlacedGatesBuffer();
         SyncCableRouterVisualsAfterPoseUpdate(mainCam);
+        if (pedagogicalHud != null)
+        {
+            pedagogicalHud.ActivateForAirWeaving(
+                stageController != null ? stageController.StageRoot : null,
+                mainCam,
+                levelManager,
+                inputANode,
+                inputBNode,
+                outputNode,
+                txtFeedback != null ? txtFeedback.font : null);
+        }
 
         OnAirWeavingModeChanged?.Invoke(true);
         gestureGuide?.OnAirWeavingModeEntered();
+        SyncBottomToastElevationForAirMode(forceResetToDefault: false);
         if (gestureGuide == null || !gestureGuide.IsGuideOverlayOpen)
         {
             SetFeedbackImmediate("Mode Udara aktif — Kepal: sakelar Input & pegang gerbang, Cubit: tarik kabel.", FeedbackActiveColor, 2.8f);
@@ -1624,6 +1771,11 @@ public class AirWeavingController : MonoBehaviour
         activeCableHoverHandSlot = -1;
         cableRouter?.ClearAllWires(circuitManager);
         circuitManager?.SetManualRoutingMode(false);
+        if (pedagogicalHud != null)
+        {
+            pedagogicalHud.HideImmediate();
+        }
+        SyncBottomToastElevationForAirMode(forceResetToDefault: true);
         floatingPropRig?.DeactivateAndRestoreForCardMode();
         lightingAndShaderRig?.DeactivateAndRestoreForCardMode();
         RestoreAirWeavingLabelReadabilityStyles();
@@ -7988,6 +8140,19 @@ public class AirWeavingController : MonoBehaviour
         }
         lightingAndShaderRig.SetFloatingPropRig(floatingPropRig);
 
+        if (pedagogicalHud == null)
+        {
+            pedagogicalHud = GetComponent<AirWeavingPedagogicalHud>();
+            if (pedagogicalHud == null)
+            {
+                pedagogicalHud = gameObject.AddComponent<AirWeavingPedagogicalHud>();
+            }
+            pedagogicalHud.OnBottomStripExpandedChanged += HandlePedagogicalBottomStripChanged;
+        }
+        pedagogicalHud.EnsureVisualsCreated(
+            stageController != null ? stageController.StageRoot : null,
+            txtFeedback != null ? txtFeedback.font : null);
+
         // 2. Cincin Hover / Grab Highlight ramping di sekitar alas target gerbang atau terminal Input
         GameObject hoverObj = new GameObject("AR_HoverHighlightRing");
         hoverObj.transform.SetParent(workbenchVisualRootObj.transform, false);
@@ -8483,6 +8648,11 @@ public class AirWeavingController : MonoBehaviour
         SetSecondaryHandRigVisible(false);
         SetHoverRingVisible(false);
         stageController?.HideImmediate();
+        if (pedagogicalHud != null)
+        {
+            pedagogicalHud.HideImmediate();
+        }
+        SyncBottomToastElevationForAirMode(forceResetToDefault: true);
         outputTrigger?.HideImmediate();
         hologramVisual?.HideImmediate();
         cableRouter?.HideImmediate();
@@ -8757,7 +8927,7 @@ public class AirWeavingController : MonoBehaviour
 
             bool isLogicGate = node.nodeType != NodeType.InputSource && node.nodeType != NodeType.OutputActuator;
             Vector3 compactPos = saved.originalLocalPos;
-            compactPos.y = Mathf.Max(0.38f, saved.originalLocalPos.y - (isLogicGate ? 0.115f : 0.135f));
+            compactPos.y = Mathf.Max(0.46f, saved.originalLocalPos.y - (isLogicGate ? 0.065f : 0.055f));
             compactPos.z = 0.0f;
             labelT.localPosition = compactPos;
 
@@ -8775,10 +8945,67 @@ public class AirWeavingController : MonoBehaviour
                 pipMat.renderQueue = 2999;
             }
         }
+
+        SuppressLegacyOutputTruthPodForAirMode();
+    }
+
+    private void SuppressLegacyOutputTruthPodForAirMode()
+    {
+        if (outputNode == null)
+        {
+            return;
+        }
+
+        if (cachedOutputTruthPodRootTransform == null)
+        {
+            cachedOutputTruthPodRootTransform = outputNode.transform.Find("OutputTruthPod3D");
+        }
+
+        if (cachedOutputTruthPodRootTransform != null)
+        {
+            if (!hasSavedOutputTruthPodTransform)
+            {
+                savedOutputTruthPodLocalPos = cachedOutputTruthPodRootTransform.localPosition;
+                savedOutputTruthPodLocalRot = cachedOutputTruthPodRootTransform.localRotation;
+                savedOutputTruthPodLocalScale = cachedOutputTruthPodRootTransform.localScale;
+                hasSavedOutputTruthPodTransform = true;
+            }
+
+            if (cachedOutputTruthPodRootTransform.gameObject.activeSelf)
+            {
+                cachedOutputTruthPodRootTransform.gameObject.SetActive(false);
+            }
+        }
+    }
+
+    private void RestoreSavedOutputTruthPodForCardMode()
+    {
+        if (!hasSavedOutputTruthPodTransform)
+        {
+            return;
+        }
+
+        if (cachedOutputTruthPodRootTransform != null)
+        {
+            cachedOutputTruthPodRootTransform.localPosition = savedOutputTruthPodLocalPos;
+            cachedOutputTruthPodRootTransform.localRotation = savedOutputTruthPodLocalRot;
+            cachedOutputTruthPodRootTransform.localScale = savedOutputTruthPodLocalScale;
+            bool shouldShowInCardMode = outputNode != null
+                                        && outputNode.isTracked
+                                        && (levelManager == null || !levelManager.IsSandboxMode);
+            if (cachedOutputTruthPodRootTransform.gameObject.activeSelf != shouldShowInCardMode)
+            {
+                cachedOutputTruthPodRootTransform.gameObject.SetActive(shouldShowInCardMode);
+            }
+        }
+
+        hasSavedOutputTruthPodTransform = false;
     }
 
     private void RestoreAirWeavingLabelReadabilityStyles()
     {
+        RestoreSavedOutputTruthPodForCardMode();
+
         for (int i = 0; i < savedNodeLabelStyles.Count; i++)
         {
             SavedNodeLabelStyle s = savedNodeLabelStyles[i];
@@ -8805,9 +9032,9 @@ public class AirWeavingController : MonoBehaviour
     }
 
     /// <summary>
-    /// Menerapkan Distance-Compensated Scale Clamping pada seluruh label world-space 3D (KARTU, MODE, LAB, AND/OR/XOR/NAND/NOT)
-    /// serta menempatkan OutputTruthPodVisual di tepi luar/depan-bawah dudukan Output dalam ruang lokal meja dengan skala terkendali
-    /// agar tidak pernah membengkak raksasa atau terbelah bodi gerbang saat meja di-orbit 360°. Zero-GC.
+    /// Mengatur skala alami &amp; keterbacaan seluruh label world-space 3D (KARTU, MODE, LAB, AND/OR/XOR/NAND/NOT)
+    /// agar ~1.5x lebih besar pada zoom default dan ikut membesar proporsional saat di-zoom masuk / didekatkan,
+    /// sekaligus menyupresi OutputTruthPod3D 2x2 lama (digantikan Kartu 2D Tabel Kebenaran Tahap 10). Zero-GC.
     /// </summary>
     private void UpdateAirWeavingLabelsAndTruthPodSpatialPose(Camera mainCam)
     {
@@ -8822,9 +9049,9 @@ public class AirWeavingController : MonoBehaviour
         Vector3 camUp = camT.up;
         Quaternion camRot = camT.rotation;
         float stageZoom = stageController != null ? stageController.CurrentZoomScale : AirWeavingStageController.DefaultZoomScale;
-        float gentleZoom = Mathf.Clamp(Mathf.Lerp(1f, Mathf.Clamp(stageZoom, 0.35f, 3.50f), 0.22f), 0.72f, 1.55f);
+        float zoomRatio = Mathf.Max(0.20f, stageZoom / AirWeavingStageController.DefaultZoomScale);
 
-        // 1. Distance-Compensated Scale Clamping untuk semua label 3D (KARTU, LAB, AND/OR/XOR/NAND/NOT) di seluruh rentang zoom 0.18x..15.0x
+        // 1. Skala Label 3D (Input A/B, Output, & 5 gerbang): ~1.5x lebih besar & ikut membesar alami hingga 2.85x saat zoom masuk
         for (int i = 0; i < savedNodeLabelStyles.Count; i++)
         {
             SavedNodeLabelStyle s = savedNodeLabelStyles[i];
@@ -8837,19 +9064,22 @@ public class AirWeavingController : MonoBehaviour
             labelT.rotation = camRot;
 
             float camDepth = Mathf.Max(0.65f, Vector3.Dot(labelT.position - camPos, camForward));
-            float distRatio = Mathf.Clamp(camDepth / WorkbenchDepth, 0.18f, 2.10f);
+            float distRatio = Mathf.Clamp(camDepth / WorkbenchDepth, 0.16f, 2.25f);
+            float depthProximityGain = Mathf.Clamp(WorkbenchDepth / camDepth, 0.50f, 2.80f);
+            float naturalZoomGain = Mathf.Clamp(zoomRatio * Mathf.Lerp(1f, depthProximityGain, 0.72f), 0.52f, 2.85f);
 
             bool isLogicGate = s.node.nodeType != NodeType.InputSource && s.node.nodeType != NodeType.OutputActuator;
             bool isParkedGate = isLogicGate && !s.node.isTracked;
-            float baseWorldLabelScale = isParkedGate ? 0.29f : (isLogicGate ? 0.39f : 0.41f);
-            float desiredWorldLabelScale = baseWorldLabelScale * distRatio * gentleZoom;
+            float baseWorldLabelScale = isParkedGate ? 0.44f : (isLogicGate ? 0.58f : 0.60f);
+            float desiredWorldLabelScale = baseWorldLabelScale * distRatio * naturalZoomGain;
 
             float parentScale = Mathf.Max(0.08f, s.node.transform.localScale.x);
-            float clampedLocalScale = Mathf.Clamp(desiredWorldLabelScale / parentScale, 0.025f, 1.35f);
+            float clampedLocalScale = Mathf.Clamp(desiredWorldLabelScale / parentScale, 0.04f, 2.65f);
             labelT.localScale = Vector3.one * clampedLocalScale;
         }
 
-        // 2. Penempatan Spasial OutputTruthPod3D di tepi luar/depan-bawah dudukan Output dalam ruang meja + Scale Clamping
+        // 2. Supresi OutputTruthPod3D 2x2 lama (digantikan Tabel Kebenaran Eksplisit di Panel Kanan Tahap 10)
+        //    & alihkan jangkar lencana OutputTrigger tepat di bawah prop Output agar nol benturan dengan Panel Kanan
         if (outputNode != null)
         {
             if (cachedOutputTruthPodRootTransform == null)
@@ -8857,30 +9087,22 @@ public class AirWeavingController : MonoBehaviour
                 cachedOutputTruthPodRootTransform = outputNode.transform.Find("OutputTruthPod3D");
             }
 
-            if (cachedOutputTruthPodRootTransform != null)
+            if (cachedOutputTruthPodRootTransform != null && cachedOutputTruthPodRootTransform.gameObject.activeSelf)
             {
-                float aspectScale = ComputeHorizontalAspectScale(mainCam);
-                Transform stageRoot = stageController != null ? stageController.StageRoot : null;
-
-                // Jangkar di tepi luar-depan-bawah sayap Output dalam ruang lokal meja XZ agar jauh dari lintasan bodi gerbang di arena
-                Vector3 basePodWorld = stageRoot != null
-                    ? stageRoot.TransformPoint(new Vector3((OutputTerminalBaseX + 0.14f) * aspectScale, 0.075f, OutputTerminalY - 0.15f))
-                    : outputNode.transform.position;
-
-                float podCamDepth = Mathf.Max(0.75f, Vector3.Dot(basePodWorld - camPos, camForward));
-                float podDistRatio = Mathf.Clamp(podCamDepth / WorkbenchDepth, 0.20f, 1.95f);
-
-                Vector3 finalPodWorld = basePodWorld - (camUp * (0.100f * podDistRatio)) - (camForward * 0.24f);
-                cachedOutputTruthPodRootTransform.position = finalPodWorld;
-                cachedOutputTruthPodRootTransform.rotation = Quaternion.LookRotation(camUp, -camForward);
-
-                float desiredPodWorldScale = 0.52f * podDistRatio * gentleZoom;
-                float outParentScale = Mathf.Max(0.08f, outputNode.transform.localScale.x);
-                float clampedPodLocalScale = Mathf.Clamp(desiredPodWorldScale / outParentScale, 0.035f, 1.35f);
-                cachedOutputTruthPodRootTransform.localScale = Vector3.one * clampedPodLocalScale;
-
-                lastTruthPodWorldAnchor = finalPodWorld;
+                cachedOutputTruthPodRootTransform.gameObject.SetActive(false);
             }
+
+            float aspectScale = ComputeHorizontalAspectScale(mainCam);
+            Transform stageRoot = stageController != null ? stageController.StageRoot : null;
+
+            Vector3 baseOutputAnchorWorld = stageRoot != null
+                ? stageRoot.TransformPoint(new Vector3(OutputTerminalBaseX * aspectScale, 0.060f, OutputTerminalY - 0.14f))
+                : outputNode.transform.position;
+
+            float podCamDepth = Mathf.Max(0.75f, Vector3.Dot(baseOutputAnchorWorld - camPos, camForward));
+            float podDistRatio = Mathf.Clamp(podCamDepth / WorkbenchDepth, 0.20f, 1.95f);
+
+            lastTruthPodWorldAnchor = baseOutputAnchorWorld - (camUp * (0.055f * podDistRatio)) - (camForward * 0.22f);
         }
     }
 

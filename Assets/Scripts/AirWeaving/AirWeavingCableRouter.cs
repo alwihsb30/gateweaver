@@ -303,8 +303,48 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     public GateNode SecondaryHoveredPortNode => IsSecondaryHoveringPort ? activePorts[secondaryHoveredPortIndex].node : null;
     public bool IsHoveringOutputNodePort => IsHoveringPort && activePorts[hoveredPortIndex].node != null && activePorts[hoveredPortIndex].node.nodeType == NodeType.OutputActuator;
     public int ActiveWireCount => wires.Count;
+    public int ActivePortCount => activePorts.Count;
     public int TopologyVersion { get; private set; }
     public Vector3 AssistedPinchWorldPosition { get; private set; }
+
+    /// <summary>
+    /// Mengembalikan snapshot read-only soket port aktif ke-i untuk visual lencana biner 0/1 (Zero-GC).
+    /// </summary>
+    public bool TryGetActivePortSnapshot(
+        int index,
+        out GateNode portNode,
+        out bool isOutput,
+        out int slotIndex,
+        out Vector3 handleWorldPos,
+        out Vector3 socketAxisWorld,
+        out bool isConnected,
+        out bool signalHigh,
+        out float visualApparentScale)
+    {
+        if (index >= 0 && index < activePorts.Count)
+        {
+            ActivePortEntry p = activePorts[index];
+            portNode = p.node;
+            isOutput = p.isOutput;
+            slotIndex = p.slotIndex;
+            handleWorldPos = p.handleWorldPos;
+            socketAxisWorld = p.socketAxisWorld;
+            isConnected = p.isConnected;
+            signalHigh = p.connectedSignalHigh;
+            visualApparentScale = p.visualApparentScale;
+            return portNode != null;
+        }
+
+        portNode = null;
+        isOutput = false;
+        slotIndex = 0;
+        handleWorldPos = Vector3.zero;
+        socketAxisWorld = Vector3.right;
+        isConnected = false;
+        signalHigh = false;
+        visualApparentScale = 1f;
+        return false;
+    }
 
     /// <summary>
     /// Mereset offset magnetik aim-assist saat kendali hover kabel berpindah antar-slot tangan (ambidextrous Zero-GC).

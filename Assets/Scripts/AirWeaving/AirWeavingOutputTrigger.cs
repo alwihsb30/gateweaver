@@ -449,10 +449,12 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             Vector3 podAnchor = truthPodWorldAnchor.sqrMagnitude > 0.001f
                 ? truthPodWorldAnchor
                 : (outputWorldPos - (camUp * (0.20f * distFactor)) - (camForward * 0.24f));
-            float podDepth = Mathf.Max(0.85f, Vector3.Dot(podAnchor - camT.position, camForward));
-            float gentleBadgeZoom = Mathf.Lerp(1f, Mathf.Clamp(zoomScale, 0.35f, 3.50f), 0.22f);
-            float badgeDistScale = Mathf.Clamp(podDepth / ReferenceCameraDepth, 0.24f, 1.50f) * gentleBadgeZoom;
-            badgeDistScale = Mathf.Clamp(badgeDistScale, 0.44f, 1.08f);
+            float podDepth = Mathf.Max(0.75f, Vector3.Dot(podAnchor - camT.position, camForward));
+            float podDistRatio = Mathf.Clamp(podDepth / ReferenceCameraDepth, 0.16f, 2.25f);
+            float zoomRatio = Mathf.Max(0.20f, zoomScale / AirWeavingStageController.DefaultZoomScale);
+            float depthProximityGain = Mathf.Clamp(ReferenceCameraDepth / podDepth, 0.50f, 2.75f);
+            float naturalBadgeZoom = Mathf.Clamp(zoomRatio * Mathf.Lerp(1f, depthProximityGain, 0.72f), 0.55f, 2.70f);
+            float badgeDistScale = 1.32f * podDistRatio * naturalBadgeZoom;
 
             Vector3 badgePos = podAnchor + (camUp * (BadgeBelowPodOffset * badgeDistScale)) - (camForward * 0.015f);
             badgeRootObj.transform.position = badgePos;
