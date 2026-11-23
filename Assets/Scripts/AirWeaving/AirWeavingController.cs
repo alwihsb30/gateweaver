@@ -34,7 +34,7 @@ public class AirWeavingController : MonoBehaviour
     private const int RequestedCamWidth = 480;
     private const int RequestedCamHeight = 360;
     private const int RequestedCamFps = 30;
-    private const int MaxInferenceLongEdge = 224;
+    private const int MaxInferenceLongEdge = 256;
     private const int LandmarkCount = 21;
     private const int WorkerShutdownJoinTimeoutMs = 1500;
     private const int MaxAsyncGpuReadbackErrorsBeforeFallback = 3;
@@ -99,12 +99,12 @@ public class AirWeavingController : MonoBehaviour
     private const float TwoHandZoomMaxLogStepPerFrame = 0.115f;
     private const float TwoHandFreePanXYGain = 1.50f;
     private const float TwoHandFreePanMaxDeltaXYPerFrame = 0.38f;
-    private const float TwoHandOrbitConfirmHoldSeconds = 0.040f;
+    private const float TwoHandOrbitConfirmHoldSeconds = 0.120f;
     private const float TwoHandOrbitHoldMaxPinchRatio = 0.74f;
     private const float TwoHandFreePanHoldMinFistBendDeg = 78.0f;
     private const float TwoHandPinchReleaseFreezeRatio = 0.60f;
     private const float TwoHandFistReleaseFreezeMaxBendDeg = 92.0f;
-    private const float TwoHandFreePanConfirmHoldSeconds = 0.055f;
+    private const float TwoHandFreePanConfirmHoldSeconds = 0.130f;
     private const float TwoHandIntentGraceMaxSeconds = 0.220f;
     private const float TwoHandSingleHandUpgradeWindowSeconds = 0.190f;
     private const float TwoHandFistResetHoldSeconds = 0.55f;
@@ -121,17 +121,38 @@ public class AirWeavingController : MonoBehaviour
     private const float CarryPanPalmOneEuroVelScale = 16.0f;
 
     private const float EdgePanStripFraction = 0.12f;
-    private const float EdgePanDwellSeconds = 0.095f;
+    private const float EdgePanDwellSeconds = 0.240f;
     private const float EdgePanRampInSeconds = 0.110f;
-    private const float EdgePanMaxSpeedAtRefDepth = 2.85f;
+    private const float EdgePanMaxSpeedAtRefDepth = 1.15f;
     private const float EdgePanCableReleasePauseRatio = 0.70f;
 
     // Parameter Quality Gate, Stabilisasi Dual-Hand, Exclusive Gesture Arbiter, & Confidence Jarak Jauh MediaPipe (Tahap 5.5+)
-    private const float MediaPipeMinHandDetectionConfidence = 0.40f;
-    private const float MediaPipeMinHandPresenceConfidence = 0.38f;
-    private const float MediaPipeMinTrackingConfidence = 0.30f;
-    private const float MinCandidateRawPalmScale = 0.028f;
+    private const float MediaPipeMinHandDetectionConfidence = 0.62f;
+    private const float MediaPipeMinHandPresenceConfidence = 0.58f;
+    private const float MediaPipeMinTrackingConfidence = 0.55f;
+    private const float MinCandidateRawPalmScale = 0.042f;
     private const float HandednessConfidenceThreshold = 0.70f;
+    // Anti-Wajah: skor handedness minimum untuk entry baru / seluruh kandidat tangan ke-2 vs tangan utama yang sudah terkunci
+    private const float HandednessEntryMinScore = 0.65f;
+    private const float HandednessLockedMinScore = 0.50f;
+    private const float CandidateLandmarkMinNorm = -0.15f;
+    private const float CandidateLandmarkMaxNorm = 1.15f;
+    private const float CandidateMinRatioD09ToD517 = 0.42f;
+    private const float CandidateMaxRatioD09ToD517 = 2.60f;
+    private const float CandidateMinRatioD05ToD09 = 0.38f;
+    private const float CandidateMaxRatioD05ToD09 = 1.65f;
+    private const float CandidateMinRatioD017ToD09 = 0.35f;
+    private const float CandidateMaxRatioD017ToD09 = 1.65f;
+    private const float CandidateMinPalmTriangleAreaFactor = 0.08f;
+    private const float CandidateMinProximalBoneRatio = 0.14f;
+    private const float CandidateMaxProximalBoneRatio = 0.95f;
+    private const float CandidateMinWorldPalmSpanMeters = 0.042f;
+    private const float CandidateMaxWorldPalmSpanMeters = 0.145f;
+    private const float SecondCandidateMinPalmDistNorm = 0.12f;
+    private const float SecondCandidateMinPalmScaleRatio = 0.45f;
+    private const int HandSlotEntryRequiredStableFrames = 3;
+    private const float HandSlotEntryStableRadiusNorm = 0.16f;
+    private const int HandSlotMaxTeleportRejectFrames = 2;
     private const float HandAssociationMaxDistNorm = 0.36f;
     private const float HandAssociationMatchedHandednessMaxDistNorm = 0.48f;
     private const float HandFrameDropGraceSeconds = 0.120f;
@@ -160,11 +181,11 @@ public class AirWeavingController : MonoBehaviour
     private const float GateDragVelocitySmoothRate = 18.0f;
 
     // Soft Magnetic Aim-Assist kalem & Konfirmasi Kepal (Fist) 70 ms untuk sakelar Input A/B (Tahap 9: Edge-Trigger Aman)
-    private const float InputSwitchMagnetRadius = 0.28f;
+    private const float InputSwitchMagnetRadius = 0.34f;
     private const float InputSwitchMagnetMaxPull = 0.24f;
     private const float SoftMagnetMaxHandSpeed = InputSwitchEnterMaxSpeed;
     private const float SoftMagnetOffsetBlendSpeed = 18.0f;
-    private const float InputFistConfirmSeconds = 0.070f;
+    private const float InputFistConfirmSeconds = 0.015f;
 
     // Magnetic Grid Snap + Auto-Separate Zero-GC (Tahap 9: spiral search berjarak aman port kiri-kanan)
     private const float AssemblyGridBaseStepX = 0.46f;
@@ -198,9 +219,9 @@ public class AirWeavingController : MonoBehaviour
 
     // Radius akses lega + Screen-Space Minimum Hitbox Floor (Fist badan gerbang & sakelar Input A/B)
     private const float MinScreenSpaceHitboxScale = 0.82f;
-    private const float GateHoverGrabRadius = 0.220f;
-    private const float ParkedGateHoverRadius = 0.245f;
-    private const float InputAirTapRadius = 0.225f;
+    private const float GateHoverGrabRadius = 0.265f;
+    private const float ParkedGateHoverRadius = 0.280f;
+    private const float InputAirTapRadius = 0.285f;
     private const float InputAirTapRearmRadius = InputAirTapRadius * 1.35f;
     private const float InputAirTapCooldownSeconds = 0.38f;
     private const float InputTouchRippleDuration = 0.34f;
@@ -490,6 +511,13 @@ public class AirWeavingController : MonoBehaviour
     private float secondaryMissingTimer = 0f;
     private TrackedHandedness secondarySlotHandedness = TrackedHandedness.Unknown;
     private Vector2 lastSecondaryPalmNormXY = new Vector2(0.5f, 0.5f);
+    // Temporal Entry (3 frame stabil dalam radius 0.16) & Anti-Teleport (tolak 1-2 frame lonjakan di luar gate) per slot
+    private int primaryEntryStableFrames = 0;
+    private Vector2 primaryEntryAnchorPalmNormXY = new Vector2(0.5f, 0.5f);
+    private int secondaryEntryStableFrames = 0;
+    private Vector2 secondaryEntryAnchorPalmNormXY = new Vector2(0.5f, 0.5f);
+    private int primaryTeleportRejectFrames = 0;
+    private int secondaryTeleportRejectFrames = 0;
     private readonly Vector3[] pinchRingPoints = new Vector3[PinchRingSegments];
     private readonly Vector3[] hoverRingPoints = new Vector3[HoverRingSegments];
 
@@ -579,6 +607,8 @@ public class AirWeavingController : MonoBehaviour
         public readonly List<Landmark> worldLandmarks = new List<Landmark>(LandmarkCount);
         public bool hasWorldLandmarks;
         public TrackedHandedness handedness;
+        public float handednessScore;
+        public float palmScale;
     }
 
     private sealed class WorkerInferenceSnapshot
@@ -2009,10 +2039,14 @@ public class AirWeavingController : MonoBehaviour
         primarySlotActive = false;
         primaryMissedLastInference = false;
         primaryMissingTimer = 0f;
+        primaryEntryStableFrames = 0;
+        primaryTeleportRejectFrames = 0;
         primarySlotHandedness = TrackedHandedness.Unknown;
         secondarySlotActive = false;
         secondaryMissedLastInference = false;
         secondaryMissingTimer = 0f;
+        secondaryEntryStableFrames = 0;
+        secondaryTeleportRejectFrames = 0;
         secondarySlotHandedness = TrackedHandedness.Unknown;
         rawPinching = false;
         isPinching = false;
@@ -3396,6 +3430,12 @@ public class AirWeavingController : MonoBehaviour
             rawPushY = Mathf.Clamp01((viewportY - (1f - EdgePanStripFraction)) / EdgePanStripFraction);
         }
 
+        // Saat GateGrab, tarik gerbang ke rak atas tidak boleh mendorong meja turun: matikan Edge-Pan vertikal ke atas
+        if (isCarryingGate && rawPushY > 0f)
+        {
+            rawPushY = 0f;
+        }
+
         Vector2 rawEdgePush = new Vector2(rawPushX, rawPushY);
         float edgeMag = rawEdgePush.magnitude;
         if (edgeMag <= 0.005f)
@@ -3567,6 +3607,16 @@ public class AirWeavingController : MonoBehaviour
                     {
                         Vector3 stageLocal3D = stageRoot.InverseTransformPoint(targetWorldPos);
                         targetStageXZ = new Vector2(stageLocal3D.x, stageLocal3D.z);
+                        // (stageX, stageZ) dari ray-plane kamera->kepalan pada bidang hover angkat: bebas inversi Z-depth webcam
+                        if (stageController.TryIntersectHandWithHoverPlane(
+                                mainCam,
+                                grabPalmWorldPos,
+                                BaseHoverHeight + GrabExtraLiftHeight,
+                                out Vector2 grabPlaneStageXZ,
+                                out _))
+                        {
+                            targetStageXZ = grabPlaneStageXZ;
+                        }
                         float defaultLiftedY = ComputeArenaBaseHoverHeightY(targetStageXZ, aspectScale, grabbed.slotIndex) + GrabExtraLiftHeight;
                         // Beri bobot elevasi 3D nyata (0.90) agar maju-mundur tangan mengatur tinggi/kedalaman gerbang secara langsung
                         liftedTargetHeightY = Mathf.Clamp(Mathf.Lerp(defaultLiftedY, stageLocal3D.y, 0.90f), MinGrabTableLocalY, MaxGrabTableLocalY);
@@ -4414,7 +4464,9 @@ public class AirWeavingController : MonoBehaviour
         }
 
         float fallbackScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, MinScreenSpaceHitboxScale, 6.0f) : 1f;
-        Vector2 rawPalmXY = detector.PalmCursorLocalXY;
+        // Saat mengepal, pakai kursor stabil (latched pra-kepal) agar pergeseran pusat telapak tidak menggeser hit-test sakelar
+        bool fistRisingEdge = detector.FistJustStarted;
+        Vector2 rawPalmXY = detector.IsFistActive ? detector.StabilizedCursorLocalXY : detector.PalmCursorLocalXY;
 
         bool inputABehind = false;
         float scaleA = fallbackScale;
@@ -4466,7 +4518,7 @@ public class AirWeavingController : MonoBehaviour
         // Gerbang Quality Gate, Exclusive Arbiter, & Anti-Pinch (cegah tangan saat transisi mode 2 tangan / cubit kabel)
         float palmSpeed = detector.CursorSpeedUnitsPerSec;
         bool gateAllowed = !detector.IsPinchActive
-                           && !detector.IsPrePinchSuppressingSummon
+                           && (!detector.IsPrePinchSuppressingSummon || detector.IsFistActive)
                            && detector.IsQualityGatePassing
                            && !isTwoHandConfirming
                            && (isOwner || (activeInteractionMode == ActiveInteractionMode.Idle && neutralCooldownTimer <= 0f));
@@ -4489,6 +4541,22 @@ public class AirWeavingController : MonoBehaviour
                 ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
             }
             return;
+        }
+
+        // Arm edge-trigger saat tangan terbuka berada dalam radius rearm (bukan hanya radius tap) agar kepalan yang mulai
+        // terbentuk di tepi zona sakelar tetap diterima (tanpa menunggu tangan masuk tepat ke pusat terminal)
+        if (!detector.IsFistActive)
+        {
+            if (inputANode != null && !inputABehind && rawDistA <= scaledRearmRadiusA)
+            {
+                inputARequiresExitRearmBySlot[handSlot] = false;
+                inputAReadyForFistBySlot[handSlot] = true;
+            }
+            if (inputBNode != null && !inputBBehind && rawDistB <= scaledRearmRadiusB)
+            {
+                inputBRequiresExitRearmBySlot[handSlot] = false;
+                inputBReadyForFistBySlot[handSlot] = true;
+            }
         }
 
         // Soft Magnetic Aim-Assist kalem menuju terminal Input A/B terdekat
@@ -4516,8 +4584,15 @@ public class AirWeavingController : MonoBehaviour
         float distA = inputABehind ? float.MaxValue : Vector2.Distance(assistedPalmXY, inputAXY);
         float distB = inputBBehind ? float.MaxValue : Vector2.Distance(assistedPalmXY, inputBXY);
 
-        bool inA = !inputABehind && distA <= scaledTapRadiusA && inputANode != null;
-        bool inB = !inputBBehind && distB <= scaledTapRadiusB && inputBNode != null;
+        // Toleransi tepi: kepalan yang sudah ter-arm boleh dikonfirmasi hingga radius magnet (bukan hanya radius tap)
+        float effTapRadiusA = (detector.IsFistActive && inputAReadyForFistBySlot[handSlot])
+            ? Mathf.Max(scaledTapRadiusA, scaledMagnetRadiusA)
+            : scaledTapRadiusA;
+        float effTapRadiusB = (detector.IsFistActive && inputBReadyForFistBySlot[handSlot])
+            ? Mathf.Max(scaledTapRadiusB, scaledMagnetRadiusB)
+            : scaledTapRadiusB;
+        bool inA = !inputABehind && distA <= effTapRadiusA && inputANode != null;
+        bool inB = !inputBBehind && distB <= effTapRadiusB && inputBNode != null;
 
         if (inA && (!inB || distA <= distB))
         {
@@ -4541,7 +4616,7 @@ public class AirWeavingController : MonoBehaviour
             else if (inputAReadyForFistBySlot[handSlot]
                      && !inputARequiresExitRearmBySlot[handSlot]
                      && inputATapCooldown <= 0f
-                     && (isOwner || speedAllowed))
+                     && (isOwner || speedAllowed || fistRisingEdge))
             {
                 if (activeInteractionMode == ActiveInteractionMode.Idle)
                 {
@@ -4554,7 +4629,8 @@ public class AirWeavingController : MonoBehaviour
                 {
                     inputADwellTimers[handSlot] += dt;
                     inputPushProgressBySlot[handSlot] = Mathf.Clamp01(0.25f + (0.75f * (inputADwellTimers[handSlot] / InputFistConfirmSeconds)));
-                    if (inputADwellTimers[handSlot] >= InputFistConfirmSeconds)
+                    // Toggle instan pada rising-edge kepalan (fallback dwell InputFistConfirmSeconds)
+                    if (fistRisingEdge || inputADwellTimers[handSlot] >= InputFistConfirmSeconds)
                     {
                         inputADwellTimers[handSlot] = 0f;
                         inputARequiresExitRearmBySlot[handSlot] = true;
@@ -4600,7 +4676,7 @@ public class AirWeavingController : MonoBehaviour
             else if (inputBReadyForFistBySlot[handSlot]
                      && !inputBRequiresExitRearmBySlot[handSlot]
                      && inputBTapCooldown <= 0f
-                     && (isOwner || speedAllowed))
+                     && (isOwner || speedAllowed || fistRisingEdge))
             {
                 if (activeInteractionMode == ActiveInteractionMode.Idle)
                 {
@@ -4613,7 +4689,8 @@ public class AirWeavingController : MonoBehaviour
                 {
                     inputBDwellTimers[handSlot] += dt;
                     inputPushProgressBySlot[handSlot] = Mathf.Clamp01(0.25f + (0.75f * (inputBDwellTimers[handSlot] / InputFistConfirmSeconds)));
-                    if (inputBDwellTimers[handSlot] >= InputFistConfirmSeconds)
+                    // Toggle instan pada rising-edge kepalan (fallback dwell InputFistConfirmSeconds)
+                    if (fistRisingEdge || inputBDwellTimers[handSlot] >= InputFistConfirmSeconds)
                     {
                         inputBDwellTimers[handSlot] = 0f;
                         inputBRequiresExitRearmBySlot[handSlot] = true;
@@ -5799,7 +5876,8 @@ public class AirWeavingController : MonoBehaviour
                 }
 
                 WorkerInferenceSnapshot dstSnap = resultSlots[workerWriteResultIdx];
-                PopulateWorkerSnapshot(dstSnap, detected, tsMs, errMsg);
+                float workerFrameAspect = (dstH > 0) ? ((float)dstW / dstH) : 1f;
+                PopulateWorkerSnapshot(dstSnap, detected, tsMs, errMsg, workerFrameAspect);
 
                 lock (workerResultLock)
                 {
@@ -5819,7 +5897,7 @@ public class AirWeavingController : MonoBehaviour
         }
     }
 
-    private void PopulateWorkerSnapshot(WorkerInferenceSnapshot dstSnap, bool detected, long tsMs, string errMsg)
+    private void PopulateWorkerSnapshot(WorkerInferenceSnapshot dstSnap, bool detected, long tsMs, string errMsg, float frameAspect)
     {
         dstSnap.timestampMs = tsMs;
         dstSnap.errorMessage = errMsg;
@@ -5831,12 +5909,25 @@ public class AirWeavingController : MonoBehaviour
             for (int h = 0; h < count && validCount < 2; h++)
             {
                 List<NormalizedLandmark> cand = cachedResult.handLandmarks[h].landmarks;
-                if (!IsValidHandLandmarkCandidateWorker(cand))
+                List<Landmark> candWorld = (cachedResult.handWorldLandmarks != null && h < cachedResult.handWorldLandmarks.Count)
+                    ? cachedResult.handWorldLandmarks[h].landmarks
+                    : null;
+                if (!IsValidHandLandmarkCandidateWorker(cand, candWorld, frameAspect, out float candPalmScale))
+                {
+                    continue;
+                }
+
+                // Anti-Wajah: lantai skor handedness absolut (tangan utama terkunci); ambang entry 0.65 diterapkan di main thread
+                TrackedHandedness candHandedness = ExtractHandednessWorker(h, out float candHandednessScore);
+                if (candHandednessScore < HandednessLockedMinScore)
                 {
                     continue;
                 }
 
                 WorkerHandRecord rec = dstSnap.hands[validCount];
+                rec.handedness = candHandedness;
+                rec.handednessScore = candHandednessScore;
+                rec.palmScale = candPalmScale;
                 rec.landmarks.Clear();
                 for (int k = 0; k < LandmarkCount; k++)
                 {
@@ -5858,7 +5949,6 @@ public class AirWeavingController : MonoBehaviour
                     }
                 }
 
-                rec.handedness = ExtractHandednessWorker(h);
                 validCount++;
             }
         }
@@ -5908,8 +5998,53 @@ public class AirWeavingController : MonoBehaviour
             {
                 secondaryMissedLastInference = true;
             }
+            primaryEntryStableFrames = 0;
+            secondaryEntryStableFrames = 0;
             return true;
         }
+
+        // Anti-Wajah kandidat tangan ke-2: tolak bila handedness < 0.65, terlalu dekat (< 0.12) dengan tangan ke-1,
+        // atau skala telapaknya < 0.45x tangan ke-1 (ciri khas false-positive wajah / bayangan di sekitar tangan utama)
+        if (validHandCount >= 2)
+        {
+            WorkerHandRecord cand0 = snap.hands[0];
+            WorkerHandRecord cand1 = snap.hands[1];
+            Vector2 candPalm0 = ComputeNormalizedPalmCenter(cand0.landmarks);
+            Vector2 candPalm1 = ComputeNormalizedPalmCenter(cand1.landmarks);
+
+            bool refIsCand1;
+            if (primarySlotActive)
+            {
+                refIsCand1 = (candPalm1 - lastPrimaryPalmNormXY).sqrMagnitude < (candPalm0 - lastPrimaryPalmNormXY).sqrMagnitude;
+            }
+            else
+            {
+                refIsCand1 = cand1.handednessScore > cand0.handednessScore;
+            }
+
+            WorkerHandRecord refRec = refIsCand1 ? cand1 : cand0;
+            WorkerHandRecord otherRec = refIsCand1 ? cand0 : cand1;
+            float palmDist = (candPalm1 - candPalm0).magnitude;
+            bool rejectSecondCandidate = (otherRec.handednessScore < HandednessEntryMinScore)
+                                         || (palmDist < SecondCandidateMinPalmDistNorm)
+                                         || (otherRec.palmScale < (refRec.palmScale * SecondCandidateMinPalmScaleRatio));
+            if (rejectSecondCandidate)
+            {
+                if (refIsCand1)
+                {
+                    // Tukar referensi record (pool tetap, Zero-GC) agar tangan ke-1 berada di indeks 0
+                    snap.hands[0] = cand1;
+                    snap.hands[1] = cand0;
+                }
+                validHandCount = 1;
+            }
+        }
+
+        // Simpan state asosiasi sebelumnya untuk rollback saat frame lonjakan (anti-teleport) ditolak
+        Vector2 prevPrimaryPalmNormXY = lastPrimaryPalmNormXY;
+        Vector2 prevSecondaryPalmNormXY = lastSecondaryPalmNormXY;
+        TrackedHandedness prevPrimarySlotHandedness = primarySlotHandedness;
+        TrackedHandedness prevSecondarySlotHandedness = secondarySlotHandedness;
 
         // Stabilisasi Dual-Hand berbasis handedness (skor >= 0.70) + nearest-palm + gating radius + anti-swap & anti-promosi paksa
         int primarySourceIndex = -1;
@@ -6118,10 +6253,110 @@ public class AirWeavingController : MonoBehaviour
 
         timeSinceLastValidHand = 0f;
 
+        // Anti-Wajah handedness: entry slot baru & seluruh kandidat slot sekunder wajib >= 0.65 (primer terkunci >= 0.50 di worker)
+        if (primarySourceIndex >= 0
+            && !primarySlotActive
+            && snap.hands[primarySourceIndex].handednessScore < HandednessEntryMinScore)
+        {
+            primarySourceIndex = -1;
+            lastPrimaryPalmNormXY = prevPrimaryPalmNormXY;
+            primarySlotHandedness = prevPrimarySlotHandedness;
+        }
+        if (secondarySourceIndex >= 0
+            && snap.hands[secondarySourceIndex].handednessScore < HandednessEntryMinScore)
+        {
+            secondarySourceIndex = -1;
+            lastSecondaryPalmNormXY = prevSecondaryPalmNormXY;
+            secondarySlotHandedness = prevSecondarySlotHandedness;
+        }
+
+        // Temporal Entry: slot baru wajib stabil 3 frame berturut-turut dalam radius 0.16 sebelum skeleton/reticle tampil
+        if (!primarySlotActive)
+        {
+            if (primarySourceIndex >= 0)
+            {
+                Vector2 entryPalm = ComputeNormalizedPalmCenter(snap.hands[primarySourceIndex].landmarks);
+                if (primaryEntryStableFrames > 0
+                    && (entryPalm - primaryEntryAnchorPalmNormXY).sqrMagnitude <= (HandSlotEntryStableRadiusNorm * HandSlotEntryStableRadiusNorm))
+                {
+                    primaryEntryStableFrames++;
+                }
+                else
+                {
+                    primaryEntryStableFrames = 1;
+                }
+                primaryEntryAnchorPalmNormXY = entryPalm;
+                if (primaryEntryStableFrames < HandSlotEntryRequiredStableFrames)
+                {
+                    primarySourceIndex = -1;
+                }
+            }
+            else
+            {
+                primaryEntryStableFrames = 0;
+            }
+        }
+        if (!secondarySlotActive)
+        {
+            if (secondarySourceIndex >= 0)
+            {
+                Vector2 entryPalm = ComputeNormalizedPalmCenter(snap.hands[secondarySourceIndex].landmarks);
+                if (secondaryEntryStableFrames > 0
+                    && (entryPalm - secondaryEntryAnchorPalmNormXY).sqrMagnitude <= (HandSlotEntryStableRadiusNorm * HandSlotEntryStableRadiusNorm))
+                {
+                    secondaryEntryStableFrames++;
+                }
+                else
+                {
+                    secondaryEntryStableFrames = 1;
+                }
+                secondaryEntryAnchorPalmNormXY = entryPalm;
+                if (secondaryEntryStableFrames < HandSlotEntryRequiredStableFrames)
+                {
+                    secondarySourceIndex = -1;
+                }
+            }
+            else
+            {
+                secondaryEntryStableFrames = 0;
+            }
+        }
+
+        // Anti-Teleport: slot aktif yang melompat di luar gate -> tolak 1-2 frame lonjakan (rollback asosiasi), terima di frame ke-3
+        if (primarySourceIndex >= 0 && primarySlotActive)
+        {
+            if (primaryJumpedOutsideGate && primaryTeleportRejectFrames < HandSlotMaxTeleportRejectFrames)
+            {
+                primaryTeleportRejectFrames++;
+                primarySourceIndex = -1;
+                lastPrimaryPalmNormXY = prevPrimaryPalmNormXY;
+                primarySlotHandedness = prevPrimarySlotHandedness;
+            }
+            else if (!primaryJumpedOutsideGate)
+            {
+                primaryTeleportRejectFrames = 0;
+            }
+        }
+        if (secondarySourceIndex >= 0 && secondarySlotActive)
+        {
+            if (secondaryJumpedOutsideGate && secondaryTeleportRejectFrames < HandSlotMaxTeleportRejectFrames)
+            {
+                secondaryTeleportRejectFrames++;
+                secondarySourceIndex = -1;
+                lastSecondaryPalmNormXY = prevSecondaryPalmNormXY;
+                secondarySlotHandedness = prevSecondarySlotHandedness;
+            }
+            else if (!secondaryJumpedOutsideGate)
+            {
+                secondaryTeleportRejectFrames = 0;
+            }
+        }
+
         if (primarySourceIndex >= 0)
         {
             if (primaryJumpedOutsideGate && primarySlotActive)
             {
+                primaryTeleportRejectFrames = 0;
                 ResetLandmarkOneEuroFilters();
                 handGestureDetector.RestartEntryWarmup();
             }
@@ -6151,6 +6386,7 @@ public class AirWeavingController : MonoBehaviour
         {
             if (secondaryJumpedOutsideGate && secondarySlotActive)
             {
+                secondaryTeleportRejectFrames = 0;
                 ResetSecondaryLandmarkOneEuroFilters();
                 secondaryHandGestureDetector.RestartEntryWarmup();
             }
@@ -6221,6 +6457,8 @@ public class AirWeavingController : MonoBehaviour
         primarySlotActive = false;
         primaryMissedLastInference = false;
         primaryMissingTimer = 0f;
+        primaryEntryStableFrames = 0;
+        primaryTeleportRejectFrames = 0;
         primarySlotHandedness = TrackedHandedness.Unknown;
         isHandDetected = false;
         wasHandDetected = false;
@@ -6249,6 +6487,8 @@ public class AirWeavingController : MonoBehaviour
         secondarySlotActive = false;
         secondaryMissedLastInference = false;
         secondaryMissingTimer = 0f;
+        secondaryEntryStableFrames = 0;
+        secondaryTeleportRejectFrames = 0;
         secondarySlotHandedness = TrackedHandedness.Unknown;
         isSecondaryHandDetected = false;
         wasSecondaryHandDetected = false;
@@ -6269,33 +6509,127 @@ public class AirWeavingController : MonoBehaviour
         ResetSecondaryLandmarkOneEuroFilters();
     }
 
-    private static bool IsValidHandLandmarkCandidateWorker(List<NormalizedLandmark> landmarks)
+    private static bool IsValidHandLandmarkCandidateWorker(
+        List<NormalizedLandmark> landmarks,
+        List<Landmark> worldLandmarks,
+        float frameAspect,
+        out float palmScale)
     {
+        palmScale = 0f;
         if (landmarks == null || landmarks.Count < LandmarkCount)
         {
             return false;
+        }
+
+        // 1. Ke-21 titik wajib terhingga & berada dalam bingkai longgar [-0.15, 1.15] (Zero-GC, tanpa alokasi)
+        for (int i = 0; i < LandmarkCount; i++)
+        {
+            NormalizedLandmark lm = landmarks[i];
+            if (float.IsNaN(lm.x) || float.IsNaN(lm.y) || float.IsInfinity(lm.x) || float.IsInfinity(lm.y))
+            {
+                return false;
+            }
+            if (lm.x < CandidateLandmarkMinNorm || lm.x > CandidateLandmarkMaxNorm
+                || lm.y < CandidateLandmarkMinNorm || lm.y > CandidateLandmarkMaxNorm)
+            {
+                return false;
+            }
         }
 
         NormalizedLandmark l0 = landmarks[0];
         NormalizedLandmark l5 = landmarks[5];
         NormalizedLandmark l9 = landmarks[9];
         NormalizedLandmark l17 = landmarks[17];
-        if (float.IsNaN(l0.x) || float.IsNaN(l0.y) || float.IsNaN(l9.x) || float.IsNaN(l9.y))
+
+        // Skala telapak mentah (kompatibel dengan ambang lama MinCandidateRawPalmScale)
+        float rawD09 = Dist2DWorker(l0, l9, 1f);
+        float rawD517 = Dist2DWorker(l5, l17, 1f);
+        if ((0.5f * (rawD09 + rawD517)) < MinCandidateRawPalmScale)
         {
             return false;
         }
 
-        float dx09 = l0.x - l9.x;
-        float dy09 = l0.y - l9.y;
-        float dx517 = l5.x - l17.x;
-        float dy517 = l5.y - l17.y;
-        double d09 = Math.Sqrt((dx09 * dx09) + (dy09 * dy09));
-        double d517 = Math.Sqrt((dx517 * dx517) + (dy517 * dy517));
-        return (0.5 * (d09 + d517)) >= MinCandidateRawPalmScale;
+        // 2. Rasio anatomi telapak (aspect-compensated agar tidak bias orientasi pada frame 16:9)
+        float aspect = Mathf.Clamp(frameAspect, 0.25f, 4.0f);
+        float d09 = Dist2DWorker(l0, l9, aspect);
+        float d517 = Dist2DWorker(l5, l17, aspect);
+        float d05 = Dist2DWorker(l0, l5, aspect);
+        float d017 = Dist2DWorker(l0, l17, aspect);
+        if (d09 < 1e-5f || d517 < 1e-5f)
+        {
+            return false;
+        }
+
+        float r09To517 = d09 / d517;
+        float r05To09 = d05 / d09;
+        float r017To09 = d017 / d09;
+        if (r09To517 < CandidateMinRatioD09ToD517 || r09To517 > CandidateMaxRatioD09ToD517
+            || r05To09 < CandidateMinRatioD05ToD09 || r05To09 > CandidateMaxRatioD05ToD09
+            || r017To09 < CandidateMinRatioD017ToD09 || r017To09 > CandidateMaxRatioD017ToD09)
+        {
+            return false;
+        }
+
+        float scale = 0.5f * (d09 + d517);
+
+        // 3. Luas segitiga telapak (0,5,17) via cross-product 2D: tolak susunan kolinear/degeneratif (fitur wajah)
+        float ax = (l5.x - l0.x) * aspect;
+        float ay = l5.y - l0.y;
+        float bx = (l17.x - l0.x) * aspect;
+        float by = l17.y - l0.y;
+        float triArea = 0.5f * Mathf.Abs((ax * by) - (ay * bx));
+        if (triArea < (CandidateMinPalmTriangleAreaFactor * scale * scale))
+        {
+            return false;
+        }
+
+        // 4. Proporsi tulang proksimal (MCP->PIP) telunjuk, tengah, manis relatif skala telapak
+        float bone5 = Dist2DWorker(l5, landmarks[6], aspect) / scale;
+        float bone9 = Dist2DWorker(l9, landmarks[10], aspect) / scale;
+        float bone13 = Dist2DWorker(landmarks[13], landmarks[14], aspect) / scale;
+        if (bone5 < CandidateMinProximalBoneRatio || bone5 > CandidateMaxProximalBoneRatio
+            || bone9 < CandidateMinProximalBoneRatio || bone9 > CandidateMaxProximalBoneRatio
+            || bone13 < CandidateMinProximalBoneRatio || bone13 > CandidateMaxProximalBoneRatio)
+        {
+            return false;
+        }
+
+        // 5. Bentang telapak metrik 3D (bila world landmarks tersedia) wajib dalam rentang tangan manusia nyata
+        if (worldLandmarks != null && worldLandmarks.Count >= LandmarkCount)
+        {
+            Landmark w0 = worldLandmarks[0];
+            Landmark w5 = worldLandmarks[5];
+            Landmark w9 = worldLandmarks[9];
+            Landmark w17 = worldLandmarks[17];
+            float wdx09 = w0.x - w9.x;
+            float wdy09 = w0.y - w9.y;
+            float wdz09 = w0.z - w9.z;
+            float wdx517 = w5.x - w17.x;
+            float wdy517 = w5.y - w17.y;
+            float wdz517 = w5.z - w17.z;
+            float rawSpan3D = 0.5f * (Mathf.Sqrt((wdx09 * wdx09) + (wdy09 * wdy09) + (wdz09 * wdz09))
+                                      + Mathf.Sqrt((wdx517 * wdx517) + (wdy517 * wdy517) + (wdz517 * wdz517)));
+            if (float.IsNaN(rawSpan3D) || float.IsInfinity(rawSpan3D)
+                || rawSpan3D < CandidateMinWorldPalmSpanMeters || rawSpan3D > CandidateMaxWorldPalmSpanMeters)
+            {
+                return false;
+            }
+        }
+
+        palmScale = scale;
+        return true;
     }
 
-    private TrackedHandedness ExtractHandednessWorker(int sourceIndex)
+    private static float Dist2DWorker(NormalizedLandmark a, NormalizedLandmark b, float aspectX)
     {
+        float dx = (a.x - b.x) * aspectX;
+        float dy = a.y - b.y;
+        return Mathf.Sqrt((dx * dx) + (dy * dy));
+    }
+
+    private TrackedHandedness ExtractHandednessWorker(int sourceIndex, out float score)
+    {
+        score = 0f;
         if (cachedResult.handedness == null || sourceIndex < 0 || sourceIndex >= cachedResult.handedness.Count)
         {
             return TrackedHandedness.Unknown;
@@ -6318,6 +6652,7 @@ public class AirWeavingController : MonoBehaviour
             }
         }
 
+        score = (float.IsNaN(bestScore) || float.IsInfinity(bestScore)) ? 0f : bestScore;
         if (bestScore < HandednessConfidenceThreshold)
         {
             return TrackedHandedness.Unknown;
@@ -9084,10 +9419,14 @@ public class AirWeavingController : MonoBehaviour
         primarySlotActive = false;
         primaryMissedLastInference = false;
         primaryMissingTimer = 0f;
+        primaryEntryStableFrames = 0;
+        primaryTeleportRejectFrames = 0;
         primarySlotHandedness = TrackedHandedness.Unknown;
         secondarySlotActive = false;
         secondaryMissedLastInference = false;
         secondaryMissingTimer = 0f;
+        secondaryEntryStableFrames = 0;
+        secondaryTeleportRejectFrames = 0;
         secondarySlotHandedness = TrackedHandedness.Unknown;
         rawPinching = false;
         isPinching = false;

@@ -4,7 +4,7 @@ using Landmark = Mediapipe.Tasks.Components.Containers.Landmark;
 using NormalizedLandmark = Mediapipe.Tasks.Components.Containers.NormalizedLandmark;
 
 /// <summary>
-/// Detektor gestur dual-kanal 3D Metrik untuk GateWeaver AR v8.0 (Tahap 5.5 — Overhaul Presisi Tracking):
+/// Detektor gestur dual-kanal 3D Metrik untuk GateWeaver AR v8.0 (Tahap 5.5 - Overhaul Presisi Tracking):
 /// - Klasifikasi utama berbasis <c>handWorldLandmarks</c> (3D meter sejati, kebal perspektif &amp; rotasi telapak) dengan
 ///   fallback 2D aspect-compensated otomatis bila <c>handWorldLandmarks</c> kosong.
 /// - Tekukan tiap jari dihitung melalui sudut sendi 3D (dot product vektor <c>Wrist-&gt;MCP</c>, <c>MCP-&gt;PIP</c>,
@@ -276,7 +276,7 @@ public sealed class AirWeavingHandGestureDetector
     private const float CursorOneEuroDCutoff = 1.75f;
     private const float CursorOneEuroWorldSpeedScale = 22.0f;
 
-    // Parameter True 3D Hand Depth Tracking (Monocular Z-Depth Logaritmik + Baseline Adaptif — Tahap 8 v8.0)
+    // Parameter True 3D Hand Depth Tracking (Monocular Z-Depth Logaritmik + Baseline Adaptif - Tahap 8 v8.0)
     public const float DefaultComfortPalmSpan = 0.172f;
     private const float MinRigidPalmSpanClamp = 0.030f;
     private const float MaxRigidPalmSpanClamp = 0.620f;
@@ -294,7 +294,7 @@ public sealed class AirWeavingHandGestureDetector
     private const float DepthLogMicroDeadzone = 0.024f;
     private const float IndexPokeEmaTauSeconds = 0.030f;
 
-    // Ambang sudut sendi 3D per jari (derajat) — kebal jarak kamera & rotasi miring
+    // Ambang sudut sendi 3D per jari (derajat) - kebal jarak kamera & rotasi miring
     private const float FingerExtendMaxPipDipDeg = 48.0f;
     private const float FingerExtendMaxWeightedDeg = 68.0f;
     private const float FingerExtendMinPalmRatio = 1.04f;
@@ -318,6 +318,7 @@ public sealed class AirWeavingHandGestureDetector
     private const float FingerDorsalFoldClampPalmRatio = 0.88f;
     private const float FistIndexMinWeightedBendDeg = 85.0f;
     private const float ThumbBlockFistMinIndexRatio = 0.78f;
+    private const float FistDominantPinchTipGuardRatio = 0.30f;
 
     // Ambang Kanal Objek (Fist / Kepal 3D + Dorsal 2D): keempat jari utama menekuk tegas + sticky-drag hysteresis lebar
     private const float FistEnterMeanWeightedBendDeg = 94.0f;
@@ -987,6 +988,7 @@ public sealed class AirWeavingHandGestureDetector
         bool ringFirmlyFolded = false;
         bool pinkyFirmlyFolded = false;
         bool indexDorsalRadialFolded2D = false;
+        bool indexTipTuckedRadial2D = false;
         float indexSmoothPalmRatio = 1.40f;
         float indexSmoothPipDipDeg = 20.0f;
         float indexSmoothWeightedDeg = 25.0f;
@@ -1056,6 +1058,7 @@ public sealed class AirWeavingHandGestureDetector
             {
                 indexFirmlyFolded = isFirmlyFolded;
                 indexDorsalRadialFolded2D = isDorsalRadialFolded2D;
+                indexTipTuckedRadial2D = tipToWrist2D <= (pipToWrist2D * 0.98f);
                 indexSmoothPalmRatio = effectivePalmRatio;
                 indexSmoothPipDipDeg = smoothPipDip;
                 indexSmoothWeightedDeg = effectiveWeighted;
@@ -1175,9 +1178,15 @@ public sealed class AirWeavingHandGestureDetector
                                   || (middleFirmlyFolded && (ringFirmlyFolded || pinkyFirmlyFolded));
         bool indexFoldedTowardPalm = !idxExt
                                      && ((indexSmoothWeightedDeg >= FistIndexMinWeightedBendDeg) || indexDorsalRadialFolded2D);
+        // Postur cubit ujung-ke-ujung (#4-#8 rapat 2D & 3D) dengan ujung telunjuk belum terselip melewati PIP ke arah
+        // pergelangan adalah Pinch kabel santai (jari lain boleh terlipat), BUKAN kepalan: jangan biarkan Fist membajaknya.
+        bool isTipToTipPinchPosture = !indexTipTuckedRadial2D
+                                      && (pinchRatio3DTip < FistDominantPinchTipGuardRatio)
+                                      && (pinchRatio2DTip < FistDominantPinchTipGuardRatio);
         bool isFistAnatomyDominant = !isPinchActive
                                      && nonIndexFistFolded
                                      && indexFoldedTowardPalm
+                                     && !isTipToTipPinchPosture
                                      && (meanWeightedBendDeg >= FistEnterMeanWeightedBendDeg);
 
         // Deteksi anatomi tegas OneFingerAnd (telunjuk lurus tegas) & ThumbOnlyNot (jempol terbentang jelas, 4 jari menekuk):
@@ -1520,7 +1529,7 @@ public sealed class AirWeavingHandGestureDetector
         bool qualityGateOk = relaxEdgeDeadzoneForTwoHand ? IsTwoHandQualityGatePassing : IsQualityGatePassing;
 
         // ---------------------------------------------------------------------
-        // KANAL 1: PINCH / CUBIT 3D (KHUSUS KABEL — DISJOINT DARI FIST)
+        // KANAL 1: PINCH / CUBIT 3D (KHUSUS KABEL - DISJOINT DARI FIST)
         // ---------------------------------------------------------------------
         if (!isPinchActive)
         {
@@ -1613,7 +1622,7 @@ public sealed class AirWeavingHandGestureDetector
         }
 
         // ---------------------------------------------------------------------
-        // KANAL 2: FIST / KEPAL 3D (KHUSUS OBJEK — 4 JARI MENEKUK TEGAS)
+        // KANAL 2: FIST / KEPAL 3D (KHUSUS OBJEK - 4 JARI MENEKUK TEGAS)
         // ---------------------------------------------------------------------
         if (!isFistActive)
         {
@@ -1695,7 +1704,7 @@ public sealed class AirWeavingHandGestureDetector
             isPreFistCurling = false;
             enterHoldTimer = 0f;
 
-            // Sticky-Drag 3D: sudut rata-rata membuka di bawah 80° (atau 86° normal) & <= 1 jari tertekuk, adaptif 55-115 ms
+            // Sticky-Drag 3D: sudut rata-rata membuka di bawah 80 deg (atau 86 deg normal) & <= 1 jari tertekuk, adaptif 55-115 ms
             bool exitMet = isFistStickyHoldActive
                 ? (meanWeightedBendDeg < FistStickyExitMeanWeightedBendDeg && foldedFingerCount <= 1)
                 : rawExitCondition;

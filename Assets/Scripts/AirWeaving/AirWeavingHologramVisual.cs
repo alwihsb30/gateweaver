@@ -31,6 +31,11 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private const float DropDeckMarginX = 4.35f;
     private const float DropDeckMarginZMin = -2.85f;
     private const float DropDeckMarginZMax = 3.05f;
+    private const float DropLineAssemblyMaxAbsX = 2.05f;
+    private const float DropLineAssemblyMinZ = -1.60f;
+    private const float DropLineAssemblyMaxZ = 1.04f;
+    private const float DropLineMaxHeight = 0.38f;
+    private const float DropLineMaxLocalY = 0.55f;
 
     // One-Euro Filter 3D Zero-GC untuk 21 titik visual skeleton tangan Tahap 8 (selaras 1:1 kursor, responsif & bebas jitter webcam)
     private const float SkeletonOneEuroMinCutoff = 1.70f;
@@ -44,7 +49,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private const float FadeDisableEpsilon = 0.015f;
 
     // Kompensasi jarak kamera konstan (constant angular/screen-space size) agar reticle kursor tetap kecil & presisi
-    // pada semua sudut orbit 360° & kedalaman zoom dekat/jauh tanpa mewarisi skala HologramStageRoot.
+    // pada semua sudut orbit 360 deg & kedalaman zoom dekat/jauh tanpa mewarisi skala HologramStageRoot.
     private const float ReticleReferenceCameraDistance = 3.13f;
     private const float ReticleMinDistanceScale = 0.18f;
     private const float ReticleMaxDistanceScale = 2.40f;
@@ -174,7 +179,7 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
     private PinchFadeState primaryPinchFade;
     private PinchFadeState secondaryPinchFade;
 
-    // Visual Lock 2 Tangan (Air-Orbit 360°, Air-Zoom, & Dual-Fist Reset)
+    // Visual Lock 2 Tangan (Air-Orbit 360 deg, Air-Zoom, & Dual-Fist Reset)
     private LineRenderer twoHandBeamRenderer;
     private LineRenderer twoHandAnchorARenderer;
     private LineRenderer twoHandAnchorBRenderer;
@@ -1281,7 +1286,12 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
         Material dropMat = cursorDropLineMats[handSlot];
         if (dropLr != null)
         {
-            if (absElevY > 0.030f)
+            const float maxDropLineHeight = DropLineMaxHeight;
+            bool insideAssemblyZone = localPos.x >= -DropLineAssemblyMaxAbsX
+                                      && localPos.x <= DropLineAssemblyMaxAbsX
+                                      && localPos.z >= DropLineAssemblyMinZ
+                                      && localPos.z <= DropLineAssemblyMaxZ;
+            if (signedElevY > 0.030f && localPos.y <= DropLineMaxLocalY && insideAssemblyZone)
             {
                 float lineAlpha = Mathf.Lerp(0.56f, 0.20f, heightNorm);
                 Color topCol = new Color(baseCol.r, baseCol.g, baseCol.b, lineAlpha * 0.45f);
@@ -1290,11 +1300,13 @@ public sealed class AirWeavingHologramVisual : MonoBehaviour
                 {
                     dropMat.color = Color.white;
                 }
+                float clampedTopLocalY = deckY + Mathf.Min(signedElevY, maxDropLineHeight);
+                Vector3 dropTopWorldPos = stageRoot.TransformPoint(new Vector3(localPos.x, clampedTopLocalY, localPos.z));
                 dropLr.enabled = true;
                 dropLr.widthMultiplier = 0.0028f * distScale;
                 dropLr.startColor = topCol;
                 dropLr.endColor = botCol;
-                dropLr.SetPosition(0, cursorWorldPos);
+                dropLr.SetPosition(0, dropTopWorldPos);
                 dropLr.SetPosition(1, floorWorldPos);
             }
             else if (dropLr.enabled)

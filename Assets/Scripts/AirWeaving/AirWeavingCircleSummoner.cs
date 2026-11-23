@@ -5,8 +5,8 @@ using UnityEngine;
 /// - Tahap 0 (Idle + Live Pose Indicator): begitu pose sah (AND/OR/XOR/NAND/NOT) terdeteksi di area rakit,
 ///   langsung memaparkan indikator ujung jari live dan merekam jejak garis mulai titik ke-2.
 /// - Tahap 1 (Charging): memakai chord turning angle kumulatif segmen-ke-segmen (sum dHeading) yang kebal pergeseran
-///   centroid, target sapuan 185°, pose vote >= 2/3, pose lock 35°, pose dropout grace 160 ms, dan baru mengevaluasi
-///   radius (>= 0.045) serta circularity (>= 0.32) setelah sapuan >= 110°.
+///   centroid, target sapuan 185 deg, pose vote >= 2/3, pose lock 35 deg, pose dropout grace 160 ms, dan baru mengevaluasi
+///   radius (>= 0.045) serta circularity (>= 0.32) setelah sapuan >= 110 deg.
 /// - Tahap 2 (Ready -> Open-5 Bloom): mengunci pusat lingkaran (di-clamp aman ke AssemblyZone), menampilkan pratinjau
 ///   hologram selama 2.2 dtk, dan men-deploy gerbang saat telapak dibuka santai (30 ms debounce); Fist membatalkan.
 /// - 100% pure C# Zero-GC & saling eksklusif dengan kontrol Skema 2 (Open-5 kursor & Fist grab/kabel).
@@ -358,7 +358,7 @@ public sealed class AirWeavingCircleSummoner
         // Stage == Charging
         if (isOpenFive)
         {
-            // Membuka 5 jari penuh terlalu dini sebelum 185° -> kembali santai ke kursor (tidak spawn prematur)
+            // Membuka 5 jari penuh terlalu dini sebelum 185 deg -> kembali santai ke kursor (tidak spawn prematur)
             CancelToIdle();
             return;
         }
@@ -424,7 +424,7 @@ public sealed class AirWeavingCircleSummoner
             accumulatedSweepDeg = cAbsDeg;
             chargeProgress = Mathf.Clamp01(cAbsDeg / TargetSweepDegrees);
 
-            // Evaluasi ketat jumlah titik, panjang goresan, radius, & circularity setelah sapuan penuh (>= 205°)
+            // Evaluasi ketat jumlah titik, panjang goresan, radius, & circularity setelah sapuan penuh (>= 205 deg)
             bool shapeOk = !isPoseInDropout
                            && trailCount >= MinTrailPointsForCharge
                            && cTotalArcLength >= MinTotalArcLengthForReady
@@ -645,7 +645,7 @@ public sealed class AirWeavingCircleSummoner
                 }
                 else
                 {
-                    // Pembalikan tajam (> 135°) hanya menambah penyebut sehingga menurunkan koherensi zig-zag
+                    // Pembalikan tajam (> 135 deg) hanya menambah penyebut sehingga menurunkan koherensi zig-zag
                     absTurnRad += absDHeading;
                 }
             }

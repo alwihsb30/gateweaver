@@ -25,10 +25,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     public const float MaxPanOffsetX = 4.50f;
     public const float MaxPanOffsetY = 3.20f;
-    private const float MinDynamicPanOffsetX = 0.85f;
-    private const float MinDynamicPanOffsetY = 0.65f;
-    public const float MinStageDepthZ = 1.15f;
-    public const float MaxStageDepthZ = 9.50f;
+    public const float MinStageDepthZ = 2.10f;
+    public const float MaxStageDepthZ = 5.40f;
     public const float MaxPanDepthPullCloserZ = 2.67f;
     public const float MaxPanDepthPushFartherZ = 5.68f;
 
@@ -63,12 +61,16 @@ public sealed class AirWeavingStageController : MonoBehaviour
     // Parameter True Z-Axis Push/Pull Logaritmik Simetris (terpisah dari Zoom skala & Anchor 2D; log(curEstDepth / anchorEstDepth))
     private const float TwoHandDepthMinDeadzone = 0.018f;
     private const float TwoHandDepthRelativeDeadzone = 0.022f;
-    public const float TwoHandOrbitDepthGainMeters = 6.00f;
-    public const float TwoHandFreePanDepthGainMeters = 6.00f;
+    public const float TwoHandOrbitDepthGainMeters = 1.80f;
+    public const float TwoHandFreePanDepthGainMeters = 1.80f;
     private const float CarryPanDepthMinDeadzone = 0.020f;
     private const float CarryPanDepthRelativeDeadzone = 0.024f;
-    public const float CarryPanDepthGainMeters = 6.00f;
-    private const float MaxTwoHandDepthSpeedMetersPerSec = 7.50f;
+    public const float CarryPanDepthGainMeters = 1.80f;
+    private const float MaxTwoHandDepthSpeedMetersPerSec = 1.80f;
+    // Clamp sudut Orbit dua tangan relatif kemiringan bawaan: Pitch [-28, +42] deg & Roll [-25, +25] deg (Yaw tetap 360 deg bebas)
+    public const float MinOrbitPitchDeg = -28.0f;
+    public const float MaxOrbitPitchDeg = 42.0f;
+    public const float MaxOrbitRollAbsDeg = 25.0f;
 
     // Parameter Inertial Coasting Quaternion Anti-Kick (ring-buffer tertunda 55-130 ms + deadzone lepas tenang terpisah XY vs Z + zoom logaritmik)
     private const float StageCoastDamping = 6.2f;
@@ -959,8 +961,6 @@ public sealed class AirWeavingStageController : MonoBehaviour
         Vector3 axisZ = stageRotCam * (Vector3.forward * (deckHalfZ * safeZoom));
         Vector3 deckCenterOffsetCam = stageRotCam * (new Vector3(deckCenterX, deckCenterY, deckCenterZ) * safeZoom);
 
-        float worldHalfX = Mathf.Abs(axisX.x) + Mathf.Abs(axisY.x) + Mathf.Abs(axisZ.x);
-        float worldHalfY = Mathf.Abs(axisX.y) + Mathf.Abs(axisY.y) + Mathf.Abs(axisZ.y);
         float worldHalfZ = Mathf.Abs(axisX.z) + Mathf.Abs(axisY.z) + Mathf.Abs(axisZ.z);
 
         // Izinkan pivot panggung berayun penuh +/-worldHalfZ saat Focus-Point Orbit makro (10x-15x) di tepi papan,
@@ -979,10 +979,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
         float frustumHalfH = effectiveViewZ * Mathf.Tan(halfFovRad);
         float frustumHalfW = frustumHalfH * aspect;
 
-        // Pada Zoom 0.18x-15x, seluruh pojok ujung lapangan 2x (Input, Output, Rak Parkir) selalu dapat digeser hingga ke
-        // tengah layar tanpa mentok, sambil menjamin minimal sebagian dek hologram selalu tetap terlihat di dalam frustum kamera.
-        float allowedDeckCenterX = Mathf.Max(MinDynamicPanOffsetX, worldHalfX + (frustumHalfW * 0.65f));
-        float allowedDeckCenterY = Mathf.Max(MinDynamicPanOffsetY, worldHalfY + (frustumHalfH * 0.62f));
+        // Pada Zoom 0.18x-15x, pusat dek dibatasi ketat (X <= 1.65m / 55% frustum, Y <= 1.10m / 50% frustum) agar meja
+        // hologram tidak pernah terlempar keluar layar oleh Pan/Edge-Pan/Orbit; dek selalu tetap terlihat di dalam frustum.
+        float allowedDeckCenterX = Mathf.Min(1.65f, frustumHalfW * 0.55f);
+        float allowedDeckCenterY = Mathf.Min(1.10f, frustumHalfH * 0.50f);
 
         dynamicMinPanX = -allowedDeckCenterX - deckCenterOffsetCam.x;
         dynamicMaxPanX = allowedDeckCenterX - deckCenterOffsetCam.x;
@@ -1046,7 +1046,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
         Quaternion deltaCamLocal = camTransform != null
             ? (Quaternion.Inverse(camTransform.rotation) * deltaWorld * camTransform.rotation)
             : deltaWorld;
-        targetOrbitRotation = NormalizeQuaternion(deltaCamLocal * targetOrbitRotation);
+        Quaternion prevOrbitRotation = targetOrbitRotation;
+        targetOrbitRotation = ClampOrbitPitchRoll(NormalizeQuaternion(deltaCamLocal * prevOrbitRotation));
+        // Delta efektif pasca-clamp agar kompensasi Focus-Point tetap konsisten saat sudut mentok di batas Pitch/Roll
+        deltaCamLocal = NormalizeQuaternion(targetOrbitRotation * Quaternion.Inverse(prevOrbitRotation));
 
         // 4. Ultra-Wide Zoom multiplikatif (0.18x..15.0x)
         float prevZoom = Mathf.Max(MinZoomScale, targetZoomScale);
@@ -1563,7 +1566,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 if (coastingSpeedDegPerSec > CoastAngularStopSpeedDegPerSec && coastingAxis.sqrMagnitude > 0.5f)
                 {
                     coastRotDelta = Quaternion.AngleAxis(coastingSpeedDegPerSec * dt, coastingAxis);
-                    targetOrbitRotation = NormalizeQuaternion(coastRotDelta * targetOrbitRotation);
+                    targetOrbitRotation = ClampOrbitPitchRoll(NormalizeQuaternion(coastRotDelta * targetOrbitRotation));
                     didOrbitOrZoomCoast = true;
                 }
 
@@ -2723,6 +2726,24 @@ public sealed class AirWeavingStageController : MonoBehaviour
         float smooth = t * t * (3f - (2f * t));
         float gain = Mathf.Lerp(OrbitNonLinearFineFloor, 1.0f, smooth);
         return rawDeltaDeg * gain;
+    }
+
+    /// <summary>
+    /// Membatasi komponen Pitch (sumbu X kamera) ke [-28, +42] deg dan Roll (sumbu Z kamera) ke [-25, +25] deg
+    /// relatif kemiringan bawaan, sementara Yaw tetap bebas 360 deg. Zero-GC (value-type).
+    /// </summary>
+    private static Quaternion ClampOrbitPitchRoll(Quaternion q)
+    {
+        Vector3 euler = q.eulerAngles;
+        float pitch = Mathf.DeltaAngle(0f, euler.x);
+        float roll = Mathf.DeltaAngle(0f, euler.z);
+        float clampedPitch = Mathf.Clamp(pitch, MinOrbitPitchDeg, MaxOrbitPitchDeg);
+        float clampedRoll = Mathf.Clamp(roll, -MaxOrbitRollAbsDeg, MaxOrbitRollAbsDeg);
+        if (Mathf.Approximately(clampedPitch, pitch) && Mathf.Approximately(clampedRoll, roll))
+        {
+            return q;
+        }
+        return NormalizeQuaternion(Quaternion.Euler(clampedPitch, euler.y, clampedRoll));
     }
 
     private static Quaternion NormalizeQuaternion(Quaternion q)
