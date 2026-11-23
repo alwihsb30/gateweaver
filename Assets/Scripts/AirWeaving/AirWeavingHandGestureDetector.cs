@@ -255,11 +255,12 @@ public struct OneEuroFilter3D
 
 public sealed class AirWeavingHandGestureDetector
 {
-    // Quality Gate: edge deadzone longgar [0.015, 0.985] & skala telapak jarak jauh (0.032) agar tangan jauh tetap lolos
+    // Quality Gate: edge deadzone longgar [0.015, 0.985] & skala telapak minimum (0.042) anti false-positive wajah
     private const float EdgeDeadzoneMin = 0.015f;
     private const float EdgeDeadzoneMax = 0.985f;
-    private const float MinValidRawPalmScale2D = 0.032f;
-    private const float MinValidPalmSpan3DMeters = 0.035f;
+    private const float MinValidRawPalmScale2D = 0.042f;
+    private const float MinValidPalmSpan3DMeters = 0.042f;
+    private const float MaxValidPalmSpan3DMeters = 0.145f;
     private const float MinPalmScaleClamp = 0.045f;
     private const float HandEntryWarmupSeconds = 0.080f;
     private const float MetricEmaTauSeconds = 0.020f;
@@ -301,29 +302,39 @@ public sealed class AirWeavingHandGestureDetector
     private const float FingerUnextendMinWeightedDeg = 90.0f;
     private const float FingerUnextendMaxPalmRatio = 0.90f;
 
-    private const float FingerFirmFoldPipDipDeg = 88.0f;
-    private const float FingerFirmFoldWeightedDeg = 116.0f;
-    private const float FingerFirmFoldDeepWeightedDeg = 132.0f;
-    private const float FingerFirmFoldDeepPalmRatio = 1.02f;
-    private const float FingerFirmFoldTuckPipDipDeg = 74.0f;
-    private const float FingerFirmFoldTuckPalmRatio = 0.88f;
+    private const float FingerFirmFoldPipDipDeg = 72.0f;
+    private const float FingerFirmFoldWeightedDeg = 96.0f;
+    private const float FingerFirmFoldDeepWeightedDeg = 114.0f;
+    private const float FingerFirmFoldDeepPalmRatio = 1.06f;
+    private const float FingerFirmFoldTuckPipDipDeg = 64.0f;
+    private const float FingerFirmFoldTuckPalmRatio = 0.94f;
 
-    // Ambang Kanal Objek (Fist / Kepal 3D): keempat jari utama menekuk tegas + sticky-drag hysteresis lebar
-    private const float FistEnterMeanWeightedBendDeg = 112.0f;
-    private const float FistEnterMaxMeanCurlRatio = 1.00f;
-    private const float FistExitMeanWeightedBendDeg = 86.0f;
-    private const float FistStickyExitMeanWeightedBendDeg = 80.0f;
-    private const float PreFistLatchMinWeightedBendDeg = 104.0f;
+    // Metrik lipatan radial 2D Dorsal-Safe (kebal oklusi ujung jari saat punggung tangan/buku jari menghadap kamera)
+    private const float FingerDorsalFoldMaxTipToPipWristRatio2D = 1.04f;
+    private const float FingerDorsalFoldMaxTipToMcpPalmRatio2D = 0.72f;
+    private const float FingerDorsalFoldMaxTipToPalmRatio2D = 0.88f;
+    private const float FingerDorsalFoldMinBendDeg = 54.0f;
+    private const float FingerDorsalFoldBoostWeightedDeg = 98.0f;
+    private const float FingerDorsalFoldClampPalmRatio = 0.88f;
+    private const float FistIndexMinWeightedBendDeg = 85.0f;
+    private const float ThumbBlockFistMinIndexRatio = 0.78f;
+
+    // Ambang Kanal Objek (Fist / Kepal 3D + Dorsal 2D): keempat jari utama menekuk tegas + sticky-drag hysteresis lebar
+    private const float FistEnterMeanWeightedBendDeg = 94.0f;
+    private const float FistEnterMaxMeanCurlRatio = 1.12f;
+    private const float FistExitMeanWeightedBendDeg = 76.0f;
+    private const float FistStickyExitMeanWeightedBendDeg = 70.0f;
+    private const float PreFistLatchMinWeightedBendDeg = 78.0f;
 
     private const int FistEnterMinConsecutiveFrames = 2;
-    private const float FistEnterDebounceSeconds = 0.055f;
+    private const float FistEnterDebounceSeconds = 0.025f;
     private const float FistExitSlowSeconds = 0.055f;
     private const float FistExitFastSeconds = 0.115f;
     private const float SlowReleaseSpeedThreshold = 1.50f;
     private const float FastReleaseSpeedThreshold = 2.50f;
     private const float OcclusionGraceSeconds = 0.080f;
     private const float StickyOcclusionGraceSeconds = 0.200f;
-    private const float PreFistLatchMaxSeconds = 0.060f;
+    private const float PreFistLatchMaxSeconds = 0.160f;
 
     // Ambang Kanal Kabel & Free-View (Pinch Hibrida 3D + 2D Tilt-Safe, anti Z-occlusion, santai tanpa pose "OK")
     private const float PinchEnterRatio = 0.56f;
@@ -336,11 +347,11 @@ public sealed class AirWeavingHandGestureDetector
     private const float IndexStraightSummonMaxPipDipDeg = 54.0f;
     private const float IndexStraightSummonMinPalmRatio = 1.00f;
     private const float PinchDipProximityWeight = 1.06f;
-    private const float IndexTuckedForFullFistMaxPalmRatio = 0.78f;
-    private const float IndexDeepFistMinPipDipDeg = 106.0f;
-    private const float FullFistClenchMaxMeanCurlRatio = 0.86f;
-    private const float FullFistClenchMinMeanWeightedBendDeg = 128.0f;
-    private const float FistIdleIndexReleaseMinPalmRatio = 0.88f;
+    private const float IndexTuckedForFullFistMaxPalmRatio = 0.92f;
+    private const float IndexDeepFistMinPipDipDeg = 82.0f;
+    private const float FullFistClenchMaxMeanCurlRatio = 0.98f;
+    private const float FullFistClenchMinMeanWeightedBendDeg = 96.0f;
+    private const float FistIdleIndexReleaseMinPalmRatio = 0.92f;
 
     private const int PinchEnterMinConsecutiveFrames = 2;
     private const float PinchEnterDebounceSeconds = 0.025f;
@@ -349,7 +360,7 @@ public sealed class AirWeavingHandGestureDetector
     private const float PinchCableStickyExitDebounceSeconds = 0.095f;
     private const float PinchOcclusionGraceSeconds = 0.080f;
     private const float PinchStickyOcclusionGraceSeconds = 0.200f;
-    private const float PrePinchLatchMaxSeconds = 0.055f;
+    private const float PrePinchLatchMaxSeconds = 0.120f;
 
     // Ambang Ibu Jari 3D (Open-5 Bloom, NAND jempol lipat, NOT jempol kuat dengan Schmitt-trigger hysteresis stabil saat berputar)
     private const float ThumbExtendEnterIndexRatio = 0.50f;
@@ -492,6 +503,7 @@ public sealed class AirWeavingHandGestureDetector
     private readonly bool[] mainFingerExtended = new bool[4];
     private bool isThumbExtended = false;
     private bool isThumbStrongOut = false;
+    private bool isThumbBlockingFist = false;
     private bool isRelaxedOpenFiveBloom = false;
     private SummonHandPose currentSummonPose = SummonHandPose.None;
 
@@ -633,6 +645,7 @@ public sealed class AirWeavingHandGestureDetector
         }
         isThumbExtended = false;
         isThumbStrongOut = false;
+        isThumbBlockingFist = false;
         isRelaxedOpenFiveBloom = false;
         currentSummonPose = SummonHandPose.None;
 
@@ -922,7 +935,10 @@ public sealed class AirWeavingHandGestureDetector
             float d09W = Vector3.Distance(p0, p9);
             float d517W = Vector3.Distance(p5, p17);
             float rawSpan3D = 0.5f * (d09W + d517W);
-            if (rawSpan3D >= MinValidPalmSpan3DMeters && !float.IsNaN(rawSpan3D) && !float.IsInfinity(rawSpan3D))
+            if (rawSpan3D >= MinValidPalmSpan3DMeters
+                && rawSpan3D <= MaxValidPalmSpan3DMeters
+                && !float.IsNaN(rawSpan3D)
+                && !float.IsInfinity(rawSpan3D))
             {
                 isUsingWorld3DMetrics = true;
                 palmSpanMetric = rawSpan3D;
@@ -959,14 +975,21 @@ public sealed class AirWeavingHandGestureDetector
         }
 
         Vector3 palmCenter3D = (p0 + p5 + p9 + p13 + p17) * 0.20f;
+        float safePalmSpan2D = Mathf.Max(MinPalmScaleClamp, rawPalmScale2D);
+        float tiltSafePalmSpan2D = Mathf.Max(safePalmSpan2D, Mathf.Max(rawPalmD09_2D * 0.88f, rawPalmD517_2D * 1.12f));
 
-        // 3. Evaluasi sudut sendi 3D (dot product MCP->PIP, PIP->DIP, DIP->TIP + Wrist->MCP) untuk 4 jari utama
+        // 3. Evaluasi sudut sendi 3D + metrik lipatan radial 2D Dorsal-Safe untuk 4 jari utama
         float sumPalmRatio = 0f;
         float sumWeightedBend = 0f;
         int firmlyFolded = 0;
         bool indexFirmlyFolded = false;
+        bool middleFirmlyFolded = false;
+        bool ringFirmlyFolded = false;
+        bool pinkyFirmlyFolded = false;
+        bool indexDorsalRadialFolded2D = false;
         float indexSmoothPalmRatio = 1.40f;
         float indexSmoothPipDipDeg = 20.0f;
+        float indexSmoothWeightedDeg = 25.0f;
 
         for (int i = 0; i < 4; i++)
         {
@@ -975,10 +998,14 @@ public sealed class AirWeavingHandGestureDetector
             int dipIdx = FingerDipIndices[i];
             int tipIdx = FingerTipIndices[i];
 
-            Vector3 pMcp = hasWorld3D ? ToVec3(worldLandmarks[mcpIdx]) : ToAspectCompensatedVec3(landmarks[mcpIdx], safeAspect);
-            Vector3 pPip = hasWorld3D ? ToVec3(worldLandmarks[pipIdx]) : ToAspectCompensatedVec3(landmarks[pipIdx], safeAspect);
+            NormalizedLandmark lMcp = landmarks[mcpIdx];
+            NormalizedLandmark lPip = landmarks[pipIdx];
+            NormalizedLandmark lTip = landmarks[tipIdx];
+
+            Vector3 pMcp = hasWorld3D ? ToVec3(worldLandmarks[mcpIdx]) : ToAspectCompensatedVec3(lMcp, safeAspect);
+            Vector3 pPip = hasWorld3D ? ToVec3(worldLandmarks[pipIdx]) : ToAspectCompensatedVec3(lPip, safeAspect);
             Vector3 pDip = hasWorld3D ? ToVec3(worldLandmarks[dipIdx]) : ToAspectCompensatedVec3(landmarks[dipIdx], safeAspect);
-            Vector3 pTip = hasWorld3D ? ToVec3(worldLandmarks[tipIdx]) : ToAspectCompensatedVec3(landmarks[tipIdx], safeAspect);
+            Vector3 pTip = hasWorld3D ? ToVec3(worldLandmarks[tipIdx]) : ToAspectCompensatedVec3(lTip, safeAspect);
 
             float bendMcp = ComputeSegmentBendDegrees(p0, pMcp, pPip);
             float bendPip = ComputeSegmentBendDegrees(pMcp, pPip, pDip);
@@ -992,10 +1019,32 @@ public sealed class AirWeavingHandGestureDetector
             float smoothWeighted = fingerWeightedBendEma[i].Update(rawWeightedBend, sampleDt, MetricEmaTauSeconds);
             float smoothPalmRatio = fingerPalmRatioEma[i].Update(rawTipPalmRatio, sampleDt, MetricEmaTauSeconds);
 
-            sumPalmRatio += smoothPalmRatio;
-            sumWeightedBend += smoothWeighted;
+            // Metrik lipatan radial 2D Dorsal-Safe: tetap akurat saat ujung jari ter-oklusi punggung tangan sendiri
+            float tipToWrist2D = Dist2DCompensated(lTip, l0, safeAspect);
+            float pipToWrist2D = Mathf.Max(0.005f, Dist2DCompensated(lPip, l0, safeAspect));
+            float tipToMcp2D = Dist2DCompensated(lTip, lMcp, safeAspect);
+            float tipToPalm2D = Dist2DCompensatedToPoint(lTip, cx2D, cy2D, safeAspect);
 
-            bool isFirmlyFolded = (smoothPipDip >= FingerFirmFoldPipDipDeg && smoothWeighted >= FingerFirmFoldWeightedDeg)
+            bool isTightRadialFold2D = (tipToWrist2D <= (pipToWrist2D * 0.98f))
+                                       || ((tipToPalm2D / tiltSafePalmSpan2D) <= 0.78f);
+            bool isDorsalRadialFolded2D = isTightRadialFold2D
+                                          || ((smoothWeighted >= FingerDorsalFoldMinBendDeg || smoothPipDip >= FingerDorsalFoldMinBendDeg)
+                                              && ((tipToWrist2D <= (pipToWrist2D * FingerDorsalFoldMaxTipToPipWristRatio2D))
+                                                  || ((tipToMcp2D / tiltSafePalmSpan2D) <= FingerDorsalFoldMaxTipToMcpPalmRatio2D)
+                                                  || ((tipToPalm2D / tiltSafePalmSpan2D) <= FingerDorsalFoldMaxTipToPalmRatio2D)));
+
+            float effectiveWeighted = isDorsalRadialFolded2D
+                ? Mathf.Max(smoothWeighted, FingerDorsalFoldBoostWeightedDeg)
+                : smoothWeighted;
+            float effectivePalmRatio = isDorsalRadialFolded2D
+                ? Mathf.Min(smoothPalmRatio, FingerDorsalFoldClampPalmRatio)
+                : smoothPalmRatio;
+
+            sumPalmRatio += effectivePalmRatio;
+            sumWeightedBend += effectiveWeighted;
+
+            bool isFirmlyFolded = isDorsalRadialFolded2D
+                                  || (smoothPipDip >= FingerFirmFoldPipDipDeg && smoothWeighted >= FingerFirmFoldWeightedDeg)
                                   || (smoothWeighted >= FingerFirmFoldDeepWeightedDeg && smoothPalmRatio <= FingerFirmFoldDeepPalmRatio)
                                   || (smoothPipDip >= FingerFirmFoldTuckPipDipDeg && smoothPalmRatio <= FingerFirmFoldTuckPalmRatio);
             if (isFirmlyFolded)
@@ -1006,21 +1055,37 @@ public sealed class AirWeavingHandGestureDetector
             if (i == 0)
             {
                 indexFirmlyFolded = isFirmlyFolded;
-                indexSmoothPalmRatio = smoothPalmRatio;
+                indexDorsalRadialFolded2D = isDorsalRadialFolded2D;
+                indexSmoothPalmRatio = effectivePalmRatio;
                 indexSmoothPipDipDeg = smoothPipDip;
+                indexSmoothWeightedDeg = effectiveWeighted;
+            }
+            else if (i == 1)
+            {
+                middleFirmlyFolded = isFirmlyFolded;
+            }
+            else if (i == 2)
+            {
+                ringFirmlyFolded = isFirmlyFolded;
+            }
+            else
+            {
+                pinkyFirmlyFolded = isFirmlyFolded;
             }
 
             // Schmitt-trigger per-jari berbasis sudut sendi 3D (anti-flicker untuk Summon & Input Switch)
             if (!mainFingerExtended[i])
             {
-                if (smoothPipDip <= FingerExtendMaxPipDipDeg
+                if (!isTightRadialFold2D
+                    && smoothPipDip <= FingerExtendMaxPipDipDeg
                     && smoothWeighted <= FingerExtendMaxWeightedDeg
                     && smoothPalmRatio >= FingerExtendMinPalmRatio)
                 {
                     mainFingerExtended[i] = true;
                 }
             }
-            else if (smoothPipDip >= FingerUnextendMinPipDipDeg
+            else if (isTightRadialFold2D
+                     || smoothPipDip >= FingerUnextendMinPipDipDeg
                      || smoothWeighted >= FingerUnextendMinWeightedDeg
                      || smoothPalmRatio <= FingerUnextendMaxPalmRatio)
             {
@@ -1074,13 +1139,16 @@ public sealed class AirWeavingHandGestureDetector
             isThumbStrongOut = false;
         }
 
+        // Jempol di samping kepalan tidak boleh memblokir Fist kecuali jempol benar-benar menjauh dari telunjuk & < 3 jari terlipat
+        isThumbBlockingFist = isThumbStrongOut
+                              && (smoothThumbIndexRatio > ThumbBlockFistMinIndexRatio)
+                              && (firmlyFolded < 3);
+
         // 5. Evaluasi Kanal Pinch Hibrida (Anti Z-Occlusion & Tilt-Safe) vs Kanal Fist vs Proteksi Pose Summon AND/NOT
         // Pinch hibrida: ambil nilai minimum antara rasio 3D (#4-#8 & #4-#7*1.06 / palmSpan3D)
         // DAN rasio 2D aspect-compensated berbobot sumbu telapak terpanjang (tiltSafePalmSpan2D) agar rotasi/kemiringan
         // pergelangan tangan (foreshortening sumbu #5-#17 atau #0-#9) tidak menggelembungkan rasio cubit.
         NormalizedLandmark l7 = landmarks[7];
-        float safePalmSpan2D = Mathf.Max(MinPalmScaleClamp, rawPalmScale2D);
-        float tiltSafePalmSpan2D = Mathf.Max(safePalmSpan2D, Mathf.Max(rawPalmD09_2D * 0.88f, rawPalmD517_2D * 1.12f));
         float pinchRatio2DTip = Dist2DCompensated(l4, l8, safeAspect) / tiltSafePalmSpan2D;
         float pinchRatio2DDip = (Dist2DCompensated(l4, l7, safeAspect) / tiltSafePalmSpan2D) * PinchDipProximityWeight;
         float pinchRatio2D = Mathf.Min(pinchRatio2DTip, pinchRatio2DDip);
@@ -1099,6 +1167,19 @@ public sealed class AirWeavingHandGestureDetector
         bool rngExt = mainFingerExtended[2];
         bool pnkExt = mainFingerExtended[3];
 
+        // Anatomi kepalan dominan (anti-bajak oleh Pinch saat mengepal, tanpa mengganggu Pinch kabel dengan Middle terbuka):
+        // Aktif hanya jika (ketiga jari non-telunjuk Middle+Ring+Pinky terlipat ATAU Middle terlipat tegas + min 1 Ring/Pinky terlipat)
+        // DAN telunjuk ikut terlipat ke arah telapak (indexSmoothWeightedDeg >= 85 deg atau lipatan radial 2D dorsal terpenuhi).
+        int foldedNonIndex = (middleFirmlyFolded ? 1 : 0) + (ringFirmlyFolded ? 1 : 0) + (pinkyFirmlyFolded ? 1 : 0);
+        bool nonIndexFistFolded = (foldedNonIndex == 3)
+                                  || (middleFirmlyFolded && (ringFirmlyFolded || pinkyFirmlyFolded));
+        bool indexFoldedTowardPalm = !idxExt
+                                     && ((indexSmoothWeightedDeg >= FistIndexMinWeightedBendDeg) || indexDorsalRadialFolded2D);
+        bool isFistAnatomyDominant = !isPinchActive
+                                     && nonIndexFistFolded
+                                     && indexFoldedTowardPalm
+                                     && (meanWeightedBendDeg >= FistEnterMeanWeightedBendDeg);
+
         // Deteksi anatomi tegas OneFingerAnd (telunjuk lurus tegas) & ThumbOnlyNot (jempol terbentang jelas, 4 jari menekuk):
         // Bila ujung #4-#8 tidak benar-benar rapat secara 3D (pinchRatio3DTip >= 0.38f), jangan biarkan overlap 2D / jarak #4-#7
         // memicu guard pra-cubit maupun Pinch palsu yang membunuh Circle Summoner AND/NOT.
@@ -1112,22 +1193,24 @@ public sealed class AirWeavingHandGestureDetector
                                       && !midExt
                                       && !rngExt
                                       && !pnkExt
+                                      && !isFistActive
                                       && (firmlyFolded >= 2)
                                       && (meanWeightedBendDeg >= ThumbNotMinFoldedMeanBendDeg)
-                                      && isThumbStrongOut;
+                                      && isThumbStrongOut
+                                      && (smoothThumbIndexRatio > 0.68f);
         bool suppressPinchForClearSummonPose = !isPinchActive
                                                && (isClearIndexAndAnatomy || isClearThumbNotAnatomy)
                                                && (pinchRatio3DTip >= SummonClearPosePinch3DTipGuardRatio);
 
         // Pinch santai tanpa harus pose "OK": jari tengah/manis/kelingking bebas menekuk rileks.
-        // Hanya anggap kepalan penuh (memblokir Pinch) jika keempat jari benar-benar terbenam rapat ke pusat telapak
-        // (ujung telunjuk terlipat dalam ke telapak, BUKAN sekadar melengkung santai bertemu ujung jempol #4).
-        bool allFourFingersClenched = (firmlyFolded >= 4)
-                                      && indexFirmlyFolded
-                                      && (indexSmoothPipDipDeg >= IndexDeepFistMinPipDipDeg)
-                                      && (indexSmoothPalmRatio <= IndexTuckedForFullFistMaxPalmRatio)
-                                      && (meanCurlRatio < FullFistClenchMaxMeanCurlRatio)
-                                      && (meanWeightedBendDeg >= FullFistClenchMinMeanWeightedBendDeg);
+        // Kepalan dominan (isFistAnatomyDominant) atau kepalan penuh memblokir Pinch agar Fist tidak dibajak oleh Pinch.
+        bool allFourFingersClenched = isFistAnatomyDominant
+                                      || ((firmlyFolded >= 4)
+                                          && indexFirmlyFolded
+                                          && (indexSmoothPipDipDeg >= IndexDeepFistMinPipDipDeg)
+                                          && (indexSmoothPalmRatio <= IndexTuckedForFullFistMaxPalmRatio)
+                                          && (meanCurlRatio < FullFistClenchMaxMeanCurlRatio)
+                                          && (meanWeightedBendDeg >= FullFistClenchMinMeanWeightedBendDeg));
         bool pinchAnatomyValid = !isFistActive && !allFourFingersClenched && !suppressPinchForClearSummonPose;
 
         rawPinchEnterCondition = (currentPinchRatio < PinchEnterRatio) && pinchAnatomyValid;
@@ -1138,11 +1221,11 @@ public sealed class AirWeavingHandGestureDetector
                                 && !isClearIndexAndAnatomy
                                 && !isClearThumbNotAnatomy;
 
-        // Fist: jari utama menekuk tegas; saat Fist belum terkunci, jempol NOT, pra-cubit, & cubit tetap menang atas Fist.
-        rawEnterCondition = (firmlyFolded >= 3)
+        // Fist: jari utama menekuk tegas (3D atau Dorsal 2D); tidak diblokir jempol samping maupun Pinch palsu.
+        rawEnterCondition = ((firmlyFolded >= 3) || isFistAnatomyDominant)
                             && (meanWeightedBendDeg >= FistEnterMeanWeightedBendDeg)
                             && (meanCurlRatio < FistEnterMaxMeanCurlRatio)
-                            && !isThumbStrongOut
+                            && !isThumbBlockingFist
                             && !isClearIndexAndAnatomy
                             && (isFistActive || (!rawPinchEnterCondition && !isPrePinchFistGuardActive));
         // Saat Fist idle (non-sticky), izinkan keluar instan jika telunjuk menunjuk/mencubit atau jempol teracung kuat (NOT)
@@ -1151,7 +1234,7 @@ public sealed class AirWeavingHandGestureDetector
                                              && (mainFingerExtended[0] || currentPinchRatio < PinchEnterRatio);
         rawExitCondition = ((meanWeightedBendDeg < FistExitMeanWeightedBendDeg) && (firmlyFolded <= 1))
                            || indexReleasedIntoPointOrPinch
-                           || isThumbStrongOut;
+                           || isThumbBlockingFist;
 
         // Hitung frame inferensi valid berturut-turut (mencegah glitch 1 frame pada 15-30 FPS lolos debounce)
         bool qualityAllowsCount = IsQualityGatePassing;
@@ -1547,7 +1630,7 @@ public sealed class AirWeavingHandGestureDetector
             bool curlingNow = qualityGateOk
                               && (meanWeightedBendDeg >= PreFistLatchMinWeightedBendDeg)
                               && !mainFingerExtended[0]
-                              && !isThumbStrongOut
+                              && !isThumbBlockingFist
                               && !isSummonGatePose
                               && !isPinchActive
                               && !isPinchStickyHoldActive
@@ -1588,7 +1671,7 @@ public sealed class AirWeavingHandGestureDetector
             bool allowFistEnter = qualityGateOk
                                   && rawEnterCondition
                                   && !blockedByPinch
-                                  && (isFistStickyHoldActive || (!mainFingerExtended[0] && !isThumbStrongOut && !isSummonGatePose));
+                                  && (isFistStickyHoldActive || (!mainFingerExtended[0] && !isThumbBlockingFist && !isSummonGatePose));
             if (allowFistEnter)
             {
                 enterHoldTimer += dt;
@@ -1689,6 +1772,13 @@ public sealed class AirWeavingHandGestureDetector
     {
         float dx = (a.x - b.x) * Mathf.Clamp(aspectX * 0.75f, 0.70f, 1.35f);
         float dy = a.y - b.y;
+        return Mathf.Sqrt((dx * dx) + (dy * dy));
+    }
+
+    private static float Dist2DCompensatedToPoint(NormalizedLandmark a, float bx, float by, float aspectX)
+    {
+        float dx = (a.x - bx) * Mathf.Clamp(aspectX * 0.75f, 0.70f, 1.35f);
+        float dy = a.y - by;
         return Mathf.Sqrt((dx * dx) + (dy * dy));
     }
 

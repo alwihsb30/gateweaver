@@ -26,19 +26,19 @@ public sealed class AirWeavingCircleSummoner
     private const int PoseVoteMajorityThreshold = 3;
     private const int MinTrailPointsForCharge = 6;
     private const float MinPointSpacing = 0.018f;
-    private const float MinTotalArcLengthForStartVisual = 0.13f;
+    private const float MinTotalArcLengthForStartVisual = 0.18f;
     private const float MinTotalArcLengthForReady = 0.30f;
     private const float MinCircleRadius = 0.062f;
     private const float MaxCircleRadius = 0.650f;
-    private const float StartVisualAngleDegrees = 75f;
-    private const float PoseLockAngleDegrees = 90f;
+    private const float StartVisualAngleDegrees = 105f;
+    private const float PoseLockAngleDegrees = 115f;
     private const float ShapeCheckAngleDegrees = 135f;
     private const float MinCircularityRatio = 0.36f;
     private const float MinDirectionalCoherence = 0.64f;
     private const float TargetSweepDegrees = 205f;
     private const float MaxSingleTurnRadians = 2.356f; // 135 deg: lonjakan balik tajam dianggap zig-zag
 
-    private const float PoseConfirmHoldSeconds = 0.160f;
+    private const float PoseConfirmHoldSeconds = 0.240f;
     private const float PoseDropoutGraceSeconds = 0.140f;
     private const float ChargePoseDropoutGraceSeconds = 0.280f;
     private const float ChargeStallTimeoutSeconds = 0.65f;
