@@ -81,3 +81,9 @@ Packages/com.github.homuler.mediapipe-*.tgz
 # Unity Editor automatic scene/asset recovery folder
 Assets/_Recovery/
 Assets/_Recovery.meta
+
+# Local AI agent rules
+GEMINI.md
+
+# Local AI agent rules
+GEMINI.md

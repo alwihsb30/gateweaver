@@ -1,140 +1,107 @@
 # Game Design Document (GDD) — GateWeaver AR
 
-- **Versi Dokumen:** 7.5 (Baseline Rilis Stabil `v7.5`, branch `main`)
-- **Genre:** Educational Augmented Reality Puzzle & Spatial Logic Sandbox
-- **Platform:** Android (Minimum API 29 / Android 10, ARM64, Landscape Left) & Unity Editor (Pengujian Webcam)
-- **Target Pengguna:** Siswa SMA/SMK Fase E (Kurikulum Merdeka — Mata Pelajaran Informatika) & Pendidik
+- **Versi Dokumen:** `8.5.0` (Rilis `v8.5.0`, branch `main`)
+- **Genre:** Educational Spatial Augmented Reality Puzzle & Digital Logic Sandbox
+- **Platform:** Android (`Min API 29`, `ARM64`, `OpenGLES3`, `Landscape Left`) & Unity Editor (`6000.6.9f1`)
+- **Target Pengguna:** Siswa SMA/SMK Kelas X Fase E (Kurikulum Merdeka — Informatika) & Pendidik
 
 ---
 
-## 1. Visi Produk & Tujuan Pedagogis
+## 1. Visi Produk & Pilar Desain Pedagogis
 
-**GateWeaver AR** mengubah konsep abstrak **Gerbang Logika, Tabel Kebenaran, dan Aljabar Boolean** menjadi pengalaman merakit mesin 3D spasial secara langsung di dunia nyata.
+**GateWeaver AR** menjembatani pemahaman siswa dari representasi konkret-spasial menuju abstraksi simbolik pada materi **Gerbang Logika Kombinasional, Tabel Kebenaran, dan Aljabar Boolean**.
 
-### Pilar Desain Utama
-1. **Aksesibilitas Dual-Mode & Onboarding Instan (`v7.5`):** Siswa bisa belajar dengan kartu fisik cetak di kelas (**Mode Kartu v5** — 0% regresi) maupun langsung tanpa peralatan tambahan cukup dengan tangan di depan kamera HP (**Mode Udara / Air-Weaving v7.5** — *100% Zero-Touch*, dilengkapi **Kartu Panduan Gestur 1 Halaman** + **Pil Latihan Cepat 4 Langkah** interaktif).
-2. **Representasi Konkret-ke-Simbolik (*Open Cutaway*, *Pulsing Packets*, Pod `2x2`, & *Live Boolean Chip*):** Setiap sinyal biner (`0` / `1`) tampil serentak sebagai mekanisme terbuka di dalam mesin 3D (`GateMechanismVisual`), aliran kabel energi & *Pulsing Signal Packets* Zero-GC, audio spasial PCM prosedural (`AirWeavingSpatialSfx`), diorama Output reaktif, Pod Tabel Kebenaran `2x2` (`00`, `01`, `10`, `11`), serta ***Live Boolean Expression Chip*** formal di kedua mode (`PedagogyMasteryHud`).
-3. **Debugging Mandiri, Scaffolding Terukur, & Evaluasi Penguasaan:** Alih-alih sekadar menekan tombol uji otomatis di Mode Udara, siswa diundang menguji keempat kombinasi `00/01/10/11` lewat sakelar `Input A/B` dengan evaluasi rangkaian instan anti-*false-win*, dibimbing lencana pemandu live (`SAMBUNG KE OUTPUT`, `KURANGI GERBANG`, `CEK SEL MERAH`, `UJI SAKELAR (X/4)`, `LULUS 4/4`), *hint* 3 tingkat (`Petunjuk 0/3`), serta **`Rapor Penguasaan`** & **`Rapor CP`** terukur.
+1. **Aksesibilitas Dual-Mode Terpadu:** Siswa dapat berpraktikum secara kolaboratif di kelas menggunakan 8 kartu cetak fisik (**Mode Kartu v5.0**) maupun berlatih mandiri kapan saja tanpa kartu cetak hanya dengan gestur tangan di depan kamera HP (**Mode Udara / Air-Weaving v8.5**).
+2. **Quiet Minimalism & Keterbacaan Optik (*Smoked Optical Glass + Brushed Titanium*):** Seluruh antarmuka Mode Udara dirancang tenang tanpa *visual clutter*, mengandalkan ikon vektor SDF prosedural (simbol gerbang IEEE, siluet pose jari, indikator status tunggal) sehingga fokus kognitif siswa tetap tertuju pada rangkaian logika 3D.
+3. **Debugging Mandiri & Proteksi Pedagogis:** Sistem mendorong siswa menguji keempat kombinasi biner (`00`, `01`, `10`, `11`) secara aktif sambil memantau strip *waveform* Input A/B, status ekspresi Boolean live (`Y = ...`), Pod Tabel Kebenaran `2x2`, serta Peta Sirkuit yang menyembunyikan gerbang target dan rumus solusi hingga level lulus diverifikasi `4/4`.
 
 ---
 
-## 2. Arsitektur Dual-Mode AR
+## 2. Arsitektur Dual-Mode & Alur Navigasi
 
-Aplikasi selalu memulai pada **Mode Kartu (v5)** dan menyediakan perpindahan instan melalui **Laci Menu Kompak** pojok kanan atas (`Mode: Udara (v7)` ↔ `Mode: Kartu (v5)`) dengan *Camera Handover* bersih (*Camera2-safe*).
+Aplikasi dibuka di **Layar Judul (`AirWeavingTitleOverlay`)** yang menawarkan pemilihan langsung **Mode Udara (Hand Tracking)**, **Mode Kartu (Vuforia AR)**, atau **Sandbox (Laboratorium Bebas)**. Perpindahan antar-mode saat sesi berjalan dilakukan melalui **Laci Menu Kompak (`AirWeavingMenuDrawerOverlay`)** dengan *Camera Handover* bersih (*Android Camera2-safe*).
 
-| Aspek | Mode Kartu (v5 — Tangible AR) | Mode Udara (v7.5 — Air-Weaving Hologram AR) |
+| Dimensi | Mode Udara (`v8.5` — Air-Weaving) | Mode Kartu (`v5.0` — Tangible AR) |
 | :--- | :--- | :--- |
-| **Mesin Pelacakan** | Vuforia Engine 11.4.4 (Image Targets) | MediaPipeUnityPlugin 0.16.3 (`HandLandmarker`, CPU) + `WebCamTexture` |
-| **Kamera** | Kamera belakang | Kamera depan (cermin horizontal) / Webcam laptop |
-| **Objek Interaksi** | 8 kartu fisik cetak (`Input A/B`, 5 Gerbang, `Output`) | Hologram 3D melayang bebas (*levitation* + *tilt* `±12°`) di ruang rakit (`AssemblyZone` 4 siku berbayangan) + Rak Parkir Atas |
-| **Kendali Gerbang & Kabel** | Geser kartu fisik di meja (auto-snap kiri-ke-kanan) | 2-Tahap *Circle Summon* + *Open-5 Bloom*, **Cubit (`Pinch`)** kabel manual port-ke-port + *Pulsing Signal Packets*, **Kepal (`Fist`)** pindah/buang gerbang, **Telunjuk `#8`** sakelar Input |
-| **Audio & Onboarding** | Audio PCM prosedural UI & evaluasi level | Synthesizer audio spasial PCM prosedural penuh (`24` cue + `2` hum anti-nyangkut) + Kartu Panduan Gestur 1 Halaman & Latihan Cepat 4 Langkah |
-| **HUD, Pedagogi, & Pengujian** | 4 kapsul ramping bawah (`Input A/B`, `Uji`/`Lanjut`), *Live Boolean Chip*, `Rapor Penguasaan`, & Pod `2x2` miring `-48°` | **0 tombol gameplay (*Zero-Touch*)**, tombol `?` panduan di Bilah Atas, *Live Boolean Chip*, `Rapor Penguasaan`, Pod `2x2` menghadap kamera, evaluasi instan anti-*false-win*, *Auto-Win* `4/4`, & tahan kepal di Output untuk *Next Level* |
-| **Mesin Evaluasi** | `CircuitManager.cs` (inti *tracking-agnostic* terpadu) | `CircuitManager.cs` (inti *tracking-agnostic* terpadu + dukungan kabel manual & *fan-out*) |
+| **Engine Pelacakan** | MediaPipe `HandLandmarker` (`0.16.3`, CPU) + `WebCamTexture` | Vuforia Engine `11.4.4` (8 Image Targets) |
+| **Kamera** | Kamera depan (cermin) / Webcam | Kamera belakang |
+| **Panggung & Prop 3D** | Meja hologram 3D (*Smoked Tray*), prop industrial *Brushed Titanium* (`GwIndustrial3DKit` + `V8_AirProps`), shader Fresnel OpenGLES3 | 8 kartu fisik cetak + 12 model modular Quaternius (`V5_SciFi`) + *Open Cutaway* |
+| **Skema Interaksi** | **Kepal (`Fist`)** sakelar & gerbang, **Cubit (`Pinch`)** kabel PBR, **Dua Tangan** orbit/zoom/pan, **Circle-Charge -> Open-5** summon | Auto-snap kiri-ke-kanan berbasis posisi fisik kartu + 4 kapsul kontrol bawah |
+| **Evaluasi & Verifikasi** | Debugging mandiri `00..11`, bar tabel kebenaran live, *Auto-Win* + Modal Verifikasi `4/4` | Tombol `Uji Rangkaian` / pemindaian otomatis `00..11` + Pod `2x2` miring `-48°` |
+| **Inti Simulasi** | `CircuitManager.cs` & `GateNode.cs` (*tracking-agnostic*, 0% regresi v5) | `CircuitManager.cs` & `GateNode.cs` (*tracking-agnostic*, 0% regresi v5) |
 
 ---
 
 ## 3. Core Gameplay Loop
 
-1. **Pahami Misi & Onboarding:** Siswa membaca target logika pada Bilah Atas ramping (`72 px`) beserta batas `Kuota Gerbang` dan konteks label 3D tiap level. Saat pertama kali membuka Mode Udara, **Kartu Panduan Gestur 1 Halaman** tampil otomatis 1x dengan opsi **Latihan Cepat 4 Langkah** interaktif.
-2. **Rakit Mesin 3D:**
-   - Di **Mode Kartu (v5)**, susun kartu fisik dari kiri ke kanan (`Input A/B` → Gerbang Logika → `Output`) hingga saluran energi tersambung otomatis.
-   - Di **Mode Udara (v7.5)**, panggil gerbang dengan **2-Tahap Circle Summon + Open-5 Bloom**, atur posisinya dengan **Kepal (`Fist`)** di dalam 4 siku `AssemblyZone`, lalu tarik/sambungkan kabel antar orb port dengan **Cubit (`Pinch` `#4+#8`)** disertai *Pulsing Signal Packets* dan audio spasial prosedural.
-3. **Eksperimen Sinyal, Rumus Boolean Live, & Debugging Mandiri:**
-   - Di kedua mode, ***Live Boolean Expression Chip*** menampilkan rumus aljabar Boolean aktual yang terhubung ke `Output` beserta nilai biner `[0]`/`[1]` secara real-time.
-   - Di **Mode Udara (v7.5)**, sentuh sakelar `Input A` dan `Input B` dengan ujung **Telunjuk `#8`** (`75 ms` + *ripple*) untuk mengamati mekanisme *Open Cutaway*, aliran *Pulsing Signal Packets*, dan status 4 kotak biner `00/01/10/11` pada Pod `OutputTruthPodVisual` sambil dibimbing lencana pemandu live (`AirWeavingOutputTrigger`) dengan sinkronisasi evaluasi instan anti-*false-win*.
-   - Di **Mode Kartu (v5)**, ubah sakelar via kapsul bawah/sentuh 3D/rotasi kartu lalu tekan `Uji Rangkaian` untuk pemindaian otomatis `00..11`.
-4. **Auto-Win, Progresi, & Refleksi Penguasaan:** Begitu 4/4 sel hijau dan tidak melebihi kuota gerbang, siswa meraih 1–3 bintang (tercatat di **`Rapor Penguasaan`** & **`Rapor CP`**). Di Mode Udara, `LULUS 4/4` langsung memicu ***Auto-Win*** dan siswa cukup **menahan kepal (`Fist`) di diorama `Output`** untuk *Zero-Touch Next Level*.
+1. **Pemilihan Mode & Misi:** Pengguna memilih mode di Layar Judul atau memilih node misi (`01`–`07`) pada **Peta Sirkuit (`AirWeavingLevelSelectorOverlay`)**. Saat pertama kali masuk Mode Udara, **Panduan Interaksi & Gestur Tangan** tampil dengan opsi **Latihan Cepat 4 Langkah**.
+2. **Perakitan Rangkaian 3D:**
+   - **Mode Udara:** Ambil gerbang dari Rak Parkir Atas dengan **Kepal (`Fist`)** atau panggil di ruang rakit lewat **2-Tahap Circle-Charge -> Open-5 Bloom**, atur posisi di meja 3D, lalu sambungkan kabel antar-port menggunakan **Cubit (`Pinch`)**.
+   - **Mode Kartu:** Susun kartu fisik `Input A/B`, gerbang logika, dan `Output` di atas meja hingga saluran energi tersambung otomatis.
+3. **Eksperimen Sinyal & Debugging Mandiri:**
+   - Ubah nilai `Input A` dan `Input B` (`0 <-> 1`) menggunakan **Kepal (`Fist`)** di Mode Udara (atau kapsul/rotasi kartu di Mode Kartu).
+   - Amati perubahan pada *waveform* A/B, *Pulsing Signal Packets* di sepanjang kabel PBR, mekanisme *Open Cutaway*, lencana pemandu Output (`SAMBUNG KE OUTPUT`, `KURANGI GERBANG`, `CEK SEL MERAH`, `UJI SAKELAR (X/4)`), dan 4 sel tabel kebenaran `[0,0]..[1,1]`.
+4. **Verifikasi Lulus `4/4` & Progresi:** Ketika seluruh 4 kombinasi input cocok dengan target dalam batas kuota gerbang, **Modal Verifikasi Lulus `4/4`** (`AirWeavingLevelCompleteModal`) menampilkan ekspresi Boolean terverifikasi, tabel kebenaran penuh, metrik kuota, serta opsi **Lanjut Level** atau **Ulangi Level**.
 
 ---
 
-## 4. Mekanik Interaksi Detail
+## 4. Mekanik Interaksi & Pipeline Teknis Mode Udara (`v8.5`)
 
-### 4.1 Sistem Rangkaian Spasial & Visual Inti (`Assets/Scripts/Core/`)
-- **8 Node Standar (`GateNode.cs`):** `Card_Input_A`, `Card_Input_B`, `Card_Gate_AND`, `Card_Gate_OR`, `Card_Gate_XOR`, `Card_Gate_NAND`, `Card_Gate_NOT`, dan `Card_Output`. Saat masuk Mode Udara, cincin port hantu bawaan kartu disembunyikan bersih agar hanya orb port hologram yang tampil.
-- **Dual-Mode Routing (`CircuitManager.cs`):**
-  - Mode Kartu (v5): auto-snap kiri-ke-kanan berbasis jarak (`maxSnapDistance = 3.0f`, jangkauan sumber Input `1.8x`), *Snap Lock VFX*, saluran energi berlapis, & *energy bolt*.
-  - Mode Udara (v7.5): koneksi manual port-ke-port dengan *fan-out* multi-cabang dari `Port_Out` yang dirender seragam orb-ke-orb oleh `AirWeavingCableRouter`.
-- **Mekanisme Terbuka (`GateMechanismVisual.cs`):** Konstruksi *Open Cutaway* reaktif pada 5 gerbang logika (termasuk *Power Core* internal pada `NOT` & `NAND`) yang bekerja identik di kedua mode.
-- **Pod Tabel Kebenaran `2x2` (`OutputTruthPodVisual.cs`):** 4 kotak biner tegas (`00`, `01`, `10`, `11`) dengan warna status jelas (abu gelap = belum diuji, tepi sian = aktif saat ini, hijau = lolos, merah = salah). Miring `-48°` di Mode Kartu dan sejajar menghadap kamera di Mode Udara.
+### 4.1 Pipeline *Hand Tracking* Anti-Wajah (`AirWeavingController.cs`)
+- **Konfigurasi MediaPipe:** `minHandDetectionConfidence = 0.62f`, `minHandPresenceConfidence = 0.58f`, `minTrackingConfidence = 0.55f`, resolusi inferensi `MaxInferenceLongEdge = 256`, `MinCandidateRawPalmScale = 0.042f`.
+- **Validasi Anatomi Worker Zero-GC:** Memeriksa integritas 21 landmark, proporsi dan luas segitiga telapak `(0, 5, 17)`, proporsi tulang proksimal, skala 3D `worldLandmarks` (`0.042m – 0.145m`), skor *handedness* adaptif (`>= 0.65f` entry/tangan-2, `>= 0.50f` saat tangan utama terkunci), serta penolakan duplikat/skala timpang pada tangan ke-2.
+- **Temporal Entry & Anti-Teleport:** Slot tangan dan visual skeleton/reticle baru aktif setelah **3 frame berturut-turut** dalam radius `0.16f`, menolak lonjakan 1–2 frame *glitch* ke area wajah.
 
-### 4.2 Mekanik Air-Weaving v7.5 (`Assets/Scripts/AirWeaving/`)
-- **Tracking 1:1 Adaptif & Visual 3D Melayang (`AirWeavingController.cs`, `AirWeavingHologramVisual.cs`):**
-  - Proyeksi tangan 21 sendi 1:1 dengan *smoothing* adaptif berbasis kecepatan (*One-Euro-style*, *zero-GC*) serta peredaman skeleton halus agar fokus visual tetap pada mesin 3D.
-  - Hologram 3D mengambang bebas (*sinusoidal levitation* + *velocity tilt* `±12°`, tanpa cincin lantai & tanpa cincin port hantu), label 3D kontras tinggi, bayangan pada 4 siku sudut `AssemblyZone`, serta *reticle* otomatis tersembunyi saat tangan keluar kamera.
-- **2-Tahap Circle Summon + Open-5 Bloom (`AirWeavingCircleSummoner.cs`, `AirWeavingSummonVisual.cs`):**
-  - Putar ujung jari di ruang rakit dengan indikator pose live di ujung jari:
-    - `1` jari → **`AND`**
-    - `2` jari → **`OR`**
-    - `3` jari → **`XOR`**
-    - `4` jari (jempol lipat) → **`NAND`**
-    - `Jempol saja` → **`NOT`**
-  - Buka lebar **5 jari (*Open-5 Bloom*)** untuk *spawn* gerbang dari Rak Parkir Atas tepat di pusat lingkaran (atau kepal untuk batal instan; tampilkan *Notice + Pulse* amber non-destruktif bila jenis gerbang sudah ada di papan).
-- **Manajemen Kabel Manual — Cubit / `Pinch` & *Pulsing Signal Packets* (`AirWeavingCableRouter.cs`, `AirWeavingHandGestureDetector.cs`):**
-  - Cubit **Jempol `#4` + Telunjuk `#8`** (skala-invarian + *pre-pinch guard*) pada orb port (`Port_Out` / `Port_In`) untuk tarik, pasang, *fan-out* (dari `Port_Out`), cabut/ganti (dari `Port_In`), atau lepas di ruang kosong untuk putus.
-  - Seluruh kabel Mode Udara dirender seragam orb-ke-orb menggunakan **pool 20 Bezier zero-GC** dengan warna sinyal live, diperkaya ***Pulsing Signal Packets* Zero-GC** (pool `60` paket, `1–3` paket adaptif per panjang kabel, 1 shared material + `MaterialPropertyBlock`) yang mengalir cepat-terang saat sinyal `1` dan pelan-redup saat sinyal `0`.
-- **Manipulasi Objek — Kepal / `Fist` (`AirWeavingHandGestureDetector.cs`, `AirWeavingController.cs`):**
-  - Kepal badan gerbang (*sticky hysteresis* + *occlusion grace* `180 ms`) untuk memindah posisi di dalam ruang rakit.
-  - Tarik gerbang keluar dari 4 siku `AssemblyZone` (bingkai & aura menyala merah) lalu lepas untuk mengembalikannya ke Rak Parkir Atas sekaligus memutus seluruh kabelnya.
-- **Sakelar Input A/B — Sentuh Telunjuk `#8` (`AirWeavingController.cs`):**
-  - Sentuh ringan ujung telunjuk `#8` (`75 ms` dwell + *Exit-to-Rearm*) disertai efek *ripple* untuk membalik nilai `0 ↔ 1`.
-- **100% Debugging Mandiri, Anti-*False-Win*, & *Zero-Touch Next Level* (`AirWeavingOutputTrigger.cs`, `OutputTruthPodVisual.cs`):**
-  - Cincin Output ditempatkan di belakang bodi 3D (anti-clipping), dengan lencana pemandu live tepat di bawah Pod `00/01/10/11`: `SAMBUNG KE OUTPUT`, `KURANGI GERBANG`, `CEK SEL MERAH`, `UJI SAKELAR (X/4)`, `LULUS 4/4` → *Auto-Win* otomatis.
-  - Sinkronisasi evaluasi rangkaian instan menjamin status Pod & lencana selalu mencerminkan kebenaran graf live (*anti-false-win*); tahan kepal pada diorama Output setelah lulus untuk pindah level tanpa menyentuh layar.
-- **Audio Spasial Prosedural Penuh (`AirWeavingSpatialSfx.cs`):**
-  - Synthesizer PCM prosedural 100% interaktif (*zero-GC*, 0 aset audio eksternal): **24 cue *one-shot*** (pool 6 `AudioSource` dengan pan stereo spasial), **2 *looping hum*** (seret kabel & seret gerbang dengan watchdog `LateUpdate` anti-nyangkut), ***soft limiter* `tanh`**, dan **cooldown independen per kategori**.
-- **Onboarding Mode Udara (`AirWeavingGestureGuide.cs`):**
-  - **Kartu Panduan Gestur 1 Halaman** (tampil otomatis 1x saat pertama masuk Mode Udara via `PlayerPrefs: GW_AirGuideSeen_v75`; dapat dibuka kapan saja lewat tombol `?` di Bilah Atas atau opsi `Panduan Gestur` di laci `≡`).
-  - **Pil Latihan Cepat 4 Langkah** interaktif *real-time* (Zero-GC, non-intrusif di tengah-bawah layar): `(1)` sentuh sakelar Input, `(2)` summon gerbang, `(3)` sambungkan kabel, `(4)` buang gerbang ke luar `AssemblyZone`.
+### 4.2 Detektor Gestur Dual-Kanal (`AirWeavingHandGestureDetector.cs`)
+- **Kepal (`Fist`) *Dorsal-Safe*:** Menggabungkan sudut tekukan 3D dengan metrik lipatan radial 2D agar kepalan dari sudut punggung tangan tetap responsif (debounce `25 ms`, *Pre-Fist Latch* `160 ms`), dilindungi `isFistAnatomyDominant` agar kepalan tidak dibajak menjadi `Pinch` tanpa mengganggu postur cubit kabel (`isTipToTipPinchPosture`).
+- **Sakelar & Drag Stabil:** Toggle sakelar `Input A/B` terpicu instan pada *rising-edge* `FistJustStarted`; perpindahan gerbang (`GateGrab`) menggunakan perpotongan *ray-plane* (`TryIntersectHandWithHoverPlane`) terhadap bidang hover meja agar bebas pergeseran kedalaman palsu.
+- **5 Pose Summon (`AirWeavingCircleSummoner.cs`):**
+  - `1 Telunjuk` -> **`AND`** (`A . B`)
+  - `2 Jari V` -> **`OR`** (`A + B`)
+  - `Jempol Atas` -> **`NOT`** (`!A`)
+  - `3 Jari` -> **`XOR`** (`A (+) B`)
+  - `4 Jari` -> **`NAND`** (`!(A . B)`)
+  - Dilengkapi guard pencegah salah-picu (`PoseConfirmHoldSeconds = 0.240f`, `StartVisualAngleDegrees = 105°`, `MinTotalArcLengthForStartVisual = 0.18f`).
 
-### 4.3 Pedagogi Live & Rapor Penguasaan (`Assets/Scripts/Levels/PedagogyMasteryHud.cs`)
-- ***Live Boolean Expression Chip* (Zero-GC, Dual-Mode):**
-  - Pil hologram ramping di kiri-atas tepat di bawah Bilah Atas `72 px` (bekerja identik di Mode Kartu v5 maupun Mode Udara v7.5, aman Safe Area Android 20:9).
-  - Mengevaluasi graf rangkaian aktif menjadi rumus aljabar Boolean formal + hasil `[0]`/`[1]` (mendukung cabang belum lengkap `?` & guard anti-siklus) tanpa alokasi runtime lewat `StringBuilder` + `char[]` + `TMP_Text.SetCharArray`.
-- **Modal `Rapor Penguasaan` (Laci `≡`):**
-  - Merangkum progres resmi 7 level kurikulum dari `GW_v3_*`: total bintang **`X/21`**, jumlah level lulus **`Y/7`**, dan **predikat penguasaan**.
-  - Mencatat statistik pedagogis terisolasi via `GW_v75_*`: counter ***Self-Debugging*** (perbaikan dari salah ke benar) serta pemisahan penyelesaian **Mode Kartu vs Mode Udara**, termasuk deteksi pasif saat progres direset.
+### 4.3 Stabilitas Panggung 3D & Kabel PBR (`AirWeavingStageController.cs`, `AirWeavingCableRouter.cs`, `AirWeavingHologramVisual.cs`)
+- **Kendali 2-Tangan Terbatas Aman:** Rentang kedalaman `2.10m – 5.40m`, *depth gain* & kecepatan terkendali (`1.80`), batas pan OBB dalam frustum (`55%` horizontal, `50%` vertikal), clamp sudut Orbit Pitch `[-28°, +42°]` dan Roll `[-25°, +25°]`, serta penonaktifan *Auto Edge-Pan* vertikal ke atas saat `GateGrab`.
+- **Kabel PBR & Proyeksi Kursor:** Pool 20 kabel tabung 3D PBR + 60 *Pulsing Signal Packets* Zero-GC. Garis proyeksi jatuh kursor (`Holo_CursorDropLine`) dibatasi maksimal `0.38` unit dan disembunyikan saat kursor melampaui `localPos.y > 0.55f` atau keluar `AssemblyZone`.
 
 ---
 
-## 5. Struktur Kurikulum & Progresi Level
+## 5. Kurikulum 7 Level & Mode Sandbox (Total 21 Bintang)
 
-Progresi disusun dari gerbang tunggal dasar menuju rangkaian komposit dan hukum aljabar Boolean (**7 Level Kurikulum = maks. 21 Bintang** + **Mode Sandbox** bebas). Sumber kebenaran implementasi berada di `Assets/Scripts/Levels/LevelAndUIManager.cs`.
-
-| Level | Konsep Inti & Judul Misi | Fokus Capaian Belajar & Solusi | Kuota |
-| :--- | :--- | :--- | :--- |
-| **Level 1** | **OR** *(Alarm Pintu & Jendela)* | Output = `1` jika A atau B bernilai `1` (`Y = A OR B`) | Maks 1 |
-| **Level 2** | **XOR** *(Sakelar Tangga Dua Arah)* | Output = `1` jika posisi A dan B berbeda (`Y = A XOR B`) | Maks 1 |
-| **Level 3** | **AND + NOT** *(Kunci Keamanan Brankas)* | Output = `1` hanya saat A = `1` dan B = `0` (`Y = A AND (NOT B)`) | Maks 2 |
-| **Level 4** | **NAND** *(Pemutus Darurat Reaktor)* | Output = `0` hanya saat A = `1` dan B = `1` (`Y = A NAND B`) | Maks 1 |
-| **Level 5** | **XNOR** *(Sinkronisasi Inti Kembar)* | Output = `1` saat A dan B bernilai sama (`Y = NOT(A XOR B)`) | Maks 2 |
-| **Level 6** | **NOR** *(Sensor Hening Ruang Server)* | Output = `1` hanya saat A = `0` dan B = `0` (`Y = NOT(A OR B)`) | Maks 2 |
-| **Level 7** | **De Morgan** *(Kunci Biometrik)* | Output = `0` hanya saat A = `0` dan B = `1` (`A OR (NOT B)` / `(NOT A) NAND B`) | Maks 2 |
-| **Sandbox** | **Eksplorasi Bebas** | Merangkai kombinasi bebas hingga 5 gerbang tanpa batas kuota | Bebas (∞) |
+| Level | Konsep & Judul Misi | Target Logika & Solusi Referensi | Kuota |
+| :---: | :--- | :--- | :---: |
+| **01** | **OR** — Alarm Pintu & Jendela | Output `1` jika A atau B bernilai `1` (`Y = A OR B`) | Maks `1` |
+| **02** | **XOR** — Sakelar Tangga Dua Arah | Output `1` jika A dan B berbeda (`Y = A XOR B`) | Maks `1` |
+| **03** | **AND + NOT** — Kunci Keamanan Brankas | Output `1` hanya saat A = `1` dan B = `0` (`Y = A AND (NOT B)`) | Maks `2` |
+| **04** | **NAND** — Pemutus Darurat Reaktor | Output `0` hanya saat A = `1` dan B = `1` (`Y = A NAND B`) | Maks `1` |
+| **05** | **XNOR** — Sinkronisasi Inti Kembar | Output `1` saat A dan B bernilai sama (`Y = NOT(A XOR B)`) | Maks `2` |
+| **06** | **NOR** — Sensor Hening Ruang Server | Output `1` hanya saat A = `0` dan B = `0` (`Y = NOT(A OR B)`) | Maks `2` |
+| **07** | **De Morgan** — Kunci Biometrik | Output `0` hanya saat A = `0` dan B = `1` (`A OR (NOT B)` / `(NOT A) NAND B`) | Maks `2` |
+| **Sandbox** | **Laboratorium Bebas** | Eksplorasi kombinasi gerbang bebas tanpa batas kuota | Bebas (`∞`) |
 
 ---
 
-## 6. Desain Visual, Audio, & UI/UX (`v7.5`)
+## 6. Sistem Visual, Audio, & Antarmuka (`v8.5.0`)
 
-- **Aset 3D & Material:** 12 model sci-fi *low-poly* **Quaternius (CC0)**, mekanisme terbuka *Open Cutaway* (`GateMechanismVisual`), Pod Tabel Kebenaran `2x2` (`OutputTruthPodVisual`), hologram melayang Mode Udara tanpa cincin port hantu & dengan cincin Output anti-clipping (`AirWeavingHologramVisual`, `AirWeavingOutputTrigger`), bayangan 4 siku `AssemblyZone`, peredaman skeleton halus, serta label kontekstual 3D kontras tinggi.
-- **Audio & VFX:** Umpan balik audio PCM prosedural umum (`LevelAndUIManager`) ditambah synthesizer spasial 100% interaktif khusus Mode Udara (`AirWeavingSpatialSfx.cs`: 24 cue *one-shot* + 2 *looping hum* anti-nyangkut + *soft limiter* `tanh` + cooldown per kategori, dapat dimatikan via Laci Menu Kompak `Audio: ON/OFF`), *Pulsing Signal Packets* Zero-GC di seluruh kabel Bezier, serta *zero-GC* `AR_SparkBurstPool`.
-- **Filosofi UI Diet — HUD Minimalis, Pedagogi Live, & Onboarding (`CompactHudMenuController.cs`, `PedagogyMasteryHud.cs`, `AirWeavingGestureGuide.cs`):**
-  - **Atas:** 1 Bilah Atas ramping (`72 px`) berisi Judul Level, Misi 1 baris, Kuota Gerbang (berubah merah berkontras tinggi jika terlampaui), tombol `?` panduan gestur (khusus Mode Udara), dan tombol ikon 3 garis `≡` pojok kanan atas. Tepat di kiri-atas bawah Bilah Atas tampil ***Live Boolean Expression Chip*** ramping (aktif di Mode Kartu & Mode Udara).
-  - **Laci Menu Kompak (`≡`):** Memuat `Mode: Udara (v7)` / `Mode: Kartu (v5)`, `Pilih Level / Sandbox`, `Reset Level`, `Rapor Penguasaan`, `Rapor CP`, `Petunjuk (0/3)`, `Audio: ON/OFF`, dan `Panduan Gestur` (khusus Mode Udara) + *scrim* klik-luar untuk menutup.
-  - **Bawah:**
-    - **Mode Udara (v7.5):** **0 tombol gameplay** (*100% Zero-Touch*), dengan **Pil Latihan Cepat 4 Langkah** non-intrusif opsional di tengah-bawah saat mode latihan aktif.
-    - **Mode Kartu (v5):** 4 kapsul ramping semi-transparan (`Input A`, `Input B`, `Uji Rangkaian` / `Level Berikutnya`).
-  - **Notifikasi (`Txt_Feedback`):** Mode *Toast-Only* berkontras tinggi (tersembunyi saat idle; gaya warna khusus untuk Gagal, Berhasil, & Petunjuk dengan prioritas aman serta pergeseran vertikal otomatis saat Pil Latihan aktif).
+- **Desain Visual (`GwThemeTokens.cs` & `GwIndustrial3DKit.cs`):** Bahasa visual *Smoked Optical Glass + Brushed Titanium* pada kanvas referensi `1920×1080`, seluruh ikon (simbol IEEE, pose jari, gestur, centang, cincin radio) dihasilkan secara prosedural via SDF Zero-GC tanpa membebani ukuran paket atau alokasi GC.
+- **Shader & Pencahayaan (`AirWeavingLightingAndShaderRig.cs`):** Built-in Render Pipeline (Forward) ramah OpenGLES3 dengan `ARBackdropDimming.shader`, `HologramFresnelHardware.shader`, dan rig pencahayaan 3-Point + Hemisphere analitik.
+- **Audio Spasial Prosedural (`AirWeavingSpatialSfx.cs`):** 24 cue *one-shot* ber-panning stereo spasial + 2 *looping hum* (seret kabel & gerbang dengan watchdog anti-nyangkut) + *soft limiter* `tanh`, 100% PCM prosedural Zero-GC.
+- **5 Overlay Inti v8.5:**
+  1. `AirWeavingTitleOverlay` — Layar Judul & Pemilih Mode (kartu 2 baris + cincin radio).
+  2. `AirWeavingMenuDrawerOverlay` — Laci Menu (`01 // MODE SIMULASI`, `02 // KEMAJUAN LEVEL (X/7)`, `03 // KONTROL & KALIBRASI`).
+  3. `AirWeavingLevelSelectorOverlay` — Peta Sirkuit 7 node kompak + panel detail misi berproteksi pedagogis.
+  4. `AirWeavingGestureGuide` — Modal 2 kolom (`01 // 3 GESTUR UTAMA` + `02 // 5 POSE SUMMON GERBANG` grid `3x2` + Latihan Cepat 4 Langkah).
+  5. `AirWeavingLevelCompleteModal` — Modal Verifikasi Lulus `4/4` dengan tabel kebenaran 1 kontainer bergaris grid `1px`.
 
 ---
 
-## 7. Backlog & Arah Pengembangan (`v7.x` / `v8.0` — Belum Diimplementasikan)
+## 7. Batasan Teknis & Rencana Pengembangan Selanjutnya
 
-*(Bagian ini hanya daftar kandidat fitur masa depan; jangan diimplementasikan kecuali diminta eksplisit oleh pengguna.)*
-- **v7.x (QA & Presentasi):**
-  - *In-Game Debug Console* tersembunyi (pemicu ketuk 3 jari) untuk inspeksi FPS, log error, dan status kamera di HP Android.
-  - Ikon aplikasi kustom (`Default Icon`) & *splash screen* GateWeaver AR.
-  - *Editor-only Mouse Fallback* ringan di Mode Udara untuk pengujian cepat tanpa webcam.
-- **v8.0 (Ekspansi Pedagogi & Interaksi):**
-  - Tantangan rangkaian 3-Input (`A`, `B`, `C`) atau *Half-Adder / Full-Adder* (gerbang majemuk + 2 output `Sum` & `Carry`).
-  - Ekspor ringkasan **Rapor Penguasaan / Rapor CP** siswa (CSV/PNG/kode sesi) untuk penilaian guru di kelas.
+- **Batasan Arsitektur Terkunci:** Unity `6000.6.9f1` Built-in RP (tanpa URP/AR Foundation/XR Plugin agar kompatibel penuh dengan Vuforia `11.4.4` & MediaPipe `0.16.3`), isolasi total kode Mode Udara di `Assets/Scripts/AirWeaving/`, serta Zero-GC pada loop `Update()` dan worker inferensi.
+- **Kandidat Pengembangan Pasca-`v8.5.0`:**
+  - *In-Game Telemetry Toggle* ringan (FPS & status kamera) untuk pengujian lapangan di perangkat Android beragam rasio layar.
+  - Tantangan lanjutan 3-Input (`A`, `B`, `C`) serta studi kasus *Half-Adder / Full-Adder* (2 output `Sum` & `Carry`).
+  - Ikon aplikasi kustom & *splash screen* rilis produksi.
