@@ -2,11 +2,11 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Pengendali Ruang Meja Hologram 3D Horizontal (GateWeaver AR v8.0 Tahap 5.5+ Focus-Point Orbit, Ultra-Wide Zoom 0.18x–15x, &amp; Lapangan 2.0x):
+/// Pengendali Ruang Meja Hologram 3D Horizontal (GateWeaver AR v8.0 Tahap 5.5+ Focus-Point Orbit, Ultra-Wide Zoom 0.18x-15x, &amp; Lapangan 2.0x):
 /// - Pivot 3D <c>HologramStageRoot</c> di depan <c>Camera.main</c> dengan bidang meja horizontal nyata 2.0x lebih luas
-///   (bidang <c>XZ</c> lokal, normal atas meja = <c>+Y</c> / <c>stageRoot.up</c>) pada kemiringan bawaan <c>DefaultElevationPitchDeg = 36°</c>
+///   (bidang <c>XZ</c> lokal, normal atas meja = <c>+Y</c> / <c>stageRoot.up</c>) pada kemiringan bawaan <c>DefaultElevationPitchDeg = 36 deg</c>
 ///   dan framing awal <c>DefaultZoomScale = 0.58f</c> sehingga seluruh lapangan 2.0x (termasuk Output kanan &amp; rak NOT) muat utuh dengan margin nyaman.
-/// - 100% bebas kontrol Mouse / Touchscreen di Mode Udara: Focus-Point Orbit Quaternion Arcball 360° mengelilingi titik yang sedang diamati,
+/// - 100% bebas kontrol Mouse / Touchscreen di Mode Udara: Focus-Point Orbit Quaternion Arcball 360 deg mengelilingi titik yang sedang diamati,
 ///   Ultra-Wide Air-Zoom multiplikatif/logaritmik (0.18x..15.0x) tepat menuju titik fokus, Free Air-Pan 3D berbasis OBB dinamis bebas mentok,
 ///   True Z-Axis Push/Pull terpisah dari Zoom, Inertial Coasting berbasis poros fokus anti-kick, dan Reset Panggung mulus.
 /// - Lantai Proyeksi Hologram 3D di bidang <c>XZ</c> (<c>y = 0</c>) + Cincin Bayangan Elips (Grounded Contact Rings) +
@@ -25,10 +25,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     public const float MaxPanOffsetX = 4.50f;
     public const float MaxPanOffsetY = 3.20f;
-    private const float MinDynamicPanOffsetX = 0.85f;
-    private const float MinDynamicPanOffsetY = 0.65f;
-    public const float MinStageDepthZ = 1.15f;
-    public const float MaxStageDepthZ = 9.50f;
+    public const float MinStageDepthZ = 2.10f;
+    public const float MaxStageDepthZ = 5.40f;
     public const float MaxPanDepthPullCloserZ = 2.67f;
     public const float MaxPanDepthPushFartherZ = 5.68f;
 
@@ -39,7 +37,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
     public const float MaxParallaxYawDeg = 7.0f;
     public const float MaxParallaxPitchDeg = 4.0f;
 
-    // Geometri vertikal di atas permukaan meja XZ (y = 0 adalah permukaan lantai meja) — Tahap 4.7 Full Free-View 6-DoF
+    // Geometri vertikal di atas permukaan meja XZ (y = 0 adalah permukaan lantai meja) -- Tahap 4.7 Full Free-View 6-DoF
     public const float StagePivotCameraOffsetY = -0.32f;
     public const float StageFloorLocalY = 0.000f;
     public const float ContactRingLocalY = 0.003f;
@@ -53,7 +51,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private const float PanSpringOmega = 14.0f;
     private const float ParallaxSpringOmega = 7.5f;
 
-    // Kurva Sensitivitas Non-Linear + Soft Detent halus di sudut pandang nyaman 36° (orbit 360° analog tetap 100% bebas)
+    // Kurva Sensitivitas Non-Linear + Soft Detent halus di sudut pandang nyaman 36 deg (orbit 360 deg analog tetap 100% bebas)
     private const float OrbitNonLinearRefStepDeg = 2.60f;
     private const float OrbitNonLinearFineFloor = 0.48f;
     private const float OrbitSoftDetentCaptureAngleDeg = 9.0f;
@@ -63,12 +61,16 @@ public sealed class AirWeavingStageController : MonoBehaviour
     // Parameter True Z-Axis Push/Pull Logaritmik Simetris (terpisah dari Zoom skala & Anchor 2D; log(curEstDepth / anchorEstDepth))
     private const float TwoHandDepthMinDeadzone = 0.018f;
     private const float TwoHandDepthRelativeDeadzone = 0.022f;
-    public const float TwoHandOrbitDepthGainMeters = 6.00f;
-    public const float TwoHandFreePanDepthGainMeters = 6.00f;
+    public const float TwoHandOrbitDepthGainMeters = 1.80f;
+    public const float TwoHandFreePanDepthGainMeters = 1.80f;
     private const float CarryPanDepthMinDeadzone = 0.020f;
     private const float CarryPanDepthRelativeDeadzone = 0.024f;
-    public const float CarryPanDepthGainMeters = 6.00f;
-    private const float MaxTwoHandDepthSpeedMetersPerSec = 7.50f;
+    public const float CarryPanDepthGainMeters = 1.80f;
+    private const float MaxTwoHandDepthSpeedMetersPerSec = 1.80f;
+    // Clamp sudut Orbit dua tangan relatif kemiringan bawaan: Pitch [-28, +42] deg & Roll [-25, +25] deg (Yaw tetap 360 deg bebas)
+    public const float MinOrbitPitchDeg = -28.0f;
+    public const float MaxOrbitPitchDeg = 42.0f;
+    public const float MaxOrbitRollAbsDeg = 25.0f;
 
     // Parameter Inertial Coasting Quaternion Anti-Kick (ring-buffer tertunda 55-130 ms + deadzone lepas tenang terpisah XY vs Z + zoom logaritmik)
     private const float StageCoastDamping = 6.2f;
@@ -92,30 +94,40 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private const int GridInternalVerticalLines = 17;
     private const int GridInternalHorizontalLines = 13;
     private const int GridTotalLineCount = GridInternalVerticalLines + GridInternalHorizontalLines;
-    private const float GridNormalHalfWidth = 0.0020f;
-    private const float GridCenterAxisHalfWidth = 0.0032f;
+    private const int GridMajorCrossCols = 5;
+    private const int GridMajorCrossRows = 3;
+    private const int GridCrosshairSegmentCount = GridMajorCrossCols * GridMajorCrossRows * 2;
+    private const int GridTotalQuadCount = GridTotalLineCount + GridCrosshairSegmentCount;
+    private const float GridNormalHalfWidth = 0.0014f;
+    private const float GridCenterAxisHalfWidth = 0.0020f;
+    private const float GridCrossTickHalfLength = 0.036f;
+    private const float GridCrossTickHalfWidth = 0.0020f;
+    private const int RackDockSlotCount = 5;
+    private static readonly float[] RackDockSlotBaseX = { -1.44f, -0.72f, 0.00f, 0.72f, 1.44f };
     private const int ContactRingSegments = 20;
     private const int MaxContactRingSlots = 8; // 0: InputA, 1: InputB, 2: Output, 3..7: 5 Gerbang Logika
 
-    private static readonly Color FloorDeckGlassColor = new Color(0.02f, 0.14f, 0.26f, 0.20f);
-    private static readonly Color FloorGridLineColor = new Color(0.16f, 0.88f, 1.00f, 0.20f);
-    private static readonly Color FloorCenterAxisColor = new Color(0.26f, 0.94f, 1.00f, 0.34f);
-    private static readonly Color FloorWingLineColor = new Color(0.18f, 0.88f, 1.00f, 0.32f);
-    private static readonly Color FloorOuterBorderColor = new Color(0.18f, 0.90f, 1.00f, 0.62f);
-    private static readonly Color FloorInnerArenaBorderColor = new Color(0.22f, 0.92f, 1.00f, 0.44f);
-    private static readonly Color FloorOuterShadowColor = new Color(0.02f, 0.06f, 0.12f, 0.68f);
-    private static readonly Color FloorDeleteWarningColor = new Color(1.00f, 0.26f, 0.22f, 0.96f);
-    private static readonly Color FloorDeleteShadowColor = new Color(0.22f, 0.02f, 0.02f, 0.78f);
+    // Palet v8.5 Smoked Optical Tray + Brushed Titanium (tanpa grid neon cyan & tanpa cincin lantai ramai)
+    private static readonly Color FloorDeckGlassColor = GwIndustrial3DKit.ColorSmokedOpticalTray;
+    private static readonly Color FloorGridLineColor = new Color(0.92f, 0.95f, 0.98f, 0.095f);
+    private static readonly Color FloorCenterAxisColor = new Color(0.96f, 0.98f, 1.00f, 0.120f);
+    private static readonly Color FloorGridCrossTickColor = new Color(0.96f, 0.98f, 1.00f, 0.220f);
+    private static readonly Color FloorWingLineColor = new Color(1.00f, 1.00f, 1.00f, 0.150f);
+    private static readonly Color FloorOuterBorderColor = new Color(0.82f, 0.86f, 0.92f, 0.280f);
+    private static readonly Color FloorInnerArenaBorderColor = new Color(1.00f, 1.00f, 1.00f, 0.150f);
+    private static readonly Color FloorOuterShadowColor = new Color(0.04f, 0.05f, 0.08f, 0.540f);
+    private static readonly Color FloorDeleteWarningColor = new Color(0xEF / 255f, 0x44 / 255f, 0x44 / 255f, 0.92f);
+    private static readonly Color FloorDeleteShadowColor = new Color(0.20f, 0.03f, 0.03f, 0.72f);
 
-    private static readonly Color ContactInputAColor = new Color(0.24f, 0.94f, 1.00f, 0.72f);
-    private static readonly Color ContactInputBColor = new Color(1.00f, 0.86f, 0.26f, 0.72f);
-    private static readonly Color ContactOutputColor = new Color(0.28f, 0.98f, 0.76f, 0.74f);
-    private static readonly Color ContactGateRestColor = new Color(0.22f, 0.92f, 1.00f, 0.70f);
-    private static readonly Color ContactGateParkedColor = new Color(0.20f, 0.86f, 1.00f, 0.56f);
-    private static readonly Color ContactGateLiftedColor = new Color(1.00f, 0.88f, 0.30f, 0.68f);
-    private static readonly Color ContactGateDeleteColor = new Color(1.00f, 0.26f, 0.22f, 0.86f);
-    private static readonly Color GridSnapTargetOuterColor = new Color(0.30f, 1.00f, 0.84f, 0.86f);
-    private static readonly Color GridSnapTargetInnerColor = new Color(0.76f, 1.00f, 0.38f, 0.72f);
+    private static readonly Color ContactInputAColor = new Color(0x38 / 255f, 0xBD / 255f, 0xF8 / 255f, 0.36f);
+    private static readonly Color ContactInputBColor = new Color(0x38 / 255f, 0xBD / 255f, 0xF8 / 255f, 0.36f);
+    private static readonly Color ContactOutputColor = new Color(0x10 / 255f, 0xB9 / 255f, 0x81 / 255f, 0.36f);
+    private static readonly Color ContactGateRestColor = new Color(0x94 / 255f, 0xA3 / 255f, 0xB8 / 255f, 0.32f);
+    private static readonly Color ContactGateParkedColor = new Color(0x94 / 255f, 0xA3 / 255f, 0xB8 / 255f, 0.20f);
+    private static readonly Color ContactGateLiftedColor = new Color(0x38 / 255f, 0xBD / 255f, 0xF8 / 255f, 0.48f);
+    private static readonly Color ContactGateDeleteColor = new Color(0xEF / 255f, 0x44 / 255f, 0x44 / 255f, 0.82f);
+    private static readonly Color GridSnapTargetOuterColor = new Color(0x38 / 255f, 0xBD / 255f, 0xF8 / 255f, 0.56f);
+    private static readonly Color GridSnapTargetInnerColor = new Color(0.96f, 0.98f, 1.00f, 0.38f);
 
     public struct ContactNodeDescriptor
     {
@@ -140,14 +152,29 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private Material floorDeckQuadMat;
     private readonly Vector3[] floorDeckVerticesBuffer = new Vector3[9];
 
-    // Grid proyeksi internal 17x13 digabung menjadi 1 static ribbon Mesh (Cull Off, 1 draw call, 0 CPU per frame)
+    // Bingkai Tepi Fisik Brushed Titanium Ber-Bevel (split/flat normals CNC mengelilingi Smoked Optical Tray)
+    private MeshFilter floorBevelFrameMeshFilter;
+    private MeshRenderer floorBevelFrameRenderer;
+    private Mesh floorBevelFrameMesh;
+    private readonly List<Vector3> bevelFrameVertsList = new List<Vector3>(128);
+    private readonly List<Vector3> bevelFrameNormsList = new List<Vector3>(128);
+    private readonly List<int> bevelFrameTrisList = new List<int>(192);
+    private readonly Vector3[] innerFrameLoopBuffer = new Vector3[8];
+    private readonly Vector3[] midInnerFrameLoopBuffer = new Vector3[8];
+    private readonly Vector3[] midOuterFrameLoopBuffer = new Vector3[8];
+    private readonly Vector3[] outerFrameLoopBuffer = new Vector3[8];
+
+    // 5 Bantalan Dok Grafit Datar (Mat_AnodizedGraphite) di zona rak gerbang belakang
+    private readonly Transform[] rackDockPadTransforms = new Transform[RackDockSlotCount];
+
+    // Grid arsitektural 17x13 + tanda '+' mikro di persimpangan utama digabung menjadi 1 static ribbon Mesh (1 draw call, 0 CPU/frame)
     private MeshFilter floorGridRibbonMeshFilter;
     private MeshRenderer floorGridRibbonRenderer;
     private Mesh floorGridRibbonMesh;
     private Material gridRibbonMat;
-    private readonly Vector3[] gridRibbonVertices = new Vector3[GridTotalLineCount * 4];
-    private readonly Color32[] gridRibbonColors = new Color32[GridTotalLineCount * 4];
-    private readonly int[] gridRibbonTriangles = new int[GridTotalLineCount * 6];
+    private readonly Vector3[] gridRibbonVertices = new Vector3[GridTotalQuadCount * 4];
+    private readonly Color32[] gridRibbonColors = new Color32[GridTotalQuadCount * 4];
+    private readonly int[] gridRibbonTriangles = new int[GridTotalQuadCount * 6];
 
     private LineRenderer outerBorderShadowRenderer;
     private LineRenderer outerBorderGlowRenderer;
@@ -201,7 +228,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
     private readonly ContactSlotCache[] contactSlotCaches = new ContactSlotCache[MaxContactRingSlots];
     private readonly Vector3[] stemLocalBuffer = new Vector3[2];
 
-    // State Air-Orbit 360° Quaternion Arcball Murni (tanpa Euler clamp / gimbal lock), Focus-Point Orbit, Ultra-Wide Zoom, & Dynamic Hand Parallax
+    // State Air-Orbit 360 deg Quaternion Arcball Murni (tanpa Euler clamp / gimbal lock), Focus-Point Orbit, Ultra-Wide Zoom, & Dynamic Hand Parallax
     private Quaternion targetOrbitRotation = Quaternion.identity;
     private Quaternion currentOrbitRotation = Quaternion.identity;
 
@@ -323,8 +350,11 @@ public sealed class AirWeavingStageController : MonoBehaviour
         floorVisualGroupObj = new GameObject("HoloStage_HorizontalTableFloor3D");
         floorVisualGroupObj.transform.SetParent(stageRootTransform, false);
 
-        // 1. Material Lantai Proyeksi & Grid Sci-Fi (Sprites/Default = Cull Off, aman 360° upside-down & OpenGLES3)
-        floorDeckQuadMat = CreateSafeSpritesMaterial(FloorDeckGlassColor, 2975);
+        // 1. Material Lantai Smoked Optical Tray & Grid Arsitektural Halus
+        GwIndustrial3DKit.EnsureInitialized();
+        floorDeckQuadMat = GwIndustrial3DKit.Mat_SmokedOpticalTray != null
+            ? GwIndustrial3DKit.Mat_SmokedOpticalTray
+            : CreateSafeSpritesMaterial(FloorDeckGlassColor, 2975);
         gridRibbonMat = CreateSafeSpritesMaterial(Color.white, 2977);
         wingLineMat = CreateSafeSpritesMaterial(FloorWingLineColor, 2978);
         innerArenaBorderMat = CreateSafeSpritesMaterial(FloorInnerArenaBorderColor, 2979);
@@ -340,7 +370,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
             contactSinTable[i] = Mathf.Sin(angle);
         }
 
-        // 2. Bidang Kaca Meja Hologram Horizontal Utuh (Mesh Oktagon Ber-Chamfer rata di bidang XZ lokal panggung)
+        // 2. Pelat Smoked Optical Tray Horizontal Utuh (~44% transparan, Mesh Oktagon Ber-Chamfer rata di bidang XZ lokal panggung)
         GameObject deckObj = new GameObject("HoloStage_FloorGlassDeck");
         deckObj.transform.SetParent(floorVisualGroupObj.transform, false);
         floorDeckMeshFilter = deckObj.AddComponent<MeshFilter>();
@@ -354,21 +384,56 @@ public sealed class AirWeavingStageController : MonoBehaviour
         floorDeckOctagonMesh = new Mesh { name = "HoloStage_UnifiedOctagonDeckMesh" };
         floorDeckMeshFilter.sharedMesh = floorDeckOctagonMesh;
 
-        // 3. Bingkai Luar Dek Meja Utuh + Bingkai Dalam Zona Rakit (Octagon/Chamfered Sci-Fi Frame di bidang XZ meja)
-        outerBorderShadowRenderer = CreateLocalLine("HoloStage_OuterBorderShadow", floorVisualGroupObj.transform, 8, loop: true, width: 0.0130f, outerBorderShadowMat);
-        outerBorderGlowRenderer = CreateLocalLine("HoloStage_OuterBorderGlow", floorVisualGroupObj.transform, 8, loop: true, width: 0.0075f, outerBorderGlowMat);
-        innerArenaBorderRenderer = CreateLocalLine("HoloStage_InnerArenaBorder", floorVisualGroupObj.transform, 8, loop: true, width: 0.0052f, innerArenaBorderMat);
+        // 2B. Bingkai Tepi Fisik Titanium Ber-Bevel mengelilingi Smoked Optical Tray (varian #848E9C lebih tenang/ramping)
+        GameObject bevelFrameObj = new GameObject("HoloStage_TitaniumBevelFrame");
+        bevelFrameObj.transform.SetParent(floorVisualGroupObj.transform, false);
+        floorBevelFrameMeshFilter = bevelFrameObj.AddComponent<MeshFilter>();
+        floorBevelFrameRenderer = bevelFrameObj.AddComponent<MeshRenderer>();
+        floorBevelFrameRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        floorBevelFrameRenderer.receiveShadows = false;
+        Material frameTitaniumMat = GwIndustrial3DKit.Mat_StageFrameTitanium != null
+            ? GwIndustrial3DKit.Mat_StageFrameTitanium
+            : GwIndustrial3DKit.Mat_BrushedTitanium;
+        if (frameTitaniumMat != null)
+        {
+            floorBevelFrameRenderer.sharedMaterial = frameTitaniumMat;
+        }
+        floorBevelFrameMesh = new Mesh { name = "HoloStage_TitaniumBevelFrameMesh" };
+        floorBevelFrameMeshFilter.sharedMesh = floorBevelFrameMesh;
 
-        // 4. 4 Siku Sudut Zona Rakit Dipertegas di Permukaan Meja XZ
+        // 2C. 5 Bantalan Dok Grafit Datar (Mat_AnodizedGraphite #1C2029) tepat di bawah posisi parkir 5 gerbang rak
+        Mesh dockPadMesh = GwIndustrial3DKit.GetChamferedBoxMesh();
+        Material dockPadMat = GwIndustrial3DKit.Mat_AnodizedGraphite;
+        for (int d = 0; d < RackDockSlotCount; d++)
+        {
+            float normX = (d - 2.0f) * 0.5f;
+            float curvedRackZ = 1.56f + (0.150f * normX * normX);
+            MeshRenderer dockMr = GwIndustrial3DKit.CreateMeshPart(
+                $"HoloStage_RackDockPad_{d}",
+                dockPadMesh,
+                floorVisualGroupObj.transform,
+                new Vector3(RackDockSlotBaseX[d], StageFloorLocalY + 0.006f, curvedRackZ),
+                new Vector3(0f, -normX * 16.0f, 0f),
+                new Vector3(0.32f, 0.012f, 0.24f),
+                dockPadMat);
+            rackDockPadTransforms[d] = dockMr != null ? dockMr.transform : null;
+        }
+
+        // 3. Garis Hairline Tepi Dalam & Zona Rakit (tanpa pendar neon berlebihan)
+        outerBorderShadowRenderer = CreateLocalLine("HoloStage_OuterBorderShadow", floorVisualGroupObj.transform, 8, loop: true, width: 0.0065f, outerBorderShadowMat);
+        outerBorderGlowRenderer = CreateLocalLine("HoloStage_OuterBorderGlow", floorVisualGroupObj.transform, 8, loop: true, width: 0.0036f, outerBorderGlowMat);
+        innerArenaBorderRenderer = CreateLocalLine("HoloStage_InnerArenaBorder", floorVisualGroupObj.transform, 8, loop: true, width: 0.0030f, innerArenaBorderMat);
+
+        // 4. 4 Siku Sudut Hairline Zona Rakit di Permukaan Meja XZ
         cornerShadowRenderers = new LineRenderer[4];
         cornerBracketRenderers = new LineRenderer[4];
         for (int c = 0; c < 4; c++)
         {
-            cornerShadowRenderers[c] = CreateLocalLine($"HoloStage_CornerShadow_{c}", floorVisualGroupObj.transform, 3, loop: false, width: 0.0135f, cornerShadowMat);
-            cornerBracketRenderers[c] = CreateLocalLine($"HoloStage_CornerBracket_{c}", floorVisualGroupObj.transform, 3, loop: false, width: 0.0085f, cornerBracketMat);
+            cornerShadowRenderers[c] = CreateLocalLine($"HoloStage_CornerShadow_{c}", floorVisualGroupObj.transform, 3, loop: false, width: 0.0070f, cornerShadowMat);
+            cornerBracketRenderers[c] = CreateLocalLine($"HoloStage_CornerBracket_{c}", floorVisualGroupObj.transform, 3, loop: false, width: 0.0045f, cornerBracketMat);
         }
 
-        // 5. Grid Proyeksi Sci-Fi Internal 17x13 sebagai 1 Static Ribbon Mesh (Cull Off Sprites/Default + vertex colors)
+        // 5. Grid Arsitektural 17x13 + Tanda '+' Mikro di Persimpangan Utama sebagai 1 Static Ribbon Mesh
         GameObject gridObj = new GameObject("HoloStage_FloorGridRibbon");
         gridObj.transform.SetParent(floorVisualGroupObj.transform, false);
         floorGridRibbonMeshFilter = gridObj.AddComponent<MeshFilter>();
@@ -380,10 +445,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
             floorGridRibbonRenderer.sharedMaterial = gridRibbonMat;
         }
         floorGridRibbonMesh = new Mesh { name = "HoloStage_UnifiedGridRibbonMesh" };
-        for (int lineIdx = 0; lineIdx < GridTotalLineCount; lineIdx++)
+        for (int quadIdx = 0; quadIdx < GridTotalQuadCount; quadIdx++)
         {
-            int vBase = lineIdx * 4;
-            int tBase = lineIdx * 6;
+            int vBase = quadIdx * 4;
+            int tBase = quadIdx * 6;
             gridRibbonTriangles[tBase] = vBase;
             gridRibbonTriangles[tBase + 1] = vBase + 1;
             gridRibbonTriangles[tBase + 2] = vBase + 2;
@@ -393,11 +458,13 @@ public sealed class AirWeavingStageController : MonoBehaviour
         }
         floorGridRibbonMeshFilter.sharedMesh = floorGridRibbonMesh;
 
-        // 6. Garis Pembatas & Dermaga Sayap Input (Kiri), Sayap Output (Kanan), & Teras Rak Parkir (Belakang Meja)
+        // 6. Garis Hairline Tunggal Pembatas Zona Rak Gerbang di Belakang (sayap neon kiri/kanan dinonaktifkan)
         wingGuideRenderers = new LineRenderer[3];
-        wingGuideRenderers[0] = CreateLocalLine("HoloStage_LeftInputWingBay", floorVisualGroupObj.transform, 4, loop: true, width: 0.0038f, wingLineMat);
-        wingGuideRenderers[1] = CreateLocalLine("HoloStage_RightOutputWingBay", floorVisualGroupObj.transform, 4, loop: true, width: 0.0038f, wingLineMat);
-        wingGuideRenderers[2] = CreateLocalLine("HoloStage_RearRackTerraceBay", floorVisualGroupObj.transform, 4, loop: true, width: 0.0038f, wingLineMat);
+        wingGuideRenderers[0] = CreateLocalLine("HoloStage_LeftInputWingBay", floorVisualGroupObj.transform, 2, loop: false, width: 0.0024f, wingLineMat);
+        wingGuideRenderers[1] = CreateLocalLine("HoloStage_RightOutputWingBay", floorVisualGroupObj.transform, 2, loop: false, width: 0.0024f, wingLineMat);
+        wingGuideRenderers[2] = CreateLocalLine("HoloStage_RearRackTerraceBay", floorVisualGroupObj.transform, 2, loop: false, width: 0.0028f, wingLineMat);
+        wingGuideRenderers[0].enabled = false;
+        wingGuideRenderers[1].enabled = false;
 
         // 7. Pool 8 Grounded Contact Rings (Terbaring rata di bidang XZ meja -> tampak sebagai elips perspektif 3D + Tiang Vertikal Y)
         contactOuterRings = new LineRenderer[MaxContactRingSlots];
@@ -884,7 +951,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
         dynamicMinStageDepthZ = Mathf.Max(MinStageDepthZ, nearClip + 0.65f);
         dynamicMaxStageDepthZ = Mathf.Max(dynamicMinStageDepthZ + 0.50f, MaxStageDepthZ);
 
-        // Hitung OBB terproyeksi dari dek hologram 2x terkalikan safeZoom & rotasi 360° aktual di ruang kamera
+        // Hitung OBB terproyeksi dari dek hologram 2x terkalikan safeZoom & rotasi 360 deg aktual di ruang kamera
         Quaternion stageRotCam = targetOrbitRotation * DefaultBaseTiltRotation;
         float deckCenterY = (DeckMinY + DeckMaxY) * 0.5f;
         float deckHalfY = (DeckMaxY - DeckMinY) * 0.5f;
@@ -894,11 +961,9 @@ public sealed class AirWeavingStageController : MonoBehaviour
         Vector3 axisZ = stageRotCam * (Vector3.forward * (deckHalfZ * safeZoom));
         Vector3 deckCenterOffsetCam = stageRotCam * (new Vector3(deckCenterX, deckCenterY, deckCenterZ) * safeZoom);
 
-        float worldHalfX = Mathf.Abs(axisX.x) + Mathf.Abs(axisY.x) + Mathf.Abs(axisZ.x);
-        float worldHalfY = Mathf.Abs(axisX.y) + Mathf.Abs(axisY.y) + Mathf.Abs(axisZ.y);
         float worldHalfZ = Mathf.Abs(axisX.z) + Mathf.Abs(axisY.z) + Mathf.Abs(axisZ.z);
 
-        // Izinkan pivot panggung berayun penuh ±worldHalfZ saat Focus-Point Orbit makro (10x–15x) di tepi papan,
+        // Izinkan pivot panggung berayun penuh +/-worldHalfZ saat Focus-Point Orbit makro (10x-15x) di tepi papan,
         // sambil menjamin minimal sebagian bidang dek tetap berada di rentang aman [dynamicMinStageDepthZ..dynamicMaxStageDepthZ].
         dynamicMinPanZ = dynamicMinStageDepthZ - workbenchDepth - deckCenterOffsetCam.z - worldHalfZ;
         dynamicMaxPanZ = dynamicMaxStageDepthZ - workbenchDepth - deckCenterOffsetCam.z + worldHalfZ;
@@ -914,10 +979,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
         float frustumHalfH = effectiveViewZ * Mathf.Tan(halfFovRad);
         float frustumHalfW = frustumHalfH * aspect;
 
-        // Pada Zoom 0.18x–15x, seluruh pojok ujung lapangan 2x (Input, Output, Rak Parkir) selalu dapat digeser hingga ke
-        // tengah layar tanpa mentok, sambil menjamin minimal sebagian dek hologram selalu tetap terlihat di dalam frustum kamera.
-        float allowedDeckCenterX = Mathf.Max(MinDynamicPanOffsetX, worldHalfX + (frustumHalfW * 0.65f));
-        float allowedDeckCenterY = Mathf.Max(MinDynamicPanOffsetY, worldHalfY + (frustumHalfH * 0.62f));
+        // Pada Zoom 0.18x-15x, pusat dek dibatasi ketat (X <= 1.65m / 55% frustum, Y <= 1.10m / 50% frustum) agar meja
+        // hologram tidak pernah terlempar keluar layar oleh Pan/Edge-Pan/Orbit; dek selalu tetap terlihat di dalam frustum.
+        float allowedDeckCenterX = Mathf.Min(1.65f, frustumHalfW * 0.55f);
+        float allowedDeckCenterY = Mathf.Min(1.10f, frustumHalfH * 0.50f);
 
         dynamicMinPanX = -allowedDeckCenterX - deckCenterOffsetCam.x;
         dynamicMaxPanX = allowedDeckCenterX - deckCenterOffsetCam.x;
@@ -926,7 +991,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
     }
 
     /// <summary>
-    /// Menerapkan Focus-Point Orbit Quaternion Arcball 360° bebas penuh (mengelilingi <c>orbitFocusLocal</c> yang sedang diamati),
+    /// Menerapkan Focus-Point Orbit Quaternion Arcball 360 deg bebas penuh (mengelilingi <c>orbitFocusLocal</c> yang sedang diamati),
     /// Ultra-Wide Air-Zoom multiplikatif/logaritmik (0.18x..15.0x) tepat menuju titik fokus, serta True Z-Axis Push/Pull absolut
     /// (<c>avgPalmScale</c>) yang 100% terpisah dari skala Zoom. Zero-GC.
     /// </summary>
@@ -970,7 +1035,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
         Quaternion stageRotBefore = targetOrbitRotation * DefaultBaseTiltRotation;
         Vector3 focusCamBefore = pivotBefore + (stageRotBefore * (orbitFocusLocal * targetZoomScale));
 
-        // 3. Pre-multiply Quaternion Arcball 360° dengan kurva sensitivitas non-linear (gerakan mikro presisi, sapuan lebar penuh)
+        // 3. Pre-multiply Quaternion Arcball 360 deg dengan kurva sensitivitas non-linear (gerakan mikro presisi, sapuan lebar penuh)
         float shapedYawDeg = ShapeOrbitSensitivityDeg(yawDeltaDeg);
         float shapedPitchDeg = ShapeOrbitSensitivityDeg(pitchDeltaDeg);
         float shapedRollDeg = ShapeOrbitSensitivityDeg(rollDeltaDeg);
@@ -981,7 +1046,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
         Quaternion deltaCamLocal = camTransform != null
             ? (Quaternion.Inverse(camTransform.rotation) * deltaWorld * camTransform.rotation)
             : deltaWorld;
-        targetOrbitRotation = NormalizeQuaternion(deltaCamLocal * targetOrbitRotation);
+        Quaternion prevOrbitRotation = targetOrbitRotation;
+        targetOrbitRotation = ClampOrbitPitchRoll(NormalizeQuaternion(deltaCamLocal * prevOrbitRotation));
+        // Delta efektif pasca-clamp agar kompensasi Focus-Point tetap konsisten saat sudut mentok di batas Pitch/Roll
+        deltaCamLocal = NormalizeQuaternion(targetOrbitRotation * Quaternion.Inverse(prevOrbitRotation));
 
         // 4. Ultra-Wide Zoom multiplikatif (0.18x..15.0x)
         float prevZoom = Mathf.Max(MinZoomScale, targetZoomScale);
@@ -991,7 +1059,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
         // 5. Kompensasi Focus-Point Orbit + Focus-Point Zoom:
         //    P_new = focusCamBefore + (deltaCamLocal * (pivotBefore - focusCamBefore)) * zoomRatio
-        //    Menjamin titik orbitFocusLocal tetap terkunci diam di layar selama putaran 360° maupun zoom makro 15x!
+        //    Menjamin titik orbitFocusLocal tetap terkunci diam di layar selama putaran 360 deg maupun zoom makro 15x!
         Vector3 pivotAfter = focusCamBefore + ((deltaCamLocal * (pivotBefore - focusCamBefore)) * zoomRatio);
         targetPanOffset.x = pivotAfter.x;
         targetPanOffset.y = pivotAfter.y - StagePivotCameraOffsetY;
@@ -1005,7 +1073,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
     /// <summary>
     /// Menerapkan Free Air-Pan 3D (1 Tangan Pinch + 1 Tangan Fist): menggeser panggung meja bebas pada sumbu X/Y
-    /// hingga pojok ujung lapangan 2x pada Zoom 0.18x–15x serta True Z-Axis Push/Pull absolut (<c>avgPalmScale</c>). Zero-GC.
+    /// hingga pojok ujung lapangan 2x pada Zoom 0.18x-15x serta True Z-Axis Push/Pull absolut (<c>avgPalmScale</c>). Zero-GC.
     /// </summary>
     public void ApplyTwoHandFreePan(Vector2 panDeltaXY, float avgPalmScale, float dt = 0.016f)
     {
@@ -1185,7 +1253,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
         float delayedLogZoomVel = delayedLogZoomSum * invDelayed;
         Vector3 delayedPanVel = delayedPanSum * invDelayed;
 
-        // 1. Orbit Angular Coasting (deadzone ~18°/s; jika pelan/sempat diam -> coast = 0 & kunci target = current)
+        // 1. Orbit Angular Coasting (deadzone ~18 deg/s; jika pelan/sempat diam -> coast = 0 & kunci target = current)
         float angSpeed = delayedAngVel.magnitude;
         if (recentCount > 0)
         {
@@ -1332,7 +1400,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
     }
 
     /// <summary>
-    /// Memperbarui smoothing Quaternion.Slerp eksponensial Focus-Point Orbit 360°, Inertial Coasting berbasis poros fokus,
+    /// Memperbarui smoothing Quaternion.Slerp eksponensial Focus-Point Orbit 360 deg, Inertial Coasting berbasis poros fokus,
     /// Ultra-Wide Air-Zoom logaritmik (0.18x..15.0x), Free Air-Pan 3D berbasis OBB dinamis, dan Dynamic Hand Parallax,
     /// lalu menerapkan transform dunia meja hologram horizontal <c>HologramStageRoot</c>. Zero-GC.
     /// </summary>
@@ -1498,7 +1566,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 if (coastingSpeedDegPerSec > CoastAngularStopSpeedDegPerSec && coastingAxis.sqrMagnitude > 0.5f)
                 {
                     coastRotDelta = Quaternion.AngleAxis(coastingSpeedDegPerSec * dt, coastingAxis);
-                    targetOrbitRotation = NormalizeQuaternion(coastRotDelta * targetOrbitRotation);
+                    targetOrbitRotation = ClampOrbitPitchRoll(NormalizeQuaternion(coastRotDelta * targetOrbitRotation));
                     didOrbitOrZoomCoast = true;
                 }
 
@@ -1596,8 +1664,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
                 if (Mathf.Abs(coastLogZoomVelocity) <= StageCoastStopEpsilon) coastLogZoomVelocity = 0f;
                 if (coastPanVelocity.sqrMagnitude <= StageCoastStopEpsilon * StageCoastStopEpsilon) coastPanVelocity = Vector3.zero;
 
-                // Soft Detent halus di sudut pandang nyaman 36° (targetOrbitRotation -> Quaternion.identity)
-                // hanya saat dilepas pelan dalam zona < 9° agar orbit 360° analog tetap 100% bebas tanpa terasa nyangkut.
+                // Soft Detent halus di sudut pandang nyaman 36 deg (targetOrbitRotation -> Quaternion.identity)
+                // hanya saat dilepas pelan dalam zona < 9 deg agar orbit 360 deg analog tetap 100% bebas tanpa terasa nyangkut.
                 if (coastingSpeedDegPerSec <= OrbitSoftDetentMaxCoastSpeedDegPerSec)
                 {
                     float devFromComfortDeg = Quaternion.Angle(targetOrbitRotation, Quaternion.identity);
@@ -1626,13 +1694,13 @@ public sealed class AirWeavingStageController : MonoBehaviour
             }
         }
 
-        // Perbarui batas OBB frustum X/Y/Z mengikuti kedalaman Z, rotasi 360°, & skala Zoom 0.18x..15x terkini, lalu clamp aman
+        // Perbarui batas OBB frustum X/Y/Z mengikuti kedalaman Z, rotasi 360 deg, & skala Zoom 0.18x..15x terkini, lalu clamp aman
         RefreshDynamicPanBounds(mainCam, workbenchDepth, targetZoomScale, targetPanOffset.z);
         targetPanOffset.x = Mathf.Clamp(targetPanOffset.x, dynamicMinPanX, dynamicMaxPanX);
         targetPanOffset.y = Mathf.Clamp(targetPanOffset.y, dynamicMinPanY, dynamicMaxPanY);
         targetPanOffset.z = Mathf.Clamp(targetPanOffset.z, dynamicMinPanZ, dynamicMaxPanZ);
 
-        // 1. Smoothing Quaternion.Slerp Air-Orbit 360° + pegas logaritmik Air-Zoom (seragam di 0.2x..12x) + Focus-Locked Pan
+        // 1. Smoothing Quaternion.Slerp Air-Orbit 360 deg + pegas logaritmik Air-Zoom (seragam di 0.2x..12x) + Focus-Locked Pan
         float orbitSlerpAlpha = dt > 0.00001f ? (1f - Mathf.Exp(-OrbitSlerpRate * dt)) : 1f;
         float targetLogZoom = Mathf.Log(Mathf.Clamp(targetZoomScale, MinZoomScale, MaxZoomScale));
         if (hasActiveOrbitFocus)
@@ -1756,18 +1824,18 @@ public sealed class AirWeavingStageController : MonoBehaviour
         Color arenaBorderCol = FloorInnerArenaBorderColor;
         Color cornerCol = FloorOuterBorderColor;
         Color shadowCol = FloorOuterShadowColor;
-        float cornerWidth = 0.0085f;
+        float cornerWidth = 0.0045f;
 
         if (isGrabbingGate)
         {
             if (isGrabbedGateOutsideZone)
             {
                 float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 9.0f));
-                outerDeckCol = new Color(1.00f, 0.34f, 0.26f, 0.62f + (0.18f * pulse));
-                arenaBorderCol = new Color(1.00f, 0.26f, 0.22f, 0.74f + (0.22f * pulse));
-                cornerCol = new Color(FloorDeleteWarningColor.r, FloorDeleteWarningColor.g, FloorDeleteWarningColor.b, 0.86f + (0.14f * pulse));
+                outerDeckCol = new Color(0xEF / 255f, 0x44 / 255f, 0x44 / 255f, 0.55f + (0.20f * pulse));
+                arenaBorderCol = new Color(0xEF / 255f, 0x44 / 255f, 0x44 / 255f, 0.72f + (0.20f * pulse));
+                cornerCol = new Color(FloorDeleteWarningColor.r, FloorDeleteWarningColor.g, FloorDeleteWarningColor.b, 0.84f + (0.14f * pulse));
                 shadowCol = FloorDeleteShadowColor;
-                cornerWidth = 0.0115f;
+                cornerWidth = 0.0072f;
             }
             else
             {
@@ -1775,11 +1843,11 @@ public sealed class AirWeavingStageController : MonoBehaviour
                     Mathf.Min(grabbedGateStageXZ.x - leftX, rightX - grabbedGateStageXZ.x),
                     Mathf.Min(grabbedGateStageXZ.y - frontZ, backZ - grabbedGateStageXZ.y));
                 float nearT = 1f - Mathf.Clamp01(minEdgeDist / 0.42f);
-                outerDeckCol = new Color(0.20f, 0.92f, 1.00f, Mathf.Lerp(0.60f, 0.78f, nearT));
-                arenaBorderCol = new Color(0.24f, 0.96f, 1.00f, Mathf.Lerp(0.50f, 0.88f, nearT));
-                cornerCol = new Color(0.28f, 0.98f, 1.00f, Mathf.Lerp(0.64f, 0.98f, nearT));
-                shadowCol = new Color(0.02f, 0.06f, 0.12f, Mathf.Lerp(0.64f, 0.78f, nearT));
-                cornerWidth = Mathf.Lerp(0.0085f, 0.0108f, nearT);
+                outerDeckCol = new Color(0.86f, 0.90f, 0.96f, Mathf.Lerp(0.28f, 0.48f, nearT));
+                arenaBorderCol = new Color(0x38 / 255f, 0xBD / 255f, 0xF8 / 255f, Mathf.Lerp(0.22f, 0.54f, nearT));
+                cornerCol = new Color(0x38 / 255f, 0xBD / 255f, 0xF8 / 255f, Mathf.Lerp(0.38f, 0.78f, nearT));
+                shadowCol = new Color(0.04f, 0.05f, 0.08f, Mathf.Lerp(0.50f, 0.66f, nearT));
+                cornerWidth = Mathf.Lerp(0.0045f, 0.0064f, nearT);
             }
         }
 
@@ -1824,7 +1892,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
             }
         }
 
-        // 2. Perbarui Grounded Contact Rings di bidang meja XZ (y = ContactRingLocalY) + Tiang Proyeksi Vertikal (+Y) untuk SELURUH 8 node
+        // 2. Cincin lantai neon di bawah Input A/B, Output, & Dok Rak dihapus di v8.5;
+        //    hanya tampilkan proyeksi pendaratan halus saat gerbang sedang dipegang (isGrabbed)
         int clampedCount = contactNodes != null ? Mathf.Min(contactNodeCount, MaxContactRingSlots) : 0;
         for (int i = 0; i < MaxContactRingSlots; i++)
         {
@@ -1832,7 +1901,13 @@ public sealed class AirWeavingStageController : MonoBehaviour
             LineRenderer innerRing = contactInnerRings[i];
             LineRenderer stemLine = contactElevationStems[i];
 
-            if (i >= clampedCount || !contactNodes[i].active)
+            if (i >= clampedCount
+                || !contactNodes[i].active
+                || !contactNodes[i].isGrabbed
+                || contactNodes[i].isInputA
+                || contactNodes[i].isInputB
+                || contactNodes[i].isOutput
+                || contactNodes[i].isParked)
             {
                 if (outerRing != null && outerRing.enabled) outerRing.enabled = false;
                 if (innerRing != null && innerRing.enabled) innerRing.enabled = false;
@@ -2038,7 +2113,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
     /// <summary>
     /// Memproyeksikan titik dunia 3D (node, sakelar, port orb, maupun kursor tangan) sepanjang sinar perspektif
     /// <c>Camera.main</c> ke bidang referensi kamera pada <c>workbenchDepth</c>.
-    /// Menjamin hit-test 100% akurat tanpa meleset saat meja miring, di-orbit 360°, maupun di-zoom. Zero-GC.
+    /// Menjamin hit-test 100% akurat tanpa meleset saat meja miring, di-orbit 360 deg, maupun di-zoom. Zero-GC.
     /// </summary>
     public Vector2 ProjectWorldPointToCameraRayPlane(Camera mainCam, Vector3 worldPos, float workbenchDepth)
     {
@@ -2151,11 +2226,27 @@ public sealed class AirWeavingStageController : MonoBehaviour
         deckCenterX = (deckMinX + deckMaxX) * 0.5f;
         deckCenterZ = (deckMinZ + deckMaxZ) * 0.5f;
 
-        // 1. Mesh Kaca Lantai Meja Horizontal Utuh (Oktagon Ber-Chamfer rata di bidang XZ meja, bebas sudut lancip keluar)
+        // 1. Mesh Pelat Smoked Optical Tray Horizontal Utuh & Bingkai Fisik Brushed Titanium Ber-Bevel
         RebuildOctagonFloorDeckMesh(deckLeftX, deckRightX, deckFrontZ, deckBackZ, deckChamfer, StageFloorLocalY - 0.002f);
+        RebuildTitaniumBevelFrameMesh(deckLeftX, deckRightX, deckFrontZ, deckBackZ, deckChamfer, StageFloorLocalY);
+
+        // 1B. Posisikan 5 Bantalan Dok Grafit Datar (Mat_AnodizedGraphite #1C2029) tepat di bawah koordinat parkir 5 gerbang rak
+        for (int d = 0; d < RackDockSlotCount; d++)
+        {
+            if (rackDockPadTransforms[d] != null)
+            {
+                float normX = (d - 2.0f) * 0.5f;
+                float curvedRackZ = parkingRackZ + (0.150f * normX * normX);
+                rackDockPadTransforms[d].localPosition = new Vector3(
+                    RackDockSlotBaseX[d] * aspectScale,
+                    StageFloorLocalY + 0.006f,
+                    curvedRackZ);
+                rackDockPadTransforms[d].localEulerAngles = new Vector3(0f, -normX * 16.0f, 0f);
+            }
+        }
 
         // 2. Bingkai Luar Dek Meja Utuh & Bingkai Dalam Zona Rakit di Bidang XZ
-        FillChamferedTableXZRectLoop(borderLoopBuffer, deckLeftX, deckRightX, deckFrontZ, deckBackZ, deckChamfer, StageFloorLocalY);
+        FillChamferedTableXZRectLoop(borderLoopBuffer, deckLeftX, deckRightX, deckFrontZ, deckBackZ, deckChamfer, StageFloorLocalY + 0.001f);
         if (outerBorderGlowRenderer != null)
         {
             outerBorderGlowRenderer.SetPositions(borderLoopBuffer);
@@ -2174,8 +2265,8 @@ public sealed class AirWeavingStageController : MonoBehaviour
         }
 
         // 3. 4 Siku Sudut Zona Rakit Dipertegas di Permukaan Meja XZ
-        float armX = 0.31f * aspectScale;
-        float armZ = 0.31f;
+        float armX = 0.26f * aspectScale;
+        float armZ = 0.26f;
         float cornerY = StageFloorLocalY + 0.0025f;
         float shadowY = StageFloorLocalY + 0.0015f;
 
@@ -2189,42 +2280,124 @@ public sealed class AirWeavingStageController : MonoBehaviour
         SetLocalTableCornerBracket(cornerBracketRenderers[2], arenaRightX, arenaBackZ - armZ, arenaRightX, arenaBackZ, arenaRightX - armX, arenaBackZ, cornerY);
         SetLocalTableCornerBracket(cornerBracketRenderers[3], arenaLeftX + armX, arenaBackZ, arenaLeftX, arenaBackZ, arenaLeftX, arenaBackZ - armZ, cornerY);
 
-        // 4. Garis Grid Proyeksi Internal 17x13 sebagai 1 Static Ribbon Mesh (Cull Off, 1 draw call, 0 beban CPU per frame)
+        // 4. Garis Grid Arsitektural Internal 17x13 + Tanda '+' Mikro sebagai 1 Static Ribbon Mesh
         float gridY = StageFloorLocalY + 0.001f;
         RebuildFloorGridRibbonMesh(deckLeftX, deckRightX, deckFrontZ, deckBackZ, deckChamfer, gridY);
 
-        // 5. Dermaga Sayap Terminal Input (Kiri), Sayap Output (Kanan), & Teras Rak Parkir (Belakang Meja) yang dirapatkan
-        float inBayOuterX = (inputBaseX - 0.34f) * aspectScale;
-        float inBayInnerX = arenaLeftX - (0.06f * aspectScale);
-        if (wingGuideRenderers[0] != null)
-        {
-            wingGuideRenderers[0].SetPosition(0, new Vector3(inBayInnerX, gridY, arenaBackZ - 0.08f));
-            wingGuideRenderers[0].SetPosition(1, new Vector3(inBayOuterX, gridY, arenaBackZ - 0.18f));
-            wingGuideRenderers[0].SetPosition(2, new Vector3(inBayOuterX, gridY, arenaFrontZ + 0.08f));
-            wingGuideRenderers[0].SetPosition(3, new Vector3(inBayInnerX, gridY, arenaFrontZ + 0.04f));
-        }
+        // 5. Garis Hairline Tunggal Pembatas Zona Rak Gerbang di Belakang
+        if (wingGuideRenderers[0] != null) wingGuideRenderers[0].enabled = false;
+        if (wingGuideRenderers[1] != null) wingGuideRenderers[1].enabled = false;
 
-        float outBayInnerX = arenaRightX + (0.06f * aspectScale);
-        float outBayOuterX = (outputBaseX + 0.42f) * aspectScale;
-        if (wingGuideRenderers[1] != null)
-        {
-            wingGuideRenderers[1].SetPosition(0, new Vector3(outBayInnerX, gridY, arenaBackZ - 0.10f));
-            wingGuideRenderers[1].SetPosition(1, new Vector3(outBayOuterX, gridY, arenaBackZ - 0.20f));
-            wingGuideRenderers[1].SetPosition(2, new Vector3(outBayOuterX, gridY, arenaFrontZ + 0.10f));
-            wingGuideRenderers[1].SetPosition(3, new Vector3(outBayInnerX, gridY, arenaFrontZ + 0.06f));
-        }
-
-        float rackFrontZ = arenaBackZ + 0.08f;
-        float rackBackZ = parkingRackZ + 0.36f;
-        float rackLeftX = -1.78f * aspectScale;
-        float rackRightX = 1.78f * aspectScale;
+        float rackFrontZ = arenaBackZ + 0.10f;
+        float rackLeftX = -1.82f * aspectScale;
+        float rackRightX = 1.82f * aspectScale;
         if (wingGuideRenderers[2] != null)
         {
-            wingGuideRenderers[2].SetPosition(0, new Vector3(rackLeftX, gridY, rackFrontZ));
-            wingGuideRenderers[2].SetPosition(1, new Vector3(rackRightX, gridY, rackFrontZ));
-            wingGuideRenderers[2].SetPosition(2, new Vector3(rackRightX - (0.16f * aspectScale), gridY, rackBackZ));
-            wingGuideRenderers[2].SetPosition(3, new Vector3(rackLeftX + (0.16f * aspectScale), gridY, rackBackZ));
+            wingGuideRenderers[2].positionCount = 2;
+            wingGuideRenderers[2].loop = false;
+            wingGuideRenderers[2].SetPosition(0, new Vector3(rackLeftX, gridY + 0.0005f, rackFrontZ));
+            wingGuideRenderers[2].SetPosition(1, new Vector3(rackRightX, gridY + 0.0005f, rackFrontZ));
         }
+    }
+
+    private void RebuildTitaniumBevelFrameMesh(
+        float leftX,
+        float rightX,
+        float frontZ,
+        float backZ,
+        float chamfer,
+        float baseY)
+    {
+        if (floorBevelFrameMesh == null)
+        {
+            return;
+        }
+
+        // Ketebalan bingkai dibuat ~28% lebih ramping agar tampak sebagai bingkai logam presisi yang tenang
+        const float innerInset = -0.003f;
+        const float topInnerOffset = 0.011f;
+        const float topOuterOffset = 0.038f;
+        const float outerWallOffset = 0.052f;
+        const float frameTopY = 0.017f;
+        const float frameBotY = -0.006f;
+
+        FillChamferedTableXZRectLoop(
+            innerFrameLoopBuffer,
+            leftX - innerInset,
+            rightX + innerInset,
+            frontZ - innerInset,
+            backZ + innerInset,
+            chamfer,
+            baseY);
+
+        FillChamferedTableXZRectLoop(
+            midInnerFrameLoopBuffer,
+            leftX - topInnerOffset,
+            rightX + topInnerOffset,
+            frontZ - topInnerOffset,
+            backZ + topInnerOffset,
+            chamfer + 0.008f,
+            baseY + frameTopY);
+
+        FillChamferedTableXZRectLoop(
+            midOuterFrameLoopBuffer,
+            leftX - topOuterOffset,
+            rightX + topOuterOffset,
+            frontZ - topOuterOffset,
+            backZ + topOuterOffset,
+            chamfer + 0.022f,
+            baseY + frameTopY);
+
+        FillChamferedTableXZRectLoop(
+            outerFrameLoopBuffer,
+            leftX - outerWallOffset,
+            rightX + outerWallOffset,
+            frontZ - outerWallOffset,
+            backZ + outerWallOffset,
+            chamfer + 0.032f,
+            baseY + frameBotY);
+
+        bevelFrameVertsList.Clear();
+        bevelFrameNormsList.Clear();
+        bevelFrameTrisList.Clear();
+
+        Vector3 center = new Vector3((leftX + rightX) * 0.5f, baseY, (frontZ + backZ) * 0.5f);
+
+        for (int i = 0; i < 8; i++)
+        {
+            int next = (i + 1) % 8;
+
+            Vector3 in0 = innerFrameLoopBuffer[i];
+            Vector3 in1 = innerFrameLoopBuffer[next];
+            Vector3 topIn0 = midInnerFrameLoopBuffer[i];
+            Vector3 topIn1 = midInnerFrameLoopBuffer[next];
+            Vector3 topOut0 = midOuterFrameLoopBuffer[i];
+            Vector3 topOut1 = midOuterFrameLoopBuffer[next];
+            Vector3 out0 = outerFrameLoopBuffer[i];
+            Vector3 out1 = outerFrameLoopBuffer[next];
+
+            Vector3 edgeMid = (topOut0 + topOut1) * 0.5f;
+            Vector3 outwardXZ = new Vector3(edgeMid.x - center.x, 0f, edgeMid.z - center.z).normalized;
+            Vector3 innerBevelNorm = (-outwardXZ + Vector3.up).normalized;
+            Vector3 outerBevelNorm = (outwardXZ + Vector3.up).normalized;
+
+            // 1. Bidang Bevel Dalam (miring 45 derajat menghadap ke pusat nampan + atas)
+            GwIndustrial3DKit.AddFlatQuad(bevelFrameVertsList, bevelFrameNormsList, bevelFrameTrisList,
+                in0, in1, topIn1, topIn0, innerBevelNorm);
+
+            // 2. Bidang Puncak Datar Brushed Titanium (+Y)
+            GwIndustrial3DKit.AddFlatQuad(bevelFrameVertsList, bevelFrameNormsList, bevelFrameTrisList,
+                topIn0, topIn1, topOut1, topOut0, Vector3.up);
+
+            // 3. Bidang Bevel Luar (miring 45 derajat menghadap ke luar + atas untuk highlight CNC)
+            GwIndustrial3DKit.AddFlatQuad(bevelFrameVertsList, bevelFrameNormsList, bevelFrameTrisList,
+                topOut0, topOut1, out1, out0, outerBevelNorm);
+        }
+
+        floorBevelFrameMesh.Clear();
+        floorBevelFrameMesh.SetVertices(bevelFrameVertsList);
+        floorBevelFrameMesh.SetNormals(bevelFrameNormsList);
+        floorBevelFrameMesh.SetIndices(bevelFrameTrisList, MeshTopology.Triangles, 0, calculateBounds: true);
     }
 
     private void RebuildFloorGridRibbonMesh(
@@ -2242,9 +2415,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
 
         Color32 normalCol = FloorGridLineColor;
         Color32 centerCol = FloorCenterAxisColor;
-        int lineCursor = 0;
+        Color32 crossCol = FloorGridCrossTickColor;
+        int quadCursor = 0;
 
-        // Garis bujur X (sejajar sumbu Z)
+        // 1. Garis bujur X (sejajar sumbu Z)
         for (int v = 0; v < GridInternalVerticalLines; v++)
         {
             bool isCenter = v == (GridInternalVerticalLines / 2);
@@ -2256,7 +2430,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
             float hw = isCenter ? GridCenterAxisHalfWidth : GridNormalHalfWidth;
             Color32 col = isCenter ? centerCol : normalCol;
 
-            int vBase = lineCursor * 4;
+            int vBase = quadCursor * 4;
             gridRibbonVertices[vBase] = new Vector3(gx - hw, gridY, z0);
             gridRibbonVertices[vBase + 1] = new Vector3(gx + hw, gridY, z0);
             gridRibbonVertices[vBase + 2] = new Vector3(gx + hw, gridY, z1);
@@ -2265,10 +2439,10 @@ public sealed class AirWeavingStageController : MonoBehaviour
             gridRibbonColors[vBase + 1] = col;
             gridRibbonColors[vBase + 2] = col;
             gridRibbonColors[vBase + 3] = col;
-            lineCursor++;
+            quadCursor++;
         }
 
-        // Garis lintang Z (sejajar sumbu X)
+        // 2. Garis lintang Z (sejajar sumbu X)
         for (int h = 0; h < GridInternalHorizontalLines; h++)
         {
             bool isCenter = h == (GridInternalHorizontalLines / 2);
@@ -2280,7 +2454,7 @@ public sealed class AirWeavingStageController : MonoBehaviour
             float hw = isCenter ? GridCenterAxisHalfWidth : GridNormalHalfWidth;
             Color32 col = isCenter ? centerCol : normalCol;
 
-            int vBase = lineCursor * 4;
+            int vBase = quadCursor * 4;
             gridRibbonVertices[vBase] = new Vector3(x0, gridY, gz - hw);
             gridRibbonVertices[vBase + 1] = new Vector3(x1, gridY, gz - hw);
             gridRibbonVertices[vBase + 2] = new Vector3(x1, gridY, gz + hw);
@@ -2289,7 +2463,47 @@ public sealed class AirWeavingStageController : MonoBehaviour
             gridRibbonColors[vBase + 1] = col;
             gridRibbonColors[vBase + 2] = col;
             gridRibbonColors[vBase + 3] = col;
-            lineCursor++;
+            quadCursor++;
+        }
+
+        // 3. Tanda '+' Mikro di 15 Persimpangan Utama Grid Arsitektural (5 kolom x 3 baris)
+        float crossY = gridY + 0.0004f;
+        for (int c = 0; c < GridMajorCrossCols; c++)
+        {
+            int vIdx = 2 + (c * 3); // v = 2, 5, 8, 11, 14
+            float vFrac = (vIdx + 1f) / (GridInternalVerticalLines + 1f);
+            float cx = Mathf.Lerp(deckLeftX + 0.14f, deckRightX - 0.14f, vFrac);
+
+            for (int r = 0; r < GridMajorCrossRows; r++)
+            {
+                int hIdx = 2 + (r * 4); // h = 2, 6, 10
+                float hFrac = (hIdx + 1f) / (GridInternalHorizontalLines + 1f);
+                float cz = Mathf.Lerp(deckFrontZ + 0.14f, deckBackZ - 0.14f, hFrac);
+
+                // Lengan horizontal tanda '+'
+                int hBase = quadCursor * 4;
+                gridRibbonVertices[hBase] = new Vector3(cx - GridCrossTickHalfLength, crossY, cz - GridCrossTickHalfWidth);
+                gridRibbonVertices[hBase + 1] = new Vector3(cx + GridCrossTickHalfLength, crossY, cz - GridCrossTickHalfWidth);
+                gridRibbonVertices[hBase + 2] = new Vector3(cx + GridCrossTickHalfLength, crossY, cz + GridCrossTickHalfWidth);
+                gridRibbonVertices[hBase + 3] = new Vector3(cx - GridCrossTickHalfLength, crossY, cz + GridCrossTickHalfWidth);
+                gridRibbonColors[hBase] = crossCol;
+                gridRibbonColors[hBase + 1] = crossCol;
+                gridRibbonColors[hBase + 2] = crossCol;
+                gridRibbonColors[hBase + 3] = crossCol;
+                quadCursor++;
+
+                // Lengan vertikal tanda '+'
+                int vBase = quadCursor * 4;
+                gridRibbonVertices[vBase] = new Vector3(cx - GridCrossTickHalfWidth, crossY, cz - GridCrossTickHalfLength);
+                gridRibbonVertices[vBase + 1] = new Vector3(cx + GridCrossTickHalfWidth, crossY, cz - GridCrossTickHalfLength);
+                gridRibbonVertices[vBase + 2] = new Vector3(cx + GridCrossTickHalfWidth, crossY, cz + GridCrossTickHalfLength);
+                gridRibbonVertices[vBase + 3] = new Vector3(cx - GridCrossTickHalfWidth, crossY, cz + GridCrossTickHalfLength);
+                gridRibbonColors[vBase] = crossCol;
+                gridRibbonColors[vBase + 1] = crossCol;
+                gridRibbonColors[vBase + 2] = crossCol;
+                gridRibbonColors[vBase + 3] = crossCol;
+                quadCursor++;
+            }
         }
 
         floorGridRibbonMesh.SetVertices(gridRibbonVertices);
@@ -2514,6 +2728,24 @@ public sealed class AirWeavingStageController : MonoBehaviour
         return rawDeltaDeg * gain;
     }
 
+    /// <summary>
+    /// Membatasi komponen Pitch (sumbu X kamera) ke [-28, +42] deg dan Roll (sumbu Z kamera) ke [-25, +25] deg
+    /// relatif kemiringan bawaan, sementara Yaw tetap bebas 360 deg. Zero-GC (value-type).
+    /// </summary>
+    private static Quaternion ClampOrbitPitchRoll(Quaternion q)
+    {
+        Vector3 euler = q.eulerAngles;
+        float pitch = Mathf.DeltaAngle(0f, euler.x);
+        float roll = Mathf.DeltaAngle(0f, euler.z);
+        float clampedPitch = Mathf.Clamp(pitch, MinOrbitPitchDeg, MaxOrbitPitchDeg);
+        float clampedRoll = Mathf.Clamp(roll, -MaxOrbitRollAbsDeg, MaxOrbitRollAbsDeg);
+        if (Mathf.Approximately(clampedPitch, pitch) && Mathf.Approximately(clampedRoll, roll))
+        {
+            return q;
+        }
+        return NormalizeQuaternion(Quaternion.Euler(clampedPitch, euler.y, clampedRoll));
+    }
+
     private static Quaternion NormalizeQuaternion(Quaternion q)
     {
         float magSqr = (q.x * q.x) + (q.y * q.y) + (q.z * q.z) + (q.w * q.w);
@@ -2551,6 +2783,11 @@ public sealed class AirWeavingStageController : MonoBehaviour
         {
             Destroy(floorDeckOctagonMesh);
             floorDeckOctagonMesh = null;
+        }
+        if (floorBevelFrameMesh != null)
+        {
+            Destroy(floorBevelFrameMesh);
+            floorBevelFrameMesh = null;
         }
         if (floorGridRibbonMesh != null)
         {

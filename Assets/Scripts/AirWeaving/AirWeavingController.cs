@@ -26,7 +26,7 @@ using Stopwatch = System.Diagnostics.Stopwatch;
 ///   * Input A, Input B, dan Output terkunci rapi sebagai terminal papan roti virtual.
 ///   * 5 Gerbang Logika (AND, OR, XOR, NAND, NOT) diparkir aman di Rak Parkir Atas (pratinjau 3D tanpa kabel/kuota)
 ///     dan dapat dicubit-seret (Air-Pinch & Drag) ke Zona Rakit tengah atau dikembalikan ke Rak Parkir.
-///   * Air-Tap / Pinch singkat pada Input A & Input B menjungkit tuas sakelar fisik 3D (-38° <-> +38°) dengan cooldown 0.55s.
+///   * Air-Tap / Pinch singkat pada Input A & Input B menjungkit tuas sakelar fisik 3D (-38 deg <-> +38 deg) dengan cooldown 0.55s.
 /// </summary>
 public class AirWeavingController : MonoBehaviour
 {
@@ -34,7 +34,7 @@ public class AirWeavingController : MonoBehaviour
     private const int RequestedCamWidth = 480;
     private const int RequestedCamHeight = 360;
     private const int RequestedCamFps = 30;
-    private const int MaxInferenceLongEdge = 224;
+    private const int MaxInferenceLongEdge = 256;
     private const int LandmarkCount = 21;
     private const int WorkerShutdownJoinTimeoutMs = 1500;
     private const int MaxAsyncGpuReadbackErrorsBeforeFallback = 3;
@@ -43,7 +43,7 @@ public class AirWeavingController : MonoBehaviour
     private const float WebCamReleaseDelaySeconds = 0.40f;
     private const float WebCamStartTimeoutSeconds = 4.0f;
 
-    // Geometri Meja Hologram 3D Horizontal (bidang XZ lokal HologramStageRoot, +Y = tinggi melayang di atas meja) — Tahap 4.6 v8.0
+    // Geometri Meja Hologram 3D Horizontal (bidang XZ lokal HologramStageRoot, +Y = tinggi melayang di atas meja) - Tahap 4.6 v8.0
     private const float VideoQuadDepth = 8.0f;
     private const float WorkbenchDepth = 3.82f;
     private const float DepthParallaxScale = 0.38f;
@@ -52,7 +52,7 @@ public class AirWeavingController : MonoBehaviour
     private const float InputAHoverHeight = BaseHoverHeight + 0.050f;
     private const float InputBHoverHeight = BaseHoverHeight + 0.014f;
     private const float OutputHoverHeight = BaseHoverHeight + 0.032f;
-    private const float ParkingRackHoverHeight = 0.340f;
+    private const float ParkingRackHoverHeight = 0.115f;
     private const float ArenaArcHeightY = 0.028f;
     private const float ParkingRackArcDepthZ = 0.150f;
     private const float InputATerminalArcYawDeg = 22.0f;
@@ -76,7 +76,7 @@ public class AirWeavingController : MonoBehaviour
     private const float HandMaxBehindVideoQuadMarginMeters = 0.25f;
     private const float MinNearClipSafeOffsetMeters = 0.28f;
 
-    // Parameter Kontrol 2 Tangan Full Free-View 6-DoF Focus-Point Orbit 360° + Ultra-Wide Zoom 0.18x..15x + True Z-Axis Push/Pull
+    // Parameter Kontrol 2 Tangan Full Free-View 6-DoF Focus-Point Orbit 360 deg + Ultra-Wide Zoom 0.18x..15x + True Z-Axis Push/Pull
     private const float TwoHandOrbitYawDegPerUnit = 98.0f;
     private const float TwoHandOrbitPitchDegPerUnit = 98.0f;
     private const float TwoHandOrbitMaxAxisDeltaPerFrameDeg = 16.0f;
@@ -99,12 +99,12 @@ public class AirWeavingController : MonoBehaviour
     private const float TwoHandZoomMaxLogStepPerFrame = 0.115f;
     private const float TwoHandFreePanXYGain = 1.50f;
     private const float TwoHandFreePanMaxDeltaXYPerFrame = 0.38f;
-    private const float TwoHandOrbitConfirmHoldSeconds = 0.040f;
+    private const float TwoHandOrbitConfirmHoldSeconds = 0.120f;
     private const float TwoHandOrbitHoldMaxPinchRatio = 0.74f;
     private const float TwoHandFreePanHoldMinFistBendDeg = 78.0f;
     private const float TwoHandPinchReleaseFreezeRatio = 0.60f;
     private const float TwoHandFistReleaseFreezeMaxBendDeg = 92.0f;
-    private const float TwoHandFreePanConfirmHoldSeconds = 0.055f;
+    private const float TwoHandFreePanConfirmHoldSeconds = 0.130f;
     private const float TwoHandIntentGraceMaxSeconds = 0.220f;
     private const float TwoHandSingleHandUpgradeWindowSeconds = 0.190f;
     private const float TwoHandFistResetHoldSeconds = 0.55f;
@@ -121,17 +121,38 @@ public class AirWeavingController : MonoBehaviour
     private const float CarryPanPalmOneEuroVelScale = 16.0f;
 
     private const float EdgePanStripFraction = 0.12f;
-    private const float EdgePanDwellSeconds = 0.095f;
+    private const float EdgePanDwellSeconds = 0.240f;
     private const float EdgePanRampInSeconds = 0.110f;
-    private const float EdgePanMaxSpeedAtRefDepth = 2.85f;
+    private const float EdgePanMaxSpeedAtRefDepth = 1.15f;
     private const float EdgePanCableReleasePauseRatio = 0.70f;
 
     // Parameter Quality Gate, Stabilisasi Dual-Hand, Exclusive Gesture Arbiter, & Confidence Jarak Jauh MediaPipe (Tahap 5.5+)
-    private const float MediaPipeMinHandDetectionConfidence = 0.40f;
-    private const float MediaPipeMinHandPresenceConfidence = 0.38f;
-    private const float MediaPipeMinTrackingConfidence = 0.30f;
-    private const float MinCandidateRawPalmScale = 0.028f;
+    private const float MediaPipeMinHandDetectionConfidence = 0.62f;
+    private const float MediaPipeMinHandPresenceConfidence = 0.58f;
+    private const float MediaPipeMinTrackingConfidence = 0.55f;
+    private const float MinCandidateRawPalmScale = 0.042f;
     private const float HandednessConfidenceThreshold = 0.70f;
+    // Anti-Wajah: skor handedness minimum untuk entry baru / seluruh kandidat tangan ke-2 vs tangan utama yang sudah terkunci
+    private const float HandednessEntryMinScore = 0.65f;
+    private const float HandednessLockedMinScore = 0.50f;
+    private const float CandidateLandmarkMinNorm = -0.15f;
+    private const float CandidateLandmarkMaxNorm = 1.15f;
+    private const float CandidateMinRatioD09ToD517 = 0.42f;
+    private const float CandidateMaxRatioD09ToD517 = 2.60f;
+    private const float CandidateMinRatioD05ToD09 = 0.38f;
+    private const float CandidateMaxRatioD05ToD09 = 1.65f;
+    private const float CandidateMinRatioD017ToD09 = 0.35f;
+    private const float CandidateMaxRatioD017ToD09 = 1.65f;
+    private const float CandidateMinPalmTriangleAreaFactor = 0.08f;
+    private const float CandidateMinProximalBoneRatio = 0.14f;
+    private const float CandidateMaxProximalBoneRatio = 0.95f;
+    private const float CandidateMinWorldPalmSpanMeters = 0.042f;
+    private const float CandidateMaxWorldPalmSpanMeters = 0.145f;
+    private const float SecondCandidateMinPalmDistNorm = 0.12f;
+    private const float SecondCandidateMinPalmScaleRatio = 0.45f;
+    private const int HandSlotEntryRequiredStableFrames = 3;
+    private const float HandSlotEntryStableRadiusNorm = 0.16f;
+    private const int HandSlotMaxTeleportRejectFrames = 2;
     private const float HandAssociationMaxDistNorm = 0.36f;
     private const float HandAssociationMatchedHandednessMaxDistNorm = 0.48f;
     private const float HandFrameDropGraceSeconds = 0.120f;
@@ -160,11 +181,11 @@ public class AirWeavingController : MonoBehaviour
     private const float GateDragVelocitySmoothRate = 18.0f;
 
     // Soft Magnetic Aim-Assist kalem & Konfirmasi Kepal (Fist) 70 ms untuk sakelar Input A/B (Tahap 9: Edge-Trigger Aman)
-    private const float InputSwitchMagnetRadius = 0.28f;
+    private const float InputSwitchMagnetRadius = 0.34f;
     private const float InputSwitchMagnetMaxPull = 0.24f;
     private const float SoftMagnetMaxHandSpeed = InputSwitchEnterMaxSpeed;
     private const float SoftMagnetOffsetBlendSpeed = 18.0f;
-    private const float InputFistConfirmSeconds = 0.070f;
+    private const float InputFistConfirmSeconds = 0.015f;
 
     // Magnetic Grid Snap + Auto-Separate Zero-GC (Tahap 9: spiral search berjarak aman port kiri-kanan)
     private const float AssemblyGridBaseStepX = 0.46f;
@@ -185,7 +206,7 @@ public class AirWeavingController : MonoBehaviour
     private const float OneEuroMaxDtSeconds = 0.200f;
     private const float TwoPi = 6.283185307f;
 
-    // Skala hologram melayang Mode Udara Tahap 4.6 (ramping & anti-fish-eye saat meja di-orbit 360°)
+    // Skala hologram melayang Mode Udara Tahap 4.6 (ramping & anti-fish-eye saat meja di-orbit 360 deg)
     private const float TerminalScale = 0.68f;
     private const float OutputTerminalScale = 0.70f;
     private const float ActiveGateScale = 0.68f;
@@ -198,9 +219,9 @@ public class AirWeavingController : MonoBehaviour
 
     // Radius akses lega + Screen-Space Minimum Hitbox Floor (Fist badan gerbang & sakelar Input A/B)
     private const float MinScreenSpaceHitboxScale = 0.82f;
-    private const float GateHoverGrabRadius = 0.220f;
-    private const float ParkedGateHoverRadius = 0.245f;
-    private const float InputAirTapRadius = 0.225f;
+    private const float GateHoverGrabRadius = 0.265f;
+    private const float ParkedGateHoverRadius = 0.280f;
+    private const float InputAirTapRadius = 0.285f;
     private const float InputAirTapRearmRadius = InputAirTapRadius * 1.35f;
     private const float InputAirTapCooldownSeconds = 0.38f;
     private const float InputTouchRippleDuration = 0.34f;
@@ -208,7 +229,7 @@ public class AirWeavingController : MonoBehaviour
     private const float ParkSlotSnapRadius = 0.38f;
     private const float HandFrameStaleTimeoutSeconds = 0.35f;
 
-    // Efek melayang 3D nyata (sinusoidal bob ±0.014, gentle gimbal sway ±3.5°, 2-axis velocity banking tilt maks ±24°)
+    // Efek melayang 3D nyata (sinusoidal bob +/-0.014, gentle gimbal sway +/-3.5 deg, 2-axis velocity banking tilt maks +/-24 deg)
     private const float FloatBobAmplitude = 0.014f;
     private const float FloatBobSpeed = 1.85f;
     private const float GimbalSwayPitchDeg = 2.6f;
@@ -253,7 +274,7 @@ public class AirWeavingController : MonoBehaviour
         NodeType.NOT
     };
 
-    // Kemiringan dasar GateNode di atas meja horizontal XZ (sejajar bidang meja XZ + sedikit bias ergonomis -4° ke kamera)
+    // Kemiringan dasar GateNode di atas meja horizontal XZ (sejajar bidang meja XZ + sedikit bias ergonomis -4 deg ke kamera)
     private static readonly Quaternion WorkbenchTiltRotation = Quaternion.Euler(-38f, 0f, 0f);
     private static readonly Quaternion NodeBaseTableRotation = Quaternion.Euler(NodeTableErgonomicPitchBiasDeg, 0f, 0f);
 
@@ -284,7 +305,6 @@ public class AirWeavingController : MonoBehaviour
     private static readonly Color HoverGrabbedRingColor = new Color(1.00f, 0.88f, 0.26f, 0.96f);
     private static readonly Color HoverReturnRackColor = new Color(1.00f, 0.56f, 0.26f, 0.95f);
     private static readonly Color HoverInputRingColor = new Color(0.42f, 1.00f, 0.68f, 0.92f);
-    private static readonly Color AirWeavingLabelPillColor = new Color(0.02f, 0.05f, 0.11f, 0.94f);
     private static readonly Color FeedbackActiveColor = new Color(0.35f, 0.96f, 1.00f, 1.00f);
     private static readonly Color FeedbackPinchColor = new Color(0.76f, 1.00f, 0.30f, 1.00f);
     private static readonly Color FeedbackWaitingColor = new Color(1.00f, 0.82f, 0.34f, 1.00f);
@@ -491,6 +511,13 @@ public class AirWeavingController : MonoBehaviour
     private float secondaryMissingTimer = 0f;
     private TrackedHandedness secondarySlotHandedness = TrackedHandedness.Unknown;
     private Vector2 lastSecondaryPalmNormXY = new Vector2(0.5f, 0.5f);
+    // Temporal Entry (3 frame stabil dalam radius 0.16) & Anti-Teleport (tolak 1-2 frame lonjakan di luar gate) per slot
+    private int primaryEntryStableFrames = 0;
+    private Vector2 primaryEntryAnchorPalmNormXY = new Vector2(0.5f, 0.5f);
+    private int secondaryEntryStableFrames = 0;
+    private Vector2 secondaryEntryAnchorPalmNormXY = new Vector2(0.5f, 0.5f);
+    private int primaryTeleportRejectFrames = 0;
+    private int secondaryTeleportRejectFrames = 0;
     private readonly Vector3[] pinchRingPoints = new Vector3[PinchRingSegments];
     private readonly Vector3[] hoverRingPoints = new Vector3[HoverRingSegments];
 
@@ -580,6 +607,8 @@ public class AirWeavingController : MonoBehaviour
         public readonly List<Landmark> worldLandmarks = new List<Landmark>(LandmarkCount);
         public bool hasWorldLandmarks;
         public TrackedHandedness handedness;
+        public float handednessScore;
+        public float palmScale;
     }
 
     private sealed class WorkerInferenceSnapshot
@@ -720,14 +749,32 @@ public class AirWeavingController : MonoBehaviour
         public GateNode node;
         public Vector3 originalLocalPos;
         public Vector3 originalLocalScale;
+        public Color originalTextColor;
         public MeshRenderer labelMeshRenderer;
         public int originalSortingOrder;
+        public GameObject backdropObj;
+        public bool originalBackdropActive;
+        public Renderer backdropRenderer;
+        public bool originalBackdropEnabled;
         public Material backdropMat;
         public Color originalBackdropColor;
         public int originalBackdropQueue;
+        public GameObject pipObj;
+        public bool originalPipActive;
+        public Renderer pipRenderer;
+        public bool originalPipEnabled;
         public Material pipMat;
+        public Color originalPipColor;
         public int originalPipQueue;
+        public GameObject v85PillRootObj;
+        public SpriteRenderer v85BackdropRenderer;
+        public SpriteRenderer v85BorderRenderer;
+        public string lastObservedLabelText;
     }
+
+    private const float V85LabelPillSpriteScale = 0.12f;
+    private Material v85LabelBackdropSharedMat;
+    private Material v85LabelBorderSharedMat;
 
     private readonly List<SavedNodeLabelStyle> savedNodeLabelStyles = new List<SavedNodeLabelStyle>(12);
     private Transform cachedOutputTruthPodRootTransform;
@@ -747,11 +794,16 @@ public class AirWeavingController : MonoBehaviour
     private AirWeavingSummonVisual summonVisual;
     private AirWeavingSpatialSfx spatialSfx;
     private AirWeavingGestureGuide gestureGuide;
+    private AirWeavingMenuDrawerOverlay menuDrawerOverlay;
+    private AirWeavingLevelCompleteModal levelCompleteModal;
+    private AirWeavingLevelSelectorOverlay levelSelectorOverlay;
+    private AirWeavingTitleOverlay titleOverlay;
+    private bool hasShownStartupTitleOverlay = false;
     private CompactHudMenuController cachedHudMenu;
     private CompactHudMenuController subscribedHudMenu;
     private RectTransform cachedFeedbackTextRect;
     private RectTransform cachedFeedbackBackdropRect;
-    private const float ToastBottomStripElevatedY = 94f;
+    private const float ToastBottomStripElevatedY = GwThemeTokens.ToastBottomStripElevatedY;
     private const float ToastPracticeElevatedY = 88f;
     private const float ToastDefaultBottomY = 16f;
     private readonly AirWeavingHandGestureDetector handGestureDetector = new AirWeavingHandGestureDetector();
@@ -824,7 +876,11 @@ public class AirWeavingController : MonoBehaviour
     private bool IsAnyHandDetected => isHandDetected || isSecondaryHandDetected;
     private bool IsAnyCircleSummonActive => circleSummoners[0].IsActive || circleSummoners[1].IsActive;
     private bool IsAnyUiOverlayOpen => (levelManager != null && levelManager.IsUiOverlayOpen)
-                                       || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen);
+                                       || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen)
+                                       || (menuDrawerOverlay != null && menuDrawerOverlay.IsDrawerVisible)
+                                       || (levelCompleteModal != null && levelCompleteModal.IsModalOpen)
+                                       || (levelSelectorOverlay != null && levelSelectorOverlay.IsSelectorOpen)
+                                       || (titleOverlay != null && titleOverlay.IsTitleOpen);
 
     private bool IsHandSlotDetected(int handSlot)
     {
@@ -888,6 +944,46 @@ public class AirWeavingController : MonoBehaviour
         {
             gestureGuide.Configure(cachedHudMenu, spatialSfx, ResolveMainCamera(), txtFeedback != null ? txtFeedback.font : null);
         }
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.Configure(levelManager, cachedHudMenu, txtFeedback != null ? txtFeedback.font : null);
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.Configure(levelManager, circuitManager, cachedHudMenu, pedagogicalHud, spatialSfx, outputNode, txtFeedback != null ? txtFeedback.font : null);
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.Configure(levelManager, cachedHudMenu, spatialSfx, txtFeedback != null ? txtFeedback.font : null);
+        }
+        if (pedagogicalHud != null)
+        {
+            pedagogicalHud.BindExternalHudTargets(cachedHudMenu, txtFeedback);
+        }
+
+        EnsureTitleOverlayCreated();
+        if (!hasShownStartupTitleOverlay && titleOverlay != null)
+        {
+            hasShownStartupTitleOverlay = true;
+            titleOverlay.OpenOverlay(isInitialStartup: true, isCurrentlyAirWeaving: isAirWeavingActive);
+        }
+    }
+
+    private void EnsureTitleOverlayCreated()
+    {
+        if (titleOverlay == null)
+        {
+            titleOverlay = GetComponent<AirWeavingTitleOverlay>();
+            if (titleOverlay == null)
+            {
+                titleOverlay = gameObject.AddComponent<AirWeavingTitleOverlay>();
+            }
+            titleOverlay.OnStartSimulationRequested -= HandleTitleStartSimulationRequested;
+            titleOverlay.OnStartSimulationRequested += HandleTitleStartSimulationRequested;
+            titleOverlay.OnSandboxRequested -= HandleTitleSandboxRequested;
+            titleOverlay.OnSandboxRequested += HandleTitleSandboxRequested;
+        }
+        titleOverlay.Configure(cachedHudMenu, spatialSfx, txtFeedback != null ? txtFeedback.font : null);
     }
 
     private void BindHudMenuEvents(CompactHudMenuController hudMenu)
@@ -928,6 +1024,214 @@ public class AirWeavingController : MonoBehaviour
             spatialSfx.PlayOutputHoldConfirm(mainCam.transform.position + (mainCam.transform.forward * WorkbenchDepth));
         }
         SetFeedbackImmediate("Tampilan meja dipusatkan.", FeedbackActiveColor, 1.5f);
+    }
+
+    private void HandleDrawerGestureGuideRequested()
+    {
+        if (!isAirWeavingActive || isTransitioning)
+        {
+            return;
+        }
+
+        if (levelManager != null)
+        {
+            levelManager.CloseAllModalsForMenu();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnExternalModalOrMenuOpened();
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.CloseOverlay();
+        }
+        if (titleOverlay != null)
+        {
+            titleOverlay.CloseOverlay();
+        }
+        if (gestureGuide != null)
+        {
+            gestureGuide.OpenGuideOverlay();
+        }
+    }
+
+    private void HandleDrawerLevelSelectorRequested()
+    {
+        if (!isAirWeavingActive || isTransitioning)
+        {
+            return;
+        }
+
+        if (levelManager != null)
+        {
+            levelManager.CloseAllModalsForMenu();
+        }
+        if (gestureGuide != null)
+        {
+            gestureGuide.OnExternalModalOrMenuOpened();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnExternalModalOrMenuOpened();
+        }
+        if (titleOverlay != null)
+        {
+            titleOverlay.CloseOverlay();
+        }
+        if (spatialSfx != null)
+        {
+            spatialSfx.StopHumImmediate();
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.OpenOverlay();
+        }
+    }
+
+    private void HandleDrawerTitleScreenRequested()
+    {
+        if (isTransitioning)
+        {
+            return;
+        }
+
+        if (levelManager != null)
+        {
+            levelManager.CloseAllModalsForMenu();
+        }
+        if (gestureGuide != null)
+        {
+            gestureGuide.OnExternalModalOrMenuOpened();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnExternalModalOrMenuOpened();
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.CloseOverlay();
+        }
+        if (spatialSfx != null)
+        {
+            spatialSfx.StopHumImmediate();
+        }
+
+        EnsureTitleOverlayCreated();
+        if (titleOverlay != null)
+        {
+            titleOverlay.OpenOverlay(isInitialStartup: false, isCurrentlyAirWeaving: isAirWeavingActive);
+        }
+    }
+
+    private void HandleTitleStartSimulationRequested(AirWeavingTitleOverlay.TitleModeSelection selectedMode)
+    {
+        if (isTransitioning)
+        {
+            return;
+        }
+
+        if (selectedMode == AirWeavingTitleOverlay.TitleModeSelection.AirMode)
+        {
+            if (levelManager != null && levelManager.IsSandboxMode && !levelManager.IsVerifying)
+            {
+                levelManager.LoadLevel(levelManager.currentLevelIndex);
+            }
+            if (!isAirWeavingActive)
+            {
+                if (levelManager != null)
+                {
+                    levelManager.TriggerToggleAirWeavingFromMenu();
+                }
+                else
+                {
+                    ToggleAirWeavingMode();
+                }
+            }
+            return;
+        }
+
+        // Mode Kartu - Vuforia AR
+        if (levelManager != null && levelManager.IsSandboxMode && !levelManager.IsVerifying)
+        {
+            levelManager.LoadLevel(levelManager.currentLevelIndex);
+        }
+        if (isAirWeavingActive)
+        {
+            if (levelManager != null)
+            {
+                levelManager.TriggerToggleAirWeavingFromMenu();
+            }
+            else
+            {
+                ToggleAirWeavingMode();
+            }
+        }
+    }
+
+    private void HandleTitleSandboxRequested()
+    {
+        if (isTransitioning)
+        {
+            return;
+        }
+
+        if (levelManager != null && !levelManager.IsSandboxMode && !levelManager.IsVerifying)
+        {
+            levelManager.EnterSandboxMode();
+        }
+
+        if (!isAirWeavingActive)
+        {
+            if (levelManager != null)
+            {
+                levelManager.TriggerToggleAirWeavingFromMenu();
+            }
+            else
+            {
+                ToggleAirWeavingMode();
+            }
+        }
+    }
+
+    private void HandleDrawerResetCircuitRequested()
+    {
+        if (!isAirWeavingActive || isTransitioning)
+        {
+            return;
+        }
+
+        if (levelManager != null)
+        {
+            if (levelManager.IsSandboxMode)
+            {
+                ResetAirWeavingWorkbench();
+                SetFeedbackImmediate("Rangkaian Sandbox dibersihkan.", GwThemeTokens.TextPrimary, 2.0f);
+            }
+            else if (!levelManager.IsVerifying)
+            {
+                levelManager.LoadLevel(levelManager.currentLevelIndex);
+            }
+        }
+        else
+        {
+            ResetAirWeavingWorkbench();
+        }
+    }
+
+    private void HandleGestureGuideOpened()
+    {
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnExternalModalOrMenuOpened();
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.CloseOverlay();
+        }
+        if (titleOverlay != null)
+        {
+            titleOverlay.OnExternalModalOrMenuOpened();
+        }
     }
 
     public void ToggleAirWeavingMode()
@@ -1033,12 +1337,21 @@ public class AirWeavingController : MonoBehaviour
         {
             pedagogicalHud.NotifyLevelOrWorkbenchReset(levelManager, inputANode, inputBNode, outputNode);
         }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.NotifyLevelOrWorkbenchReset();
+        }
 
         SetHoverRingVisible(false);
     }
 
     private void Update()
     {
+        if (titleOverlay != null)
+        {
+            titleOverlay.Tick();
+        }
+
         if (!isAirWeavingActive || isTransitioning)
         {
             return;
@@ -1085,6 +1398,18 @@ public class AirWeavingController : MonoBehaviour
             {
                 gestureGuide.OnExternalModalOrMenuOpened();
             }
+            if (levelCompleteModal != null)
+            {
+                levelCompleteModal.OnExternalModalOrMenuOpened();
+            }
+            if (levelSelectorOverlay != null)
+            {
+                levelSelectorOverlay.OnExternalModalOrMenuOpened();
+            }
+            if (titleOverlay != null)
+            {
+                titleOverlay.OnExternalModalOrMenuOpened();
+            }
         }
         if (gestureGuide != null)
         {
@@ -1092,7 +1417,21 @@ public class AirWeavingController : MonoBehaviour
             {
                 spatialSfx.StopHumImmediate();
             }
-            gestureGuide.Tick(dt, mainCam);
+            bool isBottomStripOpen = pedagogicalHud == null || pedagogicalHud.IsBottomStripExpanded;
+            gestureGuide.Tick(dt, mainCam, isBottomStripOpen);
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.Tick();
+        }
+        if (levelCompleteModal != null)
+        {
+            bool otherUiOpen = (levelManager != null && levelManager.IsUiOverlayOpen)
+                               || (gestureGuide != null && gestureGuide.IsGuideOverlayOpen)
+                               || (menuDrawerOverlay != null && menuDrawerOverlay.IsDrawerVisible)
+                               || (levelSelectorOverlay != null && levelSelectorOverlay.IsSelectorOpen)
+                               || (titleOverlay != null && titleOverlay.IsTitleOpen);
+            levelCompleteModal.Tick(dt, isAirWeavingActive, otherUiOpen);
         }
 
         UpdateVideoQuadTransform(mainCam);
@@ -1234,6 +1573,10 @@ public class AirWeavingController : MonoBehaviour
         }
 
         UpdateAirWeavingLabelsAndTruthPodSpatialPose(mainCam);
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.TickLate(isAirWeavingActive);
+        }
         UpdatePedagogicalHudVisuals(mainCam);
     }
 
@@ -1244,6 +1587,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
+        bool isGuideOpen = gestureGuide != null && gestureGuide.IsGuideOverlayOpen;
         Transform stageRoot = stageController != null ? stageController.StageRoot : null;
         float stageZoom = stageController != null ? stageController.CurrentZoomScale : AirWeavingStageController.DefaultZoomScale;
         pedagogicalHud.TickLateVisuals(
@@ -1260,19 +1604,29 @@ public class AirWeavingController : MonoBehaviour
             outputNode,
             activePlacedGatesBuffer,
             debugPassedRowMask,
-            debugFailedRowMask);
+            debugFailedRowMask,
+            isGuideOpen);
 
         SyncBottomToastElevationForAirMode(forceResetToDefault: false);
+        if (isAirWeavingActive)
+        {
+            pedagogicalHud.SyncExternalTopHudAndToastTheme(levelManager, circuitManager, isGuideOpen);
+        }
     }
 
     private void HandlePedagogicalBottomStripChanged(bool isExpanded)
     {
         _ = isExpanded;
         SyncBottomToastElevationForAirMode(forceResetToDefault: !isAirWeavingActive);
+        if (isAirWeavingActive && pedagogicalHud != null)
+        {
+            bool isGuideOpen = gestureGuide != null && gestureGuide.IsGuideOverlayOpen;
+            pedagogicalHud.SyncExternalTopHudAndToastTheme(levelManager, circuitManager, isGuideOpen);
+        }
     }
 
     /// <summary>
-    /// Mengangkat posisi toast/banner bawah ("Arahkan tangan ke kamera" &amp; feedback) tepat di atas Pita Bawah (y = 94px)
+    /// Mengangkat posisi toast/banner bawah ("Arahkan tangan ke kamera" &amp; feedback) tepat di atas Pita Bawah (y = 82px)
     /// saat Pita Bawah Mode Udara terbuka, dan otomatis mengembalikan ke 16px saat dilipat atau kembali ke Mode Kartu v5. Zero-GC.
     /// </summary>
     private void SyncBottomToastElevationForAirMode(bool forceResetToDefault)
@@ -1288,6 +1642,11 @@ public class AirWeavingController : MonoBehaviour
 
         bool bottomStripOpen = pedagogicalHud != null && pedagogicalHud.IsBottomStripExpanded;
         bool practiceActive = gestureGuide != null && gestureGuide.IsPracticeActive;
+
+        if (gestureGuide != null)
+        {
+            gestureGuide.SetBottomStripExpandedState(bottomStripOpen);
+        }
 
         if (cachedHudMenu != null)
         {
@@ -1312,9 +1671,9 @@ public class AirWeavingController : MonoBehaviour
             }
         }
 
-        float desiredBottomY = bottomStripOpen
-            ? ToastBottomStripElevatedY
-            : (practiceActive ? ToastPracticeElevatedY : ToastDefaultBottomY);
+        float desiredBottomY = (bottomStripOpen && practiceActive)
+            ? 154f
+            : (bottomStripOpen ? ToastBottomStripElevatedY : (practiceActive ? ToastPracticeElevatedY : ToastDefaultBottomY));
 
         if (cachedFeedbackTextRect != null)
         {
@@ -1340,6 +1699,22 @@ public class AirWeavingController : MonoBehaviour
 
     private void OnDisable()
     {
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnAirWeavingModeExited();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnAirWeavingModeExited();
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.OnAirWeavingModeExited();
+        }
+        if (titleOverlay != null)
+        {
+            titleOverlay.CloseOverlay();
+        }
         if (pedagogicalHud != null)
         {
             pedagogicalHud.HideImmediate();
@@ -1376,8 +1751,36 @@ public class AirWeavingController : MonoBehaviour
         }
         if (gestureGuide != null)
         {
+            gestureGuide.OnGuideOverlayOpened -= HandleGestureGuideOpened;
             gestureGuide.CleanupImmediate();
             gestureGuide = null;
+        }
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnRecenterStageRequested -= HandleHudStageRecenterRequested;
+            menuDrawerOverlay.OnGestureGuideRequested -= HandleDrawerGestureGuideRequested;
+            menuDrawerOverlay.OnLevelSelectorRequested -= HandleDrawerLevelSelectorRequested;
+            menuDrawerOverlay.OnTitleScreenRequested -= HandleDrawerTitleScreenRequested;
+            menuDrawerOverlay.OnResetCircuitRequested -= HandleDrawerResetCircuitRequested;
+            menuDrawerOverlay.CleanupImmediate();
+            menuDrawerOverlay = null;
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.CleanupImmediate();
+            levelCompleteModal = null;
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.CleanupImmediate();
+            levelSelectorOverlay = null;
+        }
+        if (titleOverlay != null)
+        {
+            titleOverlay.OnStartSimulationRequested -= HandleTitleStartSimulationRequested;
+            titleOverlay.OnSandboxRequested -= HandleTitleSandboxRequested;
+            titleOverlay.CleanupImmediate();
+            titleOverlay = null;
         }
         UnbindHudMenuEvents();
         cachedHudMenu = null;
@@ -1636,10 +2039,14 @@ public class AirWeavingController : MonoBehaviour
         primarySlotActive = false;
         primaryMissedLastInference = false;
         primaryMissingTimer = 0f;
+        primaryEntryStableFrames = 0;
+        primaryTeleportRejectFrames = 0;
         primarySlotHandedness = TrackedHandedness.Unknown;
         secondarySlotActive = false;
         secondaryMissedLastInference = false;
         secondaryMissingTimer = 0f;
+        secondaryEntryStableFrames = 0;
+        secondaryTeleportRejectFrames = 0;
         secondarySlotHandedness = TrackedHandedness.Unknown;
         rawPinching = false;
         isPinching = false;
@@ -1710,6 +2117,7 @@ public class AirWeavingController : MonoBehaviour
         SyncCableRouterVisualsAfterPoseUpdate(mainCam);
         if (pedagogicalHud != null)
         {
+            pedagogicalHud.BindExternalHudTargets(cachedHudMenu, txtFeedback);
             pedagogicalHud.ActivateForAirWeaving(
                 stageController != null ? stageController.StageRoot : null,
                 mainCam,
@@ -1721,11 +2129,32 @@ public class AirWeavingController : MonoBehaviour
         }
 
         OnAirWeavingModeChanged?.Invoke(true);
+        if (titleOverlay != null)
+        {
+            titleOverlay.CloseOverlay();
+        }
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnAirWeavingModeEntered();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnAirWeavingModeEntered();
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.OnAirWeavingModeEntered();
+        }
         gestureGuide?.OnAirWeavingModeEntered();
         SyncBottomToastElevationForAirMode(forceResetToDefault: false);
-        if (gestureGuide == null || !gestureGuide.IsGuideOverlayOpen)
+        bool isGuideOpenNow = gestureGuide != null && gestureGuide.IsGuideOverlayOpen;
+        if (!isGuideOpenNow)
         {
-            SetFeedbackImmediate("Mode Udara aktif — Kepal: sakelar Input & pegang gerbang, Cubit: tarik kabel.", FeedbackActiveColor, 2.8f);
+            SetFeedbackImmediate("Mode Udara aktif - Kepal: sakelar Input & pegang gerbang, Cubit: tarik kabel.", GwThemeTokens.TextPrimary, 2.8f);
+        }
+        if (pedagogicalHud != null)
+        {
+            pedagogicalHud.SyncExternalTopHudAndToastTheme(levelManager, circuitManager, isGuideOpenNow);
         }
     }
 
@@ -1733,6 +2162,18 @@ public class AirWeavingController : MonoBehaviour
     {
         isTransitioning = true;
         isAirWeavingActive = false;
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnAirWeavingModeExited();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnAirWeavingModeExited();
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.OnAirWeavingModeExited();
+        }
         gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
@@ -1762,6 +2203,18 @@ public class AirWeavingController : MonoBehaviour
     private IEnumerator RollbackToVuforiaMode(string warningMessage)
     {
         isAirWeavingActive = false;
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnAirWeavingModeExited();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnAirWeavingModeExited();
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.OnAirWeavingModeExited();
+        }
         gestureGuide?.OnAirWeavingModeExited();
         grabbedGateSlotIndex = -1;
         hoveredGateSlotIndex = -1;
@@ -2163,7 +2616,7 @@ public class AirWeavingController : MonoBehaviour
     ///   dari aksi 1-tangan yang baru mulai &lt;= 190 ms; setelah &gt; 190 ms aksi 1-tangan tetap terkunci aman oleh Arbiter
     ///   dan membuka sub-mode simetris Carry-Pan Tangan Kedua (CableDrag+Fist / GateGrab+Pinch).
     /// - Tidak pernah membatalkan mode 2 tangan yang sudah aktif hanya karena salah satu tangan mendekati tepi layar.
-    /// - Both Hands Pinch: Orbit 360° Quaternion Arcball + Roll + Zoom.
+    /// - Both Hands Pinch: Orbit 360 deg Quaternion Arcball + Roll + Zoom.
     /// - Free Air-Pan 3D: 1 Pinch + 1 Fist (dengan hold hysteresis &amp; Anti-Kick Release Gate).
     /// - Both Hands Fist: tahan 550 ms untuk reset panggung.
     /// </summary>
@@ -2218,7 +2671,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // Predikat anatomi murni (nol lokasi pembatas — berlaku global di seluruh layar kamera)
+        // Predikat anatomi murni (nol lokasi pembatas - berlaku global di seluruh layar kamera)
         bool primaryPurePinch = handGestureDetector.IsPinchActive && !handGestureDetector.IsFistActive;
         bool secondaryPurePinch = secondaryHandGestureDetector.IsPinchActive && !secondaryHandGestureDetector.IsFistActive;
         bool primaryPureFist = handGestureDetector.IsFistActive && !handGestureDetector.IsPinchActive;
@@ -2380,7 +2833,7 @@ public class AirWeavingController : MonoBehaviour
             return;
         }
 
-        // 2A. Masuk Both Pinch (Orbit 360° Diagonal Bebas & Focal-Zoom global): stabil >= 40 ms
+        // 2A. Masuk Both Pinch (Orbit 360 deg Diagonal Bebas & Focal-Zoom global): stabil >= 40 ms
         if (bothPurePinch)
         {
             twoHandFreePanConfirmTimer = 0f;
@@ -2559,7 +3012,7 @@ public class AirWeavingController : MonoBehaviour
             Vector2 midDelta = curMid - twoHandPinchPrevMidpointXY;
             twoHandPinchPrevMidpointXY = curMid;
 
-            // Quaternion Arcball 360° langsung pada sumbu layar kamera (camT.up, camT.right, camT.forward) secara pre-multiply:
+            // Quaternion Arcball 360 deg langsung pada sumbu layar kamera (camT.up, camT.right, camT.forward) secara pre-multiply:
             // bobot presisi 60 deg/unit & clamp maksimum per frame agar terasa berat, halus, dan anti-lonjakan.
             float yawDelta = Mathf.Clamp(
                 -midDelta.x * TwoHandOrbitYawDegPerUnit,
@@ -2826,7 +3279,7 @@ public class AirWeavingController : MonoBehaviour
         }
 
         // 2. Anti-Kick Release Gate murni (hanya saat Tangan 2 benar-benar mulai membuka gestur):
-        //    Untuk Fist di Carry-Pan, gunakan ambang longgar (< 76° atau <= 1 jari) agar kepalan yang mengecil saat mundur tidak palsu ter-freeze.
+        //    Untuk Fist di Carry-Pan, gunakan ambang longgar (< 76 deg atau <= 1 jari) agar kepalan yang mengecil saat mundur tidak palsu ter-freeze.
         bool releaseIntentFreeze;
         if (usesFist)
         {
@@ -2975,6 +3428,12 @@ public class AirWeavingController : MonoBehaviour
         else if (viewportY > (1f - EdgePanStripFraction))
         {
             rawPushY = Mathf.Clamp01((viewportY - (1f - EdgePanStripFraction)) / EdgePanStripFraction);
+        }
+
+        // Saat GateGrab, tarik gerbang ke rak atas tidak boleh mendorong meja turun: matikan Edge-Pan vertikal ke atas
+        if (isCarryingGate && rawPushY > 0f)
+        {
+            rawPushY = 0f;
         }
 
         Vector2 rawEdgePush = new Vector2(rawPushX, rawPushY);
@@ -3148,6 +3607,16 @@ public class AirWeavingController : MonoBehaviour
                     {
                         Vector3 stageLocal3D = stageRoot.InverseTransformPoint(targetWorldPos);
                         targetStageXZ = new Vector2(stageLocal3D.x, stageLocal3D.z);
+                        // (stageX, stageZ) dari ray-plane kamera->kepalan pada bidang hover angkat: bebas inversi Z-depth webcam
+                        if (stageController.TryIntersectHandWithHoverPlane(
+                                mainCam,
+                                grabPalmWorldPos,
+                                BaseHoverHeight + GrabExtraLiftHeight,
+                                out Vector2 grabPlaneStageXZ,
+                                out _))
+                        {
+                            targetStageXZ = grabPlaneStageXZ;
+                        }
                         float defaultLiftedY = ComputeArenaBaseHoverHeightY(targetStageXZ, aspectScale, grabbed.slotIndex) + GrabExtraLiftHeight;
                         // Beri bobot elevasi 3D nyata (0.90) agar maju-mundur tangan mengatur tinggi/kedalaman gerbang secara langsung
                         liftedTargetHeightY = Mathf.Clamp(Mathf.Lerp(defaultLiftedY, stageLocal3D.y, 0.90f), MinGrabTableLocalY, MaxGrabTableLocalY);
@@ -3664,7 +4133,7 @@ public class AirWeavingController : MonoBehaviour
             airDrawFadeTimer = AirDrawFadeDurationSeconds;
             airDrawPostSpawnCooldown = 0.25f;
             SetFeedbackImmediate(
-                "[Air-Draw] Pola belum dikenali — gambar tegas ^ (AND), O (OR), Z (XOR), V (NAND), atau | (NOT).",
+                "[Air-Draw] Pola belum dikenali - gambar tegas ^ (AND), O (OR), Z (XOR), V (NAND), atau | (NOT).",
                 FeedbackWaitingColor,
                 1.05f);
         }
@@ -3995,7 +4464,9 @@ public class AirWeavingController : MonoBehaviour
         }
 
         float fallbackScale = stageController != null ? Mathf.Clamp(stageController.CurrentZoomScale, MinScreenSpaceHitboxScale, 6.0f) : 1f;
-        Vector2 rawPalmXY = detector.PalmCursorLocalXY;
+        // Saat mengepal, pakai kursor stabil (latched pra-kepal) agar pergeseran pusat telapak tidak menggeser hit-test sakelar
+        bool fistRisingEdge = detector.FistJustStarted;
+        Vector2 rawPalmXY = detector.IsFistActive ? detector.StabilizedCursorLocalXY : detector.PalmCursorLocalXY;
 
         bool inputABehind = false;
         float scaleA = fallbackScale;
@@ -4047,7 +4518,7 @@ public class AirWeavingController : MonoBehaviour
         // Gerbang Quality Gate, Exclusive Arbiter, & Anti-Pinch (cegah tangan saat transisi mode 2 tangan / cubit kabel)
         float palmSpeed = detector.CursorSpeedUnitsPerSec;
         bool gateAllowed = !detector.IsPinchActive
-                           && !detector.IsPrePinchSuppressingSummon
+                           && (!detector.IsPrePinchSuppressingSummon || detector.IsFistActive)
                            && detector.IsQualityGatePassing
                            && !isTwoHandConfirming
                            && (isOwner || (activeInteractionMode == ActiveInteractionMode.Idle && neutralCooldownTimer <= 0f));
@@ -4070,6 +4541,22 @@ public class AirWeavingController : MonoBehaviour
                 ExitInteractionMode(ActiveInteractionMode.InputSwitch, triggerNeutralCooldown: false);
             }
             return;
+        }
+
+        // Arm edge-trigger saat tangan terbuka berada dalam radius rearm (bukan hanya radius tap) agar kepalan yang mulai
+        // terbentuk di tepi zona sakelar tetap diterima (tanpa menunggu tangan masuk tepat ke pusat terminal)
+        if (!detector.IsFistActive)
+        {
+            if (inputANode != null && !inputABehind && rawDistA <= scaledRearmRadiusA)
+            {
+                inputARequiresExitRearmBySlot[handSlot] = false;
+                inputAReadyForFistBySlot[handSlot] = true;
+            }
+            if (inputBNode != null && !inputBBehind && rawDistB <= scaledRearmRadiusB)
+            {
+                inputBRequiresExitRearmBySlot[handSlot] = false;
+                inputBReadyForFistBySlot[handSlot] = true;
+            }
         }
 
         // Soft Magnetic Aim-Assist kalem menuju terminal Input A/B terdekat
@@ -4097,8 +4584,15 @@ public class AirWeavingController : MonoBehaviour
         float distA = inputABehind ? float.MaxValue : Vector2.Distance(assistedPalmXY, inputAXY);
         float distB = inputBBehind ? float.MaxValue : Vector2.Distance(assistedPalmXY, inputBXY);
 
-        bool inA = !inputABehind && distA <= scaledTapRadiusA && inputANode != null;
-        bool inB = !inputBBehind && distB <= scaledTapRadiusB && inputBNode != null;
+        // Toleransi tepi: kepalan yang sudah ter-arm boleh dikonfirmasi hingga radius magnet (bukan hanya radius tap)
+        float effTapRadiusA = (detector.IsFistActive && inputAReadyForFistBySlot[handSlot])
+            ? Mathf.Max(scaledTapRadiusA, scaledMagnetRadiusA)
+            : scaledTapRadiusA;
+        float effTapRadiusB = (detector.IsFistActive && inputBReadyForFistBySlot[handSlot])
+            ? Mathf.Max(scaledTapRadiusB, scaledMagnetRadiusB)
+            : scaledTapRadiusB;
+        bool inA = !inputABehind && distA <= effTapRadiusA && inputANode != null;
+        bool inB = !inputBBehind && distB <= effTapRadiusB && inputBNode != null;
 
         if (inA && (!inB || distA <= distB))
         {
@@ -4122,7 +4616,7 @@ public class AirWeavingController : MonoBehaviour
             else if (inputAReadyForFistBySlot[handSlot]
                      && !inputARequiresExitRearmBySlot[handSlot]
                      && inputATapCooldown <= 0f
-                     && (isOwner || speedAllowed))
+                     && (isOwner || speedAllowed || fistRisingEdge))
             {
                 if (activeInteractionMode == ActiveInteractionMode.Idle)
                 {
@@ -4135,7 +4629,8 @@ public class AirWeavingController : MonoBehaviour
                 {
                     inputADwellTimers[handSlot] += dt;
                     inputPushProgressBySlot[handSlot] = Mathf.Clamp01(0.25f + (0.75f * (inputADwellTimers[handSlot] / InputFistConfirmSeconds)));
-                    if (inputADwellTimers[handSlot] >= InputFistConfirmSeconds)
+                    // Toggle instan pada rising-edge kepalan (fallback dwell InputFistConfirmSeconds)
+                    if (fistRisingEdge || inputADwellTimers[handSlot] >= InputFistConfirmSeconds)
                     {
                         inputADwellTimers[handSlot] = 0f;
                         inputARequiresExitRearmBySlot[handSlot] = true;
@@ -4181,7 +4676,7 @@ public class AirWeavingController : MonoBehaviour
             else if (inputBReadyForFistBySlot[handSlot]
                      && !inputBRequiresExitRearmBySlot[handSlot]
                      && inputBTapCooldown <= 0f
-                     && (isOwner || speedAllowed))
+                     && (isOwner || speedAllowed || fistRisingEdge))
             {
                 if (activeInteractionMode == ActiveInteractionMode.Idle)
                 {
@@ -4194,7 +4689,8 @@ public class AirWeavingController : MonoBehaviour
                 {
                     inputBDwellTimers[handSlot] += dt;
                     inputPushProgressBySlot[handSlot] = Mathf.Clamp01(0.25f + (0.75f * (inputBDwellTimers[handSlot] / InputFistConfirmSeconds)));
-                    if (inputBDwellTimers[handSlot] >= InputFistConfirmSeconds)
+                    // Toggle instan pada rising-edge kepalan (fallback dwell InputFistConfirmSeconds)
+                    if (fistRisingEdge || inputBDwellTimers[handSlot] >= InputFistConfirmSeconds)
                     {
                         inputBDwellTimers[handSlot] = 0f;
                         inputBRequiresExitRearmBySlot[handSlot] = true;
@@ -4299,8 +4795,8 @@ public class AirWeavingController : MonoBehaviour
     {
         int safeIdx = Mathf.Clamp(slotIndex, 0, ParkingSlotBaseX.Length - 1);
         float normX = (safeIdx - 2.0f) * 0.5f;
-        float archOffset = 0.028f * (1f - (normX * normX));
-        float staggerOffset = ((safeIdx & 1) == 0) ? 0.012f : -0.010f;
+        float archOffset = 0.010f * (1f - (normX * normX));
+        float staggerOffset = ((safeIdx & 1) == 0) ? 0.004f : -0.004f;
         return ParkingRackHoverHeight + archOffset + staggerOffset;
     }
 
@@ -4412,7 +4908,7 @@ public class AirWeavingController : MonoBehaviour
         }
 
         // Pengaman nearClipPlane: hanya tahan node yang benar-benar menyerempet lensa di depan pandangan,
-        // agar node yang sah berada jauh di belakang kamera saat Focus-Point Orbit makro (10x–15x) tidak ditarik ke depan lensa.
+        // agar node yang sah berada jauh di belakang kamera saat Focus-Point Orbit makro (10x-15x) tidak ditarik ke depan lensa.
         if (camT != null)
         {
             Vector3 camLocal = camT.InverseTransformPoint(worldPos);
@@ -5380,7 +5876,8 @@ public class AirWeavingController : MonoBehaviour
                 }
 
                 WorkerInferenceSnapshot dstSnap = resultSlots[workerWriteResultIdx];
-                PopulateWorkerSnapshot(dstSnap, detected, tsMs, errMsg);
+                float workerFrameAspect = (dstH > 0) ? ((float)dstW / dstH) : 1f;
+                PopulateWorkerSnapshot(dstSnap, detected, tsMs, errMsg, workerFrameAspect);
 
                 lock (workerResultLock)
                 {
@@ -5400,7 +5897,7 @@ public class AirWeavingController : MonoBehaviour
         }
     }
 
-    private void PopulateWorkerSnapshot(WorkerInferenceSnapshot dstSnap, bool detected, long tsMs, string errMsg)
+    private void PopulateWorkerSnapshot(WorkerInferenceSnapshot dstSnap, bool detected, long tsMs, string errMsg, float frameAspect)
     {
         dstSnap.timestampMs = tsMs;
         dstSnap.errorMessage = errMsg;
@@ -5412,12 +5909,25 @@ public class AirWeavingController : MonoBehaviour
             for (int h = 0; h < count && validCount < 2; h++)
             {
                 List<NormalizedLandmark> cand = cachedResult.handLandmarks[h].landmarks;
-                if (!IsValidHandLandmarkCandidateWorker(cand))
+                List<Landmark> candWorld = (cachedResult.handWorldLandmarks != null && h < cachedResult.handWorldLandmarks.Count)
+                    ? cachedResult.handWorldLandmarks[h].landmarks
+                    : null;
+                if (!IsValidHandLandmarkCandidateWorker(cand, candWorld, frameAspect, out float candPalmScale))
+                {
+                    continue;
+                }
+
+                // Anti-Wajah: lantai skor handedness absolut (tangan utama terkunci); ambang entry 0.65 diterapkan di main thread
+                TrackedHandedness candHandedness = ExtractHandednessWorker(h, out float candHandednessScore);
+                if (candHandednessScore < HandednessLockedMinScore)
                 {
                     continue;
                 }
 
                 WorkerHandRecord rec = dstSnap.hands[validCount];
+                rec.handedness = candHandedness;
+                rec.handednessScore = candHandednessScore;
+                rec.palmScale = candPalmScale;
                 rec.landmarks.Clear();
                 for (int k = 0; k < LandmarkCount; k++)
                 {
@@ -5439,7 +5949,6 @@ public class AirWeavingController : MonoBehaviour
                     }
                 }
 
-                rec.handedness = ExtractHandednessWorker(h);
                 validCount++;
             }
         }
@@ -5489,8 +5998,53 @@ public class AirWeavingController : MonoBehaviour
             {
                 secondaryMissedLastInference = true;
             }
+            primaryEntryStableFrames = 0;
+            secondaryEntryStableFrames = 0;
             return true;
         }
+
+        // Anti-Wajah kandidat tangan ke-2: tolak bila handedness < 0.65, terlalu dekat (< 0.12) dengan tangan ke-1,
+        // atau skala telapaknya < 0.45x tangan ke-1 (ciri khas false-positive wajah / bayangan di sekitar tangan utama)
+        if (validHandCount >= 2)
+        {
+            WorkerHandRecord cand0 = snap.hands[0];
+            WorkerHandRecord cand1 = snap.hands[1];
+            Vector2 candPalm0 = ComputeNormalizedPalmCenter(cand0.landmarks);
+            Vector2 candPalm1 = ComputeNormalizedPalmCenter(cand1.landmarks);
+
+            bool refIsCand1;
+            if (primarySlotActive)
+            {
+                refIsCand1 = (candPalm1 - lastPrimaryPalmNormXY).sqrMagnitude < (candPalm0 - lastPrimaryPalmNormXY).sqrMagnitude;
+            }
+            else
+            {
+                refIsCand1 = cand1.handednessScore > cand0.handednessScore;
+            }
+
+            WorkerHandRecord refRec = refIsCand1 ? cand1 : cand0;
+            WorkerHandRecord otherRec = refIsCand1 ? cand0 : cand1;
+            float palmDist = (candPalm1 - candPalm0).magnitude;
+            bool rejectSecondCandidate = (otherRec.handednessScore < HandednessEntryMinScore)
+                                         || (palmDist < SecondCandidateMinPalmDistNorm)
+                                         || (otherRec.palmScale < (refRec.palmScale * SecondCandidateMinPalmScaleRatio));
+            if (rejectSecondCandidate)
+            {
+                if (refIsCand1)
+                {
+                    // Tukar referensi record (pool tetap, Zero-GC) agar tangan ke-1 berada di indeks 0
+                    snap.hands[0] = cand1;
+                    snap.hands[1] = cand0;
+                }
+                validHandCount = 1;
+            }
+        }
+
+        // Simpan state asosiasi sebelumnya untuk rollback saat frame lonjakan (anti-teleport) ditolak
+        Vector2 prevPrimaryPalmNormXY = lastPrimaryPalmNormXY;
+        Vector2 prevSecondaryPalmNormXY = lastSecondaryPalmNormXY;
+        TrackedHandedness prevPrimarySlotHandedness = primarySlotHandedness;
+        TrackedHandedness prevSecondarySlotHandedness = secondarySlotHandedness;
 
         // Stabilisasi Dual-Hand berbasis handedness (skor >= 0.70) + nearest-palm + gating radius + anti-swap & anti-promosi paksa
         int primarySourceIndex = -1;
@@ -5589,7 +6143,7 @@ public class AirWeavingController : MonoBehaviour
         }
         else
         {
-            // Hanya 1 tangan terdeteksi: cocokkan ke slot asalnya — DILARANG mempromosikan tangan sekunder ke slot primer 0!
+            // Hanya 1 tangan terdeteksi: cocokkan ke slot asalnya - DILARANG mempromosikan tangan sekunder ke slot primer 0!
             WorkerHandRecord rec0 = snap.hands[0];
             Vector2 palm0 = ComputeNormalizedPalmCenter(rec0.landmarks);
             TrackedHandedness handed0 = rec0.handedness;
@@ -5699,10 +6253,110 @@ public class AirWeavingController : MonoBehaviour
 
         timeSinceLastValidHand = 0f;
 
+        // Anti-Wajah handedness: entry slot baru & seluruh kandidat slot sekunder wajib >= 0.65 (primer terkunci >= 0.50 di worker)
+        if (primarySourceIndex >= 0
+            && !primarySlotActive
+            && snap.hands[primarySourceIndex].handednessScore < HandednessEntryMinScore)
+        {
+            primarySourceIndex = -1;
+            lastPrimaryPalmNormXY = prevPrimaryPalmNormXY;
+            primarySlotHandedness = prevPrimarySlotHandedness;
+        }
+        if (secondarySourceIndex >= 0
+            && snap.hands[secondarySourceIndex].handednessScore < HandednessEntryMinScore)
+        {
+            secondarySourceIndex = -1;
+            lastSecondaryPalmNormXY = prevSecondaryPalmNormXY;
+            secondarySlotHandedness = prevSecondarySlotHandedness;
+        }
+
+        // Temporal Entry: slot baru wajib stabil 3 frame berturut-turut dalam radius 0.16 sebelum skeleton/reticle tampil
+        if (!primarySlotActive)
+        {
+            if (primarySourceIndex >= 0)
+            {
+                Vector2 entryPalm = ComputeNormalizedPalmCenter(snap.hands[primarySourceIndex].landmarks);
+                if (primaryEntryStableFrames > 0
+                    && (entryPalm - primaryEntryAnchorPalmNormXY).sqrMagnitude <= (HandSlotEntryStableRadiusNorm * HandSlotEntryStableRadiusNorm))
+                {
+                    primaryEntryStableFrames++;
+                }
+                else
+                {
+                    primaryEntryStableFrames = 1;
+                }
+                primaryEntryAnchorPalmNormXY = entryPalm;
+                if (primaryEntryStableFrames < HandSlotEntryRequiredStableFrames)
+                {
+                    primarySourceIndex = -1;
+                }
+            }
+            else
+            {
+                primaryEntryStableFrames = 0;
+            }
+        }
+        if (!secondarySlotActive)
+        {
+            if (secondarySourceIndex >= 0)
+            {
+                Vector2 entryPalm = ComputeNormalizedPalmCenter(snap.hands[secondarySourceIndex].landmarks);
+                if (secondaryEntryStableFrames > 0
+                    && (entryPalm - secondaryEntryAnchorPalmNormXY).sqrMagnitude <= (HandSlotEntryStableRadiusNorm * HandSlotEntryStableRadiusNorm))
+                {
+                    secondaryEntryStableFrames++;
+                }
+                else
+                {
+                    secondaryEntryStableFrames = 1;
+                }
+                secondaryEntryAnchorPalmNormXY = entryPalm;
+                if (secondaryEntryStableFrames < HandSlotEntryRequiredStableFrames)
+                {
+                    secondarySourceIndex = -1;
+                }
+            }
+            else
+            {
+                secondaryEntryStableFrames = 0;
+            }
+        }
+
+        // Anti-Teleport: slot aktif yang melompat di luar gate -> tolak 1-2 frame lonjakan (rollback asosiasi), terima di frame ke-3
+        if (primarySourceIndex >= 0 && primarySlotActive)
+        {
+            if (primaryJumpedOutsideGate && primaryTeleportRejectFrames < HandSlotMaxTeleportRejectFrames)
+            {
+                primaryTeleportRejectFrames++;
+                primarySourceIndex = -1;
+                lastPrimaryPalmNormXY = prevPrimaryPalmNormXY;
+                primarySlotHandedness = prevPrimarySlotHandedness;
+            }
+            else if (!primaryJumpedOutsideGate)
+            {
+                primaryTeleportRejectFrames = 0;
+            }
+        }
+        if (secondarySourceIndex >= 0 && secondarySlotActive)
+        {
+            if (secondaryJumpedOutsideGate && secondaryTeleportRejectFrames < HandSlotMaxTeleportRejectFrames)
+            {
+                secondaryTeleportRejectFrames++;
+                secondarySourceIndex = -1;
+                lastSecondaryPalmNormXY = prevSecondaryPalmNormXY;
+                secondarySlotHandedness = prevSecondarySlotHandedness;
+            }
+            else if (!secondaryJumpedOutsideGate)
+            {
+                secondaryTeleportRejectFrames = 0;
+            }
+        }
+
         if (primarySourceIndex >= 0)
         {
             if (primaryJumpedOutsideGate && primarySlotActive)
             {
+                primaryTeleportRejectFrames = 0;
                 ResetLandmarkOneEuroFilters();
                 handGestureDetector.RestartEntryWarmup();
             }
@@ -5732,6 +6386,7 @@ public class AirWeavingController : MonoBehaviour
         {
             if (secondaryJumpedOutsideGate && secondarySlotActive)
             {
+                secondaryTeleportRejectFrames = 0;
                 ResetSecondaryLandmarkOneEuroFilters();
                 secondaryHandGestureDetector.RestartEntryWarmup();
             }
@@ -5802,6 +6457,8 @@ public class AirWeavingController : MonoBehaviour
         primarySlotActive = false;
         primaryMissedLastInference = false;
         primaryMissingTimer = 0f;
+        primaryEntryStableFrames = 0;
+        primaryTeleportRejectFrames = 0;
         primarySlotHandedness = TrackedHandedness.Unknown;
         isHandDetected = false;
         wasHandDetected = false;
@@ -5830,6 +6487,8 @@ public class AirWeavingController : MonoBehaviour
         secondarySlotActive = false;
         secondaryMissedLastInference = false;
         secondaryMissingTimer = 0f;
+        secondaryEntryStableFrames = 0;
+        secondaryTeleportRejectFrames = 0;
         secondarySlotHandedness = TrackedHandedness.Unknown;
         isSecondaryHandDetected = false;
         wasSecondaryHandDetected = false;
@@ -5850,33 +6509,127 @@ public class AirWeavingController : MonoBehaviour
         ResetSecondaryLandmarkOneEuroFilters();
     }
 
-    private static bool IsValidHandLandmarkCandidateWorker(List<NormalizedLandmark> landmarks)
+    private static bool IsValidHandLandmarkCandidateWorker(
+        List<NormalizedLandmark> landmarks,
+        List<Landmark> worldLandmarks,
+        float frameAspect,
+        out float palmScale)
     {
+        palmScale = 0f;
         if (landmarks == null || landmarks.Count < LandmarkCount)
         {
             return false;
+        }
+
+        // 1. Ke-21 titik wajib terhingga & berada dalam bingkai longgar [-0.15, 1.15] (Zero-GC, tanpa alokasi)
+        for (int i = 0; i < LandmarkCount; i++)
+        {
+            NormalizedLandmark lm = landmarks[i];
+            if (float.IsNaN(lm.x) || float.IsNaN(lm.y) || float.IsInfinity(lm.x) || float.IsInfinity(lm.y))
+            {
+                return false;
+            }
+            if (lm.x < CandidateLandmarkMinNorm || lm.x > CandidateLandmarkMaxNorm
+                || lm.y < CandidateLandmarkMinNorm || lm.y > CandidateLandmarkMaxNorm)
+            {
+                return false;
+            }
         }
 
         NormalizedLandmark l0 = landmarks[0];
         NormalizedLandmark l5 = landmarks[5];
         NormalizedLandmark l9 = landmarks[9];
         NormalizedLandmark l17 = landmarks[17];
-        if (float.IsNaN(l0.x) || float.IsNaN(l0.y) || float.IsNaN(l9.x) || float.IsNaN(l9.y))
+
+        // Skala telapak mentah (kompatibel dengan ambang lama MinCandidateRawPalmScale)
+        float rawD09 = Dist2DWorker(l0, l9, 1f);
+        float rawD517 = Dist2DWorker(l5, l17, 1f);
+        if ((0.5f * (rawD09 + rawD517)) < MinCandidateRawPalmScale)
         {
             return false;
         }
 
-        float dx09 = l0.x - l9.x;
-        float dy09 = l0.y - l9.y;
-        float dx517 = l5.x - l17.x;
-        float dy517 = l5.y - l17.y;
-        double d09 = Math.Sqrt((dx09 * dx09) + (dy09 * dy09));
-        double d517 = Math.Sqrt((dx517 * dx517) + (dy517 * dy517));
-        return (0.5 * (d09 + d517)) >= MinCandidateRawPalmScale;
+        // 2. Rasio anatomi telapak (aspect-compensated agar tidak bias orientasi pada frame 16:9)
+        float aspect = Mathf.Clamp(frameAspect, 0.25f, 4.0f);
+        float d09 = Dist2DWorker(l0, l9, aspect);
+        float d517 = Dist2DWorker(l5, l17, aspect);
+        float d05 = Dist2DWorker(l0, l5, aspect);
+        float d017 = Dist2DWorker(l0, l17, aspect);
+        if (d09 < 1e-5f || d517 < 1e-5f)
+        {
+            return false;
+        }
+
+        float r09To517 = d09 / d517;
+        float r05To09 = d05 / d09;
+        float r017To09 = d017 / d09;
+        if (r09To517 < CandidateMinRatioD09ToD517 || r09To517 > CandidateMaxRatioD09ToD517
+            || r05To09 < CandidateMinRatioD05ToD09 || r05To09 > CandidateMaxRatioD05ToD09
+            || r017To09 < CandidateMinRatioD017ToD09 || r017To09 > CandidateMaxRatioD017ToD09)
+        {
+            return false;
+        }
+
+        float scale = 0.5f * (d09 + d517);
+
+        // 3. Luas segitiga telapak (0,5,17) via cross-product 2D: tolak susunan kolinear/degeneratif (fitur wajah)
+        float ax = (l5.x - l0.x) * aspect;
+        float ay = l5.y - l0.y;
+        float bx = (l17.x - l0.x) * aspect;
+        float by = l17.y - l0.y;
+        float triArea = 0.5f * Mathf.Abs((ax * by) - (ay * bx));
+        if (triArea < (CandidateMinPalmTriangleAreaFactor * scale * scale))
+        {
+            return false;
+        }
+
+        // 4. Proporsi tulang proksimal (MCP->PIP) telunjuk, tengah, manis relatif skala telapak
+        float bone5 = Dist2DWorker(l5, landmarks[6], aspect) / scale;
+        float bone9 = Dist2DWorker(l9, landmarks[10], aspect) / scale;
+        float bone13 = Dist2DWorker(landmarks[13], landmarks[14], aspect) / scale;
+        if (bone5 < CandidateMinProximalBoneRatio || bone5 > CandidateMaxProximalBoneRatio
+            || bone9 < CandidateMinProximalBoneRatio || bone9 > CandidateMaxProximalBoneRatio
+            || bone13 < CandidateMinProximalBoneRatio || bone13 > CandidateMaxProximalBoneRatio)
+        {
+            return false;
+        }
+
+        // 5. Bentang telapak metrik 3D (bila world landmarks tersedia) wajib dalam rentang tangan manusia nyata
+        if (worldLandmarks != null && worldLandmarks.Count >= LandmarkCount)
+        {
+            Landmark w0 = worldLandmarks[0];
+            Landmark w5 = worldLandmarks[5];
+            Landmark w9 = worldLandmarks[9];
+            Landmark w17 = worldLandmarks[17];
+            float wdx09 = w0.x - w9.x;
+            float wdy09 = w0.y - w9.y;
+            float wdz09 = w0.z - w9.z;
+            float wdx517 = w5.x - w17.x;
+            float wdy517 = w5.y - w17.y;
+            float wdz517 = w5.z - w17.z;
+            float rawSpan3D = 0.5f * (Mathf.Sqrt((wdx09 * wdx09) + (wdy09 * wdy09) + (wdz09 * wdz09))
+                                      + Mathf.Sqrt((wdx517 * wdx517) + (wdy517 * wdy517) + (wdz517 * wdz517)));
+            if (float.IsNaN(rawSpan3D) || float.IsInfinity(rawSpan3D)
+                || rawSpan3D < CandidateMinWorldPalmSpanMeters || rawSpan3D > CandidateMaxWorldPalmSpanMeters)
+            {
+                return false;
+            }
+        }
+
+        palmScale = scale;
+        return true;
     }
 
-    private TrackedHandedness ExtractHandednessWorker(int sourceIndex)
+    private static float Dist2DWorker(NormalizedLandmark a, NormalizedLandmark b, float aspectX)
     {
+        float dx = (a.x - b.x) * aspectX;
+        float dy = a.y - b.y;
+        return Mathf.Sqrt((dx * dx) + (dy * dy));
+    }
+
+    private TrackedHandedness ExtractHandednessWorker(int sourceIndex, out float score)
+    {
+        score = 0f;
         if (cachedResult.handedness == null || sourceIndex < 0 || sourceIndex >= cachedResult.handedness.Count)
         {
             return TrackedHandedness.Unknown;
@@ -5899,6 +6652,7 @@ public class AirWeavingController : MonoBehaviour
             }
         }
 
+        score = (float.IsNaN(bestScore) || float.IsInfinity(bestScore)) ? 0f : bestScore;
         if (bestScore < HandednessConfidenceThreshold)
         {
             return TrackedHandedness.Unknown;
@@ -8223,14 +8977,57 @@ public class AirWeavingController : MonoBehaviour
         spatialSfx.Configure(levelManager, ResolveMainCamera());
         if (gestureGuide == null)
         {
-            gestureGuide = GetComponent<AirWeavingGestureGuide>() ?? gameObject.AddComponent<AirWeavingGestureGuide>();
+            gestureGuide = GetComponent<AirWeavingGestureGuide>();
+            if (gestureGuide == null)
+            {
+                gestureGuide = gameObject.AddComponent<AirWeavingGestureGuide>();
+            }
+            gestureGuide.OnGuideOverlayOpened += HandleGestureGuideOpened;
         }
         if (cachedHudMenu == null && levelManager != null)
         {
             cachedHudMenu = levelManager.GetComponent<CompactHudMenuController>();
         }
         BindHudMenuEvents(cachedHudMenu);
-        gestureGuide.Configure(cachedHudMenu, spatialSfx, ResolveMainCamera(), txtFeedback != null ? txtFeedback.font : null);
+        TMP_FontAsset sharedHudFont = txtFeedback != null ? txtFeedback.font : null;
+        gestureGuide.Configure(cachedHudMenu, spatialSfx, ResolveMainCamera(), sharedHudFont);
+
+        if (menuDrawerOverlay == null)
+        {
+            menuDrawerOverlay = GetComponent<AirWeavingMenuDrawerOverlay>();
+            if (menuDrawerOverlay == null)
+            {
+                menuDrawerOverlay = gameObject.AddComponent<AirWeavingMenuDrawerOverlay>();
+            }
+            menuDrawerOverlay.OnRecenterStageRequested += HandleHudStageRecenterRequested;
+            menuDrawerOverlay.OnGestureGuideRequested += HandleDrawerGestureGuideRequested;
+            menuDrawerOverlay.OnLevelSelectorRequested += HandleDrawerLevelSelectorRequested;
+            menuDrawerOverlay.OnTitleScreenRequested += HandleDrawerTitleScreenRequested;
+            menuDrawerOverlay.OnResetCircuitRequested += HandleDrawerResetCircuitRequested;
+        }
+        menuDrawerOverlay.Configure(levelManager, cachedHudMenu, sharedHudFont);
+
+        if (levelCompleteModal == null)
+        {
+            levelCompleteModal = GetComponent<AirWeavingLevelCompleteModal>();
+            if (levelCompleteModal == null)
+            {
+                levelCompleteModal = gameObject.AddComponent<AirWeavingLevelCompleteModal>();
+            }
+        }
+        levelCompleteModal.Configure(levelManager, circuitManager, cachedHudMenu, pedagogicalHud, spatialSfx, outputNode, sharedHudFont);
+
+        if (levelSelectorOverlay == null)
+        {
+            levelSelectorOverlay = GetComponent<AirWeavingLevelSelectorOverlay>();
+            if (levelSelectorOverlay == null)
+            {
+                levelSelectorOverlay = gameObject.AddComponent<AirWeavingLevelSelectorOverlay>();
+            }
+        }
+        levelSelectorOverlay.Configure(levelManager, cachedHudMenu, spatialSfx, sharedHudFont);
+
+        EnsureTitleOverlayCreated();
 
         workbenchVisualRootObj.SetActive(false);
     }
@@ -8622,10 +9419,14 @@ public class AirWeavingController : MonoBehaviour
         primarySlotActive = false;
         primaryMissedLastInference = false;
         primaryMissingTimer = 0f;
+        primaryEntryStableFrames = 0;
+        primaryTeleportRejectFrames = 0;
         primarySlotHandedness = TrackedHandedness.Unknown;
         secondarySlotActive = false;
         secondaryMissedLastInference = false;
         secondaryMissingTimer = 0f;
+        secondaryEntryStableFrames = 0;
+        secondaryTeleportRejectFrames = 0;
         secondarySlotHandedness = TrackedHandedness.Unknown;
         rawPinching = false;
         isPinching = false;
@@ -8668,6 +9469,18 @@ public class AirWeavingController : MonoBehaviour
         if (spatialSfx != null)
         {
             spatialSfx.StopAllImmediate();
+        }
+        if (menuDrawerOverlay != null)
+        {
+            menuDrawerOverlay.OnAirWeavingModeExited();
+        }
+        if (levelCompleteModal != null)
+        {
+            levelCompleteModal.OnAirWeavingModeExited();
+        }
+        if (levelSelectorOverlay != null)
+        {
+            levelSelectorOverlay.OnAirWeavingModeExited();
         }
         gestureGuide?.OnAirWeavingModeExited();
         summonVisual?.HideImmediate();
@@ -8883,15 +9696,31 @@ public class AirWeavingController : MonoBehaviour
         pinchRingMat = null;
         hoverRingMat = null;
         airDrawStrokeMat = null;
+        v85LabelBackdropSharedMat = null;
+        v85LabelBorderSharedMat = null;
     }
 
     /// <summary>
     /// Merapikan offset ketinggian Label_Status3D agar duduk dekat di atas masing-masing objek (anti-tabrakan dengan HUD atas),
-    /// mempertegas pil gelap AR_LabelBackdrop, &amp; mengangkat renderQueue (2998..3000) khusus selama Mode Udara aktif (0 diff di GateNode.cs).
+    /// menyeragamkan seluruh label 3D (KARTU, MODE, LAB, AND..NOT) ke gaya GwThemeTokens (SmokedGlassDense + hairline 1px +
+    /// TextPrimary/SignalTeal/StatusPassText), menyembunyikan strip bar biru/kuning tebal lama di Mode Udara,
+    /// dan memulihkan 100% saat kembali ke Mode Kartu v5 (0 diff di GateNode.cs).
     /// </summary>
     private void ApplyAirWeavingLabelReadabilityStyles()
     {
         RestoreAirWeavingLabelReadabilityStyles();
+
+        if (v85LabelBackdropSharedMat == null)
+        {
+            v85LabelBackdropSharedMat = CreateSafeSpritesMaterial(Color.white, 2998);
+        }
+        if (v85LabelBorderSharedMat == null)
+        {
+            v85LabelBorderSharedMat = CreateSafeSpritesMaterial(Color.white, 2999);
+        }
+
+        Sprite roundedSprite = GwThemeTokens.GetRoundedRect6Sprite();
+        Sprite borderSprite = GwThemeTokens.GetHairlineBorder6Sprite();
 
         for (int i = 0; i < cachedGateNodes.Count; i++)
         {
@@ -8904,28 +9733,123 @@ public class AirWeavingController : MonoBehaviour
             Transform labelT = node.statusLabel.transform;
             MeshRenderer labelMr = node.statusLabel.GetComponent<MeshRenderer>();
             Transform backdropT = labelT.Find("AR_LabelBackdrop");
+            GameObject backdropObj = backdropT != null ? backdropT.gameObject : null;
             Renderer backdropRend = backdropT != null ? backdropT.GetComponent<Renderer>() : null;
             Material backdropMat = backdropRend != null ? backdropRend.sharedMaterial : null;
             Transform pipT = labelT.Find("AR_LabelIdentityPip");
+            GameObject pipObj = pipT != null ? pipT.gameObject : null;
             Renderer pipRend = pipT != null ? pipT.GetComponent<Renderer>() : null;
             Material pipMat = pipRend != null ? pipRend.sharedMaterial : null;
+
+            bool isLogicGate = node.nodeType != NodeType.InputSource && node.nodeType != NodeType.OutputActuator;
+            Vector2 initialSlicedSize = ComputeTightLabelSlicedSize(node.statusLabel, node.statusLabel.text);
+
+            Transform existingPillT = labelT.Find("AR_V85LabelPillRoot");
+            GameObject pillRootObj;
+            SpriteRenderer pillBgSr;
+            SpriteRenderer pillBorderSr;
+
+            if (existingPillT != null)
+            {
+                pillRootObj = existingPillT.gameObject;
+                Transform bgT = existingPillT.Find("Pill_Backdrop");
+                Transform bdT = existingPillT.Find("Pill_Border");
+                pillBgSr = bgT != null ? bgT.GetComponent<SpriteRenderer>() : null;
+                pillBorderSr = bdT != null ? bdT.GetComponent<SpriteRenderer>() : null;
+                if (bgT != null)
+                {
+                    bgT.localScale = Vector3.one * V85LabelPillSpriteScale;
+                }
+                if (bdT != null)
+                {
+                    bdT.localScale = Vector3.one * V85LabelPillSpriteScale;
+                }
+            }
+            else
+            {
+                pillRootObj = new GameObject("AR_V85LabelPillRoot");
+                pillRootObj.transform.SetParent(labelT, false);
+                pillRootObj.transform.localPosition = Vector3.zero;
+                pillRootObj.transform.localRotation = Quaternion.identity;
+                pillRootObj.transform.localScale = Vector3.one;
+
+                GameObject bgObj = new GameObject("Pill_Backdrop");
+                bgObj.transform.SetParent(pillRootObj.transform, false);
+                bgObj.transform.localPosition = new Vector3(0f, 0f, 0.010f);
+                bgObj.transform.localRotation = Quaternion.identity;
+                bgObj.transform.localScale = Vector3.one * V85LabelPillSpriteScale;
+                pillBgSr = bgObj.AddComponent<SpriteRenderer>();
+                pillBgSr.sprite = roundedSprite;
+                pillBgSr.drawMode = SpriteDrawMode.Sliced;
+                pillBgSr.sortingOrder = 18;
+                pillBgSr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                pillBgSr.receiveShadows = false;
+                if (v85LabelBackdropSharedMat != null)
+                {
+                    pillBgSr.sharedMaterial = v85LabelBackdropSharedMat;
+                }
+
+                GameObject bdObj = new GameObject("Pill_Border");
+                bdObj.transform.SetParent(pillRootObj.transform, false);
+                bdObj.transform.localPosition = new Vector3(0f, 0f, 0.008f);
+                bdObj.transform.localRotation = Quaternion.identity;
+                bdObj.transform.localScale = Vector3.one * V85LabelPillSpriteScale;
+                pillBorderSr = bdObj.AddComponent<SpriteRenderer>();
+                pillBorderSr.sprite = borderSprite;
+                pillBorderSr.drawMode = SpriteDrawMode.Sliced;
+                pillBorderSr.sortingOrder = 19;
+                pillBorderSr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                pillBorderSr.receiveShadows = false;
+                if (v85LabelBorderSharedMat != null)
+                {
+                    pillBorderSr.sharedMaterial = v85LabelBorderSharedMat;
+                }
+            }
+
+            if (pillBgSr != null)
+            {
+                pillBgSr.size = initialSlicedSize;
+                pillBgSr.color = GwThemeTokens.SmokedGlassDense;
+            }
+            if (pillBorderSr != null)
+            {
+                pillBorderSr.size = initialSlicedSize;
+                pillBorderSr.color = GwThemeTokens.HairlineIdle;
+            }
+            if (!pillRootObj.activeSelf)
+            {
+                pillRootObj.SetActive(true);
+            }
 
             SavedNodeLabelStyle saved = new SavedNodeLabelStyle
             {
                 node = node,
                 originalLocalPos = labelT.localPosition,
                 originalLocalScale = labelT.localScale,
+                originalTextColor = node.statusLabel.color,
                 labelMeshRenderer = labelMr,
                 originalSortingOrder = labelMr != null ? labelMr.sortingOrder : 0,
+                backdropObj = backdropObj,
+                originalBackdropActive = backdropObj != null && backdropObj.activeSelf,
+                backdropRenderer = backdropRend,
+                originalBackdropEnabled = backdropRend != null && backdropRend.enabled,
                 backdropMat = backdropMat,
                 originalBackdropColor = backdropMat != null ? backdropMat.color : Color.black,
                 originalBackdropQueue = backdropMat != null ? backdropMat.renderQueue : 2995,
+                pipObj = pipObj,
+                originalPipActive = pipObj != null && pipObj.activeSelf,
+                pipRenderer = pipRend,
+                originalPipEnabled = pipRend != null && pipRend.enabled,
                 pipMat = pipMat,
-                originalPipQueue = pipMat != null ? pipMat.renderQueue : 2996
+                originalPipColor = pipMat != null ? pipMat.color : Color.white,
+                originalPipQueue = pipMat != null ? pipMat.renderQueue : 2996,
+                v85PillRootObj = pillRootObj,
+                v85BackdropRenderer = pillBgSr,
+                v85BorderRenderer = pillBorderSr,
+                lastObservedLabelText = node.statusLabel.text
             };
             savedNodeLabelStyles.Add(saved);
 
-            bool isLogicGate = node.nodeType != NodeType.InputSource && node.nodeType != NodeType.OutputActuator;
             Vector3 compactPos = saved.originalLocalPos;
             compactPos.y = Mathf.Max(0.46f, saved.originalLocalPos.y - (isLogicGate ? 0.065f : 0.055f));
             compactPos.z = 0.0f;
@@ -8935,18 +9859,56 @@ public class AirWeavingController : MonoBehaviour
             {
                 labelMr.sortingOrder = 20;
             }
+
+            // Sembunyikan quad backdrop lama & strip bar biru/kuning tebal lama selama Mode Udara aktif
+            // (termasuk alpha 0 & SetActive(false) pada pipObj agar kebal RestoreExternalChildRenderers() di GateNode.cs)
             if (backdropMat != null)
             {
-                backdropMat.color = AirWeavingLabelPillColor;
-                backdropMat.renderQueue = 2998;
+                backdropMat.color = Color.clear;
+            }
+            if (backdropRend != null)
+            {
+                backdropRend.enabled = false;
             }
             if (pipMat != null)
             {
-                pipMat.renderQueue = 2999;
+                pipMat.color = Color.clear;
+            }
+            if (pipRend != null)
+            {
+                pipRend.enabled = false;
+            }
+            if (pipObj != null && pipObj.activeSelf)
+            {
+                pipObj.SetActive(false);
             }
         }
 
         SuppressLegacyOutputTruthPodForAirMode();
+    }
+
+    private static Vector2 ComputeTightLabelSlicedSize(TMP_Text label, string text)
+    {
+        if (label == null)
+        {
+            return new Vector2(0.32f / V85LabelPillSpriteScale, 0.088f / V85LabelPillSpriteScale);
+        }
+
+        Vector2 pref = string.IsNullOrEmpty(text)
+            ? label.GetPreferredValues()
+            : label.GetPreferredValues(text);
+
+        // Padding tipis rapat (~15-18% + margin mikro) mengikuti renderedWidth/bounds teks 3D aktual (fontSize=0.55f)
+        float tightWidth = pref.x > 0.005f
+            ? Mathf.Clamp((pref.x * 1.15f) + 0.028f, 0.145f, 0.92f)
+            : 0.28f;
+        float tightHeight = pref.y > 0.005f
+            ? Mathf.Clamp((pref.y * 1.22f) + 0.014f, 0.076f, 0.104f)
+            : 0.088f;
+
+        return new Vector2(
+            tightWidth / V85LabelPillSpriteScale,
+            tightHeight / V85LabelPillSpriteScale);
     }
 
     private void SuppressLegacyOutputTruthPodForAirMode()
@@ -9013,28 +9975,50 @@ public class AirWeavingController : MonoBehaviour
             {
                 s.node.statusLabel.transform.localPosition = s.originalLocalPos;
                 s.node.statusLabel.transform.localScale = s.originalLocalScale;
+                s.node.statusLabel.color = s.originalTextColor;
             }
             if (s.labelMeshRenderer != null)
             {
                 s.labelMeshRenderer.sortingOrder = s.originalSortingOrder;
+            }
+            if (s.backdropObj != null && s.backdropObj.activeSelf != s.originalBackdropActive)
+            {
+                s.backdropObj.SetActive(s.originalBackdropActive);
+            }
+            if (s.backdropRenderer != null)
+            {
+                s.backdropRenderer.enabled = s.originalBackdropEnabled;
             }
             if (s.backdropMat != null)
             {
                 s.backdropMat.color = s.originalBackdropColor;
                 s.backdropMat.renderQueue = s.originalBackdropQueue;
             }
+            if (s.pipObj != null && s.pipObj.activeSelf != s.originalPipActive)
+            {
+                s.pipObj.SetActive(s.originalPipActive);
+            }
+            if (s.pipRenderer != null)
+            {
+                s.pipRenderer.enabled = s.originalPipEnabled;
+            }
             if (s.pipMat != null)
             {
+                s.pipMat.color = s.originalPipColor;
                 s.pipMat.renderQueue = s.originalPipQueue;
+            }
+            if (s.v85PillRootObj != null && s.v85PillRootObj.activeSelf)
+            {
+                s.v85PillRootObj.SetActive(false);
             }
         }
         savedNodeLabelStyles.Clear();
     }
 
     /// <summary>
-    /// Mengatur skala alami &amp; keterbacaan seluruh label world-space 3D (KARTU, MODE, LAB, AND/OR/XOR/NAND/NOT)
-    /// agar ~1.5x lebih besar pada zoom default dan ikut membesar proporsional saat di-zoom masuk / didekatkan,
-    /// sekaligus menyupresi OutputTruthPod3D 2x2 lama (digantikan Kartu 2D Tabel Kebenaran Tahap 10). Zero-GC.
+    /// Mengatur skala alami, ukuran pil 9-slice rapat mengikuti teks, warna GwThemeTokens (TextPrimary / SignalTeal / StatusPassText),
+    /// &amp; border hairline 1px seluruh label world-space 3D (KARTU, MODE, LAB, AND/OR/XOR/NAND/NOT) di LateUpdate,
+    /// sekaligus menyupresi OutputTruthPod3D 2x2 lama dan bar biru/kuning lama. Zero-GC.
     /// </summary>
     private void UpdateAirWeavingLabelsAndTruthPodSpatialPose(Camera mainCam)
     {
@@ -9051,13 +10035,27 @@ public class AirWeavingController : MonoBehaviour
         float stageZoom = stageController != null ? stageController.CurrentZoomScale : AirWeavingStageController.DefaultZoomScale;
         float zoomRatio = Mathf.Max(0.20f, stageZoom / AirWeavingStageController.DefaultZoomScale);
 
-        // 1. Skala Label 3D (Input A/B, Output, & 5 gerbang): ~1.5x lebih besar & ikut membesar alami hingga 2.85x saat zoom masuk
+        // 1. Skala, Ukuran Pil Rapat, & Warna Label 3D (Input A/B, Output, & 5 gerbang) sesuai GwThemeTokens
         for (int i = 0; i < savedNodeLabelStyles.Count; i++)
         {
             SavedNodeLabelStyle s = savedNodeLabelStyles[i];
             if (s.node == null || s.node.statusLabel == null)
             {
                 continue;
+            }
+
+            // Pastikan quad backdrop lama & strip bar biru/kuning lama tetap mati setelah RestoreExternalChildRenderers() di Update()
+            if (s.backdropRenderer != null && s.backdropRenderer.enabled)
+            {
+                s.backdropRenderer.enabled = false;
+            }
+            if (s.pipRenderer != null && s.pipRenderer.enabled)
+            {
+                s.pipRenderer.enabled = false;
+            }
+            if (s.pipObj != null && s.pipObj.activeSelf)
+            {
+                s.pipObj.SetActive(false);
             }
 
             Transform labelT = s.node.statusLabel.transform;
@@ -9076,6 +10074,58 @@ public class AirWeavingController : MonoBehaviour
             float parentScale = Mathf.Max(0.08f, s.node.transform.localScale.x);
             float clampedLocalScale = Mathf.Clamp(desiredWorldLabelScale / parentScale, 0.04f, 2.65f);
             labelT.localScale = Vector3.one * clampedLocalScale;
+
+            // Hitung ulang ukuran pil 9-slice rapat bila teks label berubah (Zero-GC string reference check)
+            string curText = s.node.statusLabel.text;
+            if (!ReferenceEquals(curText, s.lastObservedLabelText)
+                && !string.Equals(curText, s.lastObservedLabelText, StringComparison.Ordinal))
+            {
+                s.lastObservedLabelText = curText;
+                savedNodeLabelStyles[i] = s;
+                Vector2 tightSliced = ComputeTightLabelSlicedSize(s.node.statusLabel, curText);
+                if (s.v85BackdropRenderer != null)
+                {
+                    s.v85BackdropRenderer.size = tightSliced;
+                }
+                if (s.v85BorderRenderer != null)
+                {
+                    s.v85BorderRenderer.size = tightSliced;
+                }
+            }
+
+            // Seragamkan warna teks & border hairline 1px ke GwThemeTokens (menimpa warna kuning/hijau v5 dari GateNode.Update)
+            Color desiredTextCol;
+            Color desiredBorderCol;
+            if (s.node.nodeType == NodeType.OutputActuator)
+            {
+                bool isOutUnlocked = s.node.currentOutputValue || isLiveCircuitPassedAllFour;
+                desiredTextCol = isOutUnlocked ? GwThemeTokens.StatusPassText : GwThemeTokens.TextPrimary;
+                desiredBorderCol = isOutUnlocked ? GwThemeTokens.StatusPassEmerald : GwThemeTokens.HairlineIdle;
+            }
+            else if (isParkedGate)
+            {
+                desiredTextCol = GwThemeTokens.TextPrimary;
+                desiredBorderCol = GwThemeTokens.HairlineIdle;
+            }
+            else if (s.node.currentOutputValue)
+            {
+                desiredTextCol = GwThemeTokens.SignalHighTeal;
+                desiredBorderCol = GwThemeTokens.HairlineActive;
+            }
+            else
+            {
+                desiredTextCol = GwThemeTokens.TextPrimary;
+                desiredBorderCol = GwThemeTokens.HairlineIdle;
+            }
+
+            if (s.node.statusLabel.color != desiredTextCol)
+            {
+                s.node.statusLabel.color = desiredTextCol;
+            }
+            if (s.v85BorderRenderer != null && s.v85BorderRenderer.color != desiredBorderCol)
+            {
+                s.v85BorderRenderer.color = desiredBorderCol;
+            }
         }
 
         // 2. Supresi OutputTruthPod3D 2x2 lama (digantikan Tabel Kebenaran Eksplisit di Panel Kanan Tahap 10)

@@ -1,77 +1,35 @@
+using System;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
 /// <summary>
-/// Panduan Gestur Interaktif 1 Halaman & Latihan Cepat 4 Langkah khusus Mode Udara (GateWeaver AR v8.0 Tahap 2).
-/// - 100% Code-First & Prosedural (0 aset/prefab eksternal, 0% regresi Mode Kartu v5).
-/// - Bahasa desain Floating Rounded Glass (#08111EE0 + garis tepi 9-slice bercahaya halus) selaras CompactHudMenuController
-///   dengan tipografi langkah/petunjuk ~30-35% lebih besar, kontras tinggi, bebas overflow/truncation, dan aman Safe Area 20:9.
-/// - Tampil otomatis 1 kali saja saat pertama kali masuk Mode Udara (PlayerPrefs: GW_AirGuideSeen_v75),
-///   dapat dibuka ulang kapan saja lewat tombol '?' di HUD Atas atau opsi 'Panduan Gestur' di laci menu.
-/// - Mode Latihan Cepat 4 langkah non-intrusif di tengah-bawah layar yang melacak aksi tangan nyata Zero-GC.
+/// Panduan Gestur Interaktif 1 Halaman &amp; Latihan Cepat 4 Langkah khusus Mode Udara
+/// (GateWeaver AR v8.5 - Smoked Optical Glass + Brushed Titanium, 06_Modal_Guide).
+/// - 100% memakai token warna, metrik (radius 6px, hairline 1px), &amp; sprite 9-slice GwThemeTokens.
+/// - Tata letak 2 kolom sejajar:
+///   * Kiri: 3 gestur utama (KEPAL (FIST), CUBIT (PINCH), DUA TANGAN) dalam kartu CardIdle + HairlineIdle.
+///   * Kanan: Grid 5 kartu pose summon gerbang (AND 1 Telunjuk, OR 2 Jari V, NOT Jempol Atas, XOR 3 Jari, NAND 4 Jari)
+///     dengan aksen #38BDF8 + catatan alur 2-tahap (Circle-Charge -&gt; Open-5).
+/// - Tombol aksi tutup utama ("PAHAM, KEMBALI KE SIMULASI") bergaya primer solid PrimaryFill (#FFFFFF) + PrimaryText (#12141C bold).
+/// - Pil Latihan Cepat 4 Langkah non-intrusif di tengah-bawah layar yang melacak aksi tangan nyata Zero-GC.
+/// - 0% regresi Mode Kartu Vuforia v5, 100% pure ASCII 7-bit, tanpa neon glow, tanpa LINQ.
 /// </summary>
 public sealed class AirWeavingGestureGuide : MonoBehaviour
 {
     private const string PrefKeyGuideSeen = "GW_AirGuideSeen_v75";
-    private const float TopBarHeight = 76f;
-    private const float GuideCardWidth = 1280f;
-    private const float GuideCardHeight = 656f;
+    private const int OverlayCanvasSortingOrder = 25;
+    private const float ReferenceCanvasWidth = 1920f;
+    private const float ReferenceCanvasHeight = 1080f;
+    private const float GuideCardWidth = 1220f;
+    private const float GuideCardHeight = 668f;
     private const float PracticePillWidth = 840f;
-    private const float PracticePillHeight = 64f;
+    private const float PracticePillHeight = 58f;
+    private const float PracticePillBottomYWhenStripExpanded = 88f;
+    private const float PracticePillBottomYWhenStripCollapsed = 32f;
     private const float StepCompleteBeatSeconds = 0.42f;
     private const float CompletionBannerSeconds = 1.60f;
     private const float AudioReferenceDepth = 3.60f;
-
-    private static readonly Color ScrimBgColor = new Color(0.01f, 0.03f, 0.07f, 0.72f);
-    private static readonly Color CardBgColor = new Color(0.031f, 0.067f, 0.118f, 0.95f);
-    private static readonly Color CardBorderCyanColor = new Color(0.20f, 0.90f, 1.00f, 0.88f);
-    private static readonly Color CardDividerColor = new Color(0.20f, 0.72f, 0.90f, 0.42f);
-    private static readonly Color SubtitleTextColor = new Color(0.76f, 0.91f, 0.98f, 0.96f);
-    private static readonly Color RowBgColor = new Color(0.06f, 0.13f, 0.22f, 0.92f);
-    private static readonly Color RowBorderColor = new Color(0.20f, 0.62f, 0.82f, 0.36f);
-    private static readonly Color RowTextColor = new Color(0.94f, 0.98f, 1.00f, 1.00f);
-
-    private static readonly Color TagIndexBgColor = new Color(0.06f, 0.30f, 0.24f, 0.96f);
-    private static readonly Color TagIndexAccentColor = new Color(0.36f, 1.00f, 0.72f, 1.00f);
-    private static readonly Color TagSummonBgColor = new Color(0.06f, 0.28f, 0.40f, 0.96f);
-    private static readonly Color TagSummonAccentColor = new Color(0.30f, 0.96f, 1.00f, 1.00f);
-    private static readonly Color TagPinchBgColor = new Color(0.17f, 0.29f, 0.09f, 0.96f);
-    private static readonly Color TagPinchAccentColor = new Color(0.76f, 1.00f, 0.34f, 1.00f);
-    private static readonly Color TagFistBgColor = new Color(0.34f, 0.18f, 0.08f, 0.96f);
-    private static readonly Color TagFistAccentColor = new Color(1.00f, 0.74f, 0.32f, 1.00f);
-    private static readonly Color TagTestBgColor = new Color(0.07f, 0.31f, 0.16f, 0.96f);
-    private static readonly Color TagTestAccentColor = new Color(0.42f, 1.00f, 0.56f, 1.00f);
-
-    private static readonly Color PrimaryBtnBgColor = new Color(0.08f, 0.44f, 0.58f, 0.98f);
-    private static readonly Color PrimaryBtnOutlineColor = new Color(0.28f, 0.94f, 1.00f, 1.00f);
-    private static readonly Color NeutralBtnBgColor = new Color(0.10f, 0.18f, 0.28f, 0.96f);
-    private static readonly Color NeutralBtnOutlineColor = new Color(0.36f, 0.58f, 0.74f, 0.85f);
-
-    private static readonly Color PillBgIdleColor = new Color(0.031f, 0.067f, 0.118f, 0.93f);
-    private static readonly Color PillOutlineIdleColor = new Color(0.22f, 0.90f, 1.00f, 0.88f);
-    private static readonly Color PillBgSuccessColor = new Color(0.04f, 0.28f, 0.16f, 0.96f);
-    private static readonly Color PillOutlineSuccessColor = new Color(0.28f, 1.00f, 0.62f, 1.00f);
-    private static readonly Color BadgeBgIdleColor = new Color(0.08f, 0.32f, 0.46f, 0.98f);
-    private static readonly Color BadgeTextIdleColor = new Color(0.82f, 0.99f, 1.00f, 1.00f);
-    private static readonly Color BadgeBgSuccessColor = new Color(0.10f, 0.48f, 0.28f, 0.98f);
-    private static readonly Color BadgeTextSuccessColor = new Color(0.94f, 1.00f, 0.96f, 1.00f);
-    private static readonly Color SkipBtnBgColor = new Color(0.11f, 0.19f, 0.30f, 0.95f);
-    private static readonly Color SkipBtnOutlineColor = new Color(0.38f, 0.60f, 0.76f, 0.82f);
-    private static readonly Color SkipBtnTextColor = new Color(0.88f, 0.95f, 1.00f, 1.00f);
-    private static readonly Color PracticePromptColor = new Color(0.95f, 0.99f, 1.00f, 1.00f);
-    private static readonly Color PracticeCompleteTextColor = new Color(0.42f, 1.00f, 0.64f, 1.00f);
-
-    private static readonly ColorBlock GuideButtonColorBlock = new ColorBlock
-    {
-        normalColor = Color.white,
-        highlightedColor = new Color(0.90f, 0.97f, 1.00f, 1f),
-        pressedColor = new Color(0.72f, 0.82f, 0.90f, 1f),
-        selectedColor = Color.white,
-        disabledColor = new Color(0.45f, 0.48f, 0.52f, 0.55f),
-        colorMultiplier = 1f,
-        fadeDuration = 0.08f
-    };
 
     private enum PracticeState
     {
@@ -83,17 +41,20 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         CompletedBanner = 5
     }
 
+    public event Action OnGuideOverlayOpened;
+
     private CompactHudMenuController compactHudMenu;
     private AirWeavingSpatialSfx spatialSfx;
     private Camera referenceCamera;
     private Canvas targetCanvas;
     private TMP_FontAsset safeFont;
 
-    // Overlay Panduan 1 Halaman
+    // Overlay Panduan 1 Halaman (06_Modal_Guide)
     private GameObject guideRootObj;
     private Button guideScrimButton;
     private RectTransform guideSafeAreaRect;
     private RectTransform guideCardRect;
+    private Button btnCloseTopX;
     private Button btnStartPractice;
     private Button btnCloseGuide;
 
@@ -101,8 +62,8 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
     private GameObject practiceRootObj;
     private RectTransform practiceSafeAreaRect;
     private GameObject practicePillObj;
+    private RectTransform practicePillRect;
     private Image practicePillBg;
-    private Outline practicePillOutline;
     private Image practicePillBorderImg;
     private Image practiceBadgeBg;
     private Image practiceBadgeBorderImg;
@@ -112,11 +73,11 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
     private GameObject skipPracticeBtnObj;
     private Button btnSkipPractice;
 
-    // Pra-cache string Zero-GC (bebas alokasi saat runtime)
-    private string step1PromptText;
-    private string step2PromptText;
-    private string step3PromptText;
-    private string step4PromptText;
+    // Pra-cache string ASCII 7-bit Zero-GC (bebas alokasi saat runtime)
+    private const string Step1PromptText = "Kepal tangan di sakelar kiri untuk balik 0 <-> 1";
+    private const string Step2PromptText = "Putar 1-4 jari atau jempol, lalu buka lebar 5 jari (Open-5)";
+    private const string Step3PromptText = "Cubit orb port lalu sambungkan 1 kabel";
+    private const string Step4PromptText = "Kepal gerbang lalu buang keluar batas zona rakit";
     private const string CompletedBannerText = "SIAP MERAKIT";
     private const string BadgeStep1 = "1/4";
     private const string BadgeStep2 = "2/4";
@@ -127,6 +88,7 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
     private bool isUiBuilt = false;
     private bool isAirWeavingActive = false;
     private bool isGuideOverlayOpen = false;
+    private bool isPedBottomStripExpanded = true;
     private PracticeState practiceState = PracticeState.Inactive;
     private PracticeState pendingNextState = PracticeState.Inactive;
     private float stepCompleteBeatTimer = 0f;
@@ -217,7 +179,40 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         }
     }
 
-    public void Tick(float dt, Camera mainCam)
+    public void SetBottomStripExpandedState(bool expanded)
+    {
+        if (isPedBottomStripExpanded == expanded && practicePillRect != null)
+        {
+            float targetY = expanded ? PracticePillBottomYWhenStripExpanded : PracticePillBottomYWhenStripCollapsed;
+            if (Mathf.Abs(practicePillRect.anchoredPosition.y - targetY) <= 0.5f)
+            {
+                return;
+            }
+        }
+
+        isPedBottomStripExpanded = expanded;
+        ApplyPracticePillVerticalOffset();
+    }
+
+    private void ApplyPracticePillVerticalOffset()
+    {
+        if (practicePillRect == null)
+        {
+            return;
+        }
+
+        float desiredY = isPedBottomStripExpanded
+            ? PracticePillBottomYWhenStripExpanded
+            : PracticePillBottomYWhenStripCollapsed;
+        Vector2 pos = practicePillRect.anchoredPosition;
+        if (Mathf.Abs(pos.y - desiredY) > 0.5f)
+        {
+            pos.y = desiredY;
+            practicePillRect.anchoredPosition = pos;
+        }
+    }
+
+    public void Tick(float dt, Camera mainCam, bool bottomStripExpanded = true)
     {
         if (mainCam != null)
         {
@@ -228,6 +223,8 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         {
             return;
         }
+
+        SetBottomStripExpandedState(bottomStripExpanded);
 
         if (isGuideOverlayOpen || practiceState != PracticeState.Inactive)
         {
@@ -366,15 +363,25 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         }
 
         StopPracticeImmediate();
-        compactHudMenu?.CloseMenuDrawer();
-        compactHudMenu?.ClearToastImmediate();
-        spatialSfx?.StopHumImmediate();
+        if (compactHudMenu != null)
+        {
+            compactHudMenu.CloseMenuDrawer();
+            compactHudMenu.ClearToastImmediate();
+        }
+        if (spatialSfx != null)
+        {
+            spatialSfx.StopHumImmediate();
+        }
+
+        OnGuideOverlayOpened?.Invoke();
 
         isGuideOverlayOpen = true;
-        guideRootObj.transform.SetAsLastSibling();
         guideRootObj.SetActive(true);
         ApplySafeAreaAndResponsiveScaleIfNeeded(force: true);
-        compactHudMenu?.SetGuideButtonActiveState(true);
+        if (compactHudMenu != null)
+        {
+            compactHudMenu.SetGuideButtonActiveState(true);
+        }
     }
 
     public void CloseGuideOverlay(bool markAsSeen)
@@ -389,7 +396,10 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         {
             guideRootObj.SetActive(false);
         }
-        compactHudMenu?.SetGuideButtonActiveState(false);
+        if (compactHudMenu != null)
+        {
+            compactHudMenu.SetGuideButtonActiveState(false);
+        }
     }
 
     public void StartQuickPractice()
@@ -406,7 +416,10 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         }
 
         CloseGuideOverlay(markAsSeen: true);
-        compactHudMenu?.CloseMenuDrawer();
+        if (compactHudMenu != null)
+        {
+            compactHudMenu.CloseMenuDrawer();
+        }
 
         practiceState = PracticeState.Step1ToggleInput;
         pendingNextState = PracticeState.Inactive;
@@ -417,7 +430,10 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         practiceRootObj.SetActive(true);
         ApplySafeAreaAndResponsiveScaleIfNeeded(force: true);
         RefreshPracticePillVisuals(isStepFlashSuccess: false);
-        compactHudMenu?.SetPracticePillBottomOffset(true);
+        if (compactHudMenu != null)
+        {
+            compactHudMenu.SetPracticePillBottomOffset(true);
+        }
     }
 
     public void StopPracticeImmediate()
@@ -431,13 +447,17 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         {
             practiceRootObj.SetActive(false);
         }
-        compactHudMenu?.SetPracticePillBottomOffset(false);
+        if (compactHudMenu != null)
+        {
+            compactHudMenu.SetPracticePillBottomOffset(false);
+        }
     }
 
     public void CleanupImmediate()
     {
         UnsubscribeHudEvents();
         RemoveBtnListener(guideScrimButton, OnCloseGuideClicked);
+        RemoveBtnListener(btnCloseTopX, OnCloseGuideClicked);
         RemoveBtnListener(btnStartPractice, OnStartPracticeClicked);
         RemoveBtnListener(btnCloseGuide, OnCloseGuideClicked);
         RemoveBtnListener(btnSkipPractice, OnSkipPracticeClicked);
@@ -469,12 +489,13 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         guideScrimButton = null;
         guideSafeAreaRect = null;
         guideCardRect = null;
+        btnCloseTopX = null;
         btnStartPractice = null;
         btnCloseGuide = null;
         practiceSafeAreaRect = null;
         practicePillObj = null;
+        practicePillRect = null;
         practicePillBg = null;
-        practicePillOutline = null;
         practicePillBorderImg = null;
         practiceBadgeBg = null;
         practiceBadgeBorderImg = null;
@@ -600,7 +621,7 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
     }
 
     // =========================================================================
-    // PEMBANGUNAN UI PROSEDURAL ZERO-GC (ROUNDED GLASS OVERLAY + PIL LATIHAN)
+    // PEMBANGUNAN UI PROSEDURAL 100% TOKEN GwThemeTokens (06_Modal_Guide)
     // =========================================================================
 
     private void EnsureUiBuilt()
@@ -629,34 +650,37 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
                 : TMP_Settings.defaultFontAsset;
         }
 
-        string arrowGlyph = SupportsGlyph('\u2194') ? "\u2194" : "<->";
-        string dotGlyph = SupportsGlyph('\u00B7') ? "\u00B7" : "|";
-        string dashGlyph = SupportsGlyph('\u2013') ? "\u2013" : "-";
-
-        step1PromptText = "Kepal tangan di sakelar kiri untuk balik 0/1";
-        step2PromptText = $"Putar 1{dashGlyph}4 jari atau jempol, lalu buka 5 jari";
-        step3PromptText = "Cubit orb port lalu sambungkan 1 kabel";
-        step4PromptText = "Kepal gerbang lalu buang keluar 4 siku";
-
-        BuildGuideOverlayUi(targetCanvas.transform, arrowGlyph, dotGlyph, dashGlyph);
+        BuildGuideOverlayUi();
         BuildPracticePillUi(targetCanvas.transform);
 
         isUiBuilt = true;
         ApplySafeAreaAndResponsiveScaleIfNeeded(force: true);
     }
 
-    private void BuildGuideOverlayUi(Transform canvasTransform, string arrowGlyph, string dotGlyph, string dashGlyph)
+    private void BuildGuideOverlayUi()
     {
-        // Root berada tepat di bawah area Floating Glass HUD Atas agar tombol '?' & '≡' selalu responsif dalam 1 ketukan
-        guideRootObj = new GameObject("Panel_AirGestureGuideRoot", typeof(RectTransform));
-        guideRootObj.transform.SetParent(canvasTransform, false);
-        RectTransform rootRect = guideRootObj.GetComponent<RectTransform>();
-        rootRect.anchorMin = Vector2.zero;
-        rootRect.anchorMax = Vector2.one;
-        rootRect.offsetMin = Vector2.zero;
-        rootRect.offsetMax = new Vector2(0f, -TopBarHeight);
+        // Dedicated ScreenSpaceOverlay Canvas (sortingOrder = 25) strictly di atas Top HUD (0) & Pedagogical HUD (5)
+        guideRootObj = new GameObject(
+            "Canvas_AirGestureGuideOverlay_V85",
+            typeof(RectTransform),
+            typeof(Canvas),
+            typeof(CanvasScaler),
+            typeof(GraphicRaycaster));
+        guideRootObj.transform.SetParent(transform, false);
 
-        // Scrim gelap semi-transparan klik-luar
+        Canvas overlayCanvas = guideRootObj.GetComponent<Canvas>();
+        overlayCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        overlayCanvas.sortingOrder = OverlayCanvasSortingOrder;
+
+        CanvasScaler scaler = guideRootObj.GetComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(ReferenceCanvasWidth, ReferenceCanvasHeight);
+        scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+        scaler.matchWidthOrHeight = 0.5f;
+
+        RectTransform rootRect = guideRootObj.GetComponent<RectTransform>();
+
+        // Full-screen dark dim scrim (#090B10 62%, raycast blocker aktif) meredupkan Top HUD & 3D panggung
         GameObject scrimObj = new GameObject("Btn_AirGestureGuideScrim", typeof(RectTransform), typeof(Image), typeof(Button));
         scrimObj.transform.SetParent(rootRect, false);
         RectTransform scrimRect = scrimObj.GetComponent<RectTransform>();
@@ -666,7 +690,7 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         scrimRect.offsetMax = Vector2.zero;
 
         Image scrimImg = scrimObj.GetComponent<Image>();
-        scrimImg.color = ScrimBgColor;
+        scrimImg.color = GwThemeTokens.BackdropScrim;
         scrimImg.raycastTarget = true;
 
         guideScrimButton = scrimObj.GetComponent<Button>();
@@ -683,8 +707,8 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         guideSafeAreaRect.offsetMin = Vector2.zero;
         guideSafeAreaRect.offsetMax = Vector2.zero;
 
-        // Kartu Floating Rounded Glass Kontras Tinggi
-        GameObject cardObj = new GameObject("Card_AirGestureGuide", typeof(RectTransform), typeof(Image), typeof(Outline));
+        // Panel modal tengah: SmokedGlassOverlay (94%) + HairlineActive 1px + radius 6px (nol neon glow)
+        GameObject cardObj = new GameObject("Card_AirGestureGuide", typeof(RectTransform), typeof(Image));
         cardObj.transform.SetParent(guideSafeAreaRect, false);
         guideCardRect = cardObj.GetComponent<RectTransform>();
         guideCardRect.anchorMin = new Vector2(0.5f, 0.5f);
@@ -694,247 +718,637 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         guideCardRect.sizeDelta = new Vector2(GuideCardWidth, GuideCardHeight);
 
         Image cardBg = cardObj.GetComponent<Image>();
-        CompactHudMenuController.ApplyRoundedCard(cardBg);
-        cardBg.color = CardBgColor;
+        GwThemeTokens.ApplyRoundedRect6(cardBg, GwThemeTokens.SmokedGlassOverlay);
         cardBg.raycastTarget = true;
 
-        Outline cardOutline = cardObj.GetComponent<Outline>();
-        cardOutline.effectColor = new Color(0.18f, 0.88f, 1.00f, 0.42f);
-        cardOutline.effectDistance = new Vector2(2.2f, -2.2f);
+        GwThemeTokens.AttachHairlineBorder(guideCardRect, "Card_AirGestureGuide_Border", GwThemeTokens.HairlineActive);
 
-        CompactHudMenuController.AttachRoundedBorderOverlay(
-            guideCardRect,
-            "Card_AirGestureGuide_Border",
-            CompactHudMenuController.GetRoundedCardBorderSprite(),
-            CardBorderCyanColor);
+        const float padX = 28f;
+        float contentW = GuideCardWidth - (padX * 2f);
 
-        // Header Kartu (~30% lebih besar)
+        // ---------------------------------------------------------------------
+        // HEADER MODAL (1:1 Figma: PANDUAN INTERAKSI & GESTUR TANGAN + sub sian pendek)
+        // ---------------------------------------------------------------------
         TMP_Text titleTmp = CreateTopLeftText(
             "Txt_GuideHeader",
             guideCardRect,
-            new Vector2(32f, -16f),
-            new Vector2(GuideCardWidth - 64f, 42f),
-            "PANDUAN GESTUR MODE UDARA",
-            TextAlignmentOptions.Center,
-            CardBorderCyanColor,
-            21f,
-            30f,
+            new Vector2(padX, -20f),
+            new Vector2(contentW - 52f, 32f),
+            "PANDUAN INTERAKSI & GESTUR TANGAN",
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.TextPrimary,
+            20f,
+            24f,
             TextWrappingModes.NoWrap);
         titleTmp.fontStyle = FontStyles.Bold;
 
         TMP_Text subTmp = CreateTopLeftText(
             "Txt_GuideSubtitle",
             guideCardRect,
-            new Vector2(32f, -58f),
-            new Vector2(GuideCardWidth - 64f, 30f),
-            $"5 Kontrol Utama Tanpa Sentuh Layar  {dotGlyph}  Buka ulang kapan saja via tombol ?",
-            TextAlignmentOptions.Center,
-            SubtitleTextColor,
-            15.5f,
-            20.5f,
+            new Vector2(padX, -52f),
+            new Vector2(contentW - 52f, 20f),
+            "MODE UDARA // AIRWEAVING v8.5",
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.SignalHighTeal,
+            11.5f,
+            13f,
             TextWrappingModes.NoWrap);
-        subTmp.fontStyle = FontStyles.Normal;
+        subTmp.fontStyle = FontStyles.Bold;
 
-        CreateDivider("Divider_Top", guideCardRect, 32f, -94f, GuideCardWidth - 64f, 2f);
-
-        // 5 Baris Kontrol Utama Mode Udara v7 dengan bahasa Rounded Glass & font ~32-35% lebih besar
-        float rowY = -108f;
-        const float rowStep = 88f;
-        const float rowHeight = 78f;
-
-        CreateGuideRuleRow(
-            "Row_Rule_1",
+        btnCloseTopX = CreateCardActionButton(
+            "Btn_GuideCloseTopX",
             guideCardRect,
-            rowY,
-            rowHeight,
-            "KEPAL INPUT",
-            TagIndexBgColor,
-            TagIndexAccentColor,
-            $"<color=#6EFFB8><b>Sakelar Input:</b></color> Arahkan tangan terbuka ke sakelar kiri lalu kepal sejenak untuk membalik 0 {arrowGlyph} 1.");
-        rowY -= rowStep;
+            GuideCardWidth - padX - 36f,
+            -22f,
+            36f,
+            36f,
+            "X",
+            GwThemeTokens.CardIdle,
+            GwThemeTokens.HairlineIdle,
+            GwThemeTokens.TextPrimary,
+            15f,
+            18f,
+            hasBorder: true,
+            OnCloseGuideClicked);
 
-        CreateGuideRuleRow(
-            "Row_Rule_2",
+        CreateDivider("Divider_Top", guideCardRect, padX, -86f, contentW, GwThemeTokens.HairlineBorderPx);
+
+        // ---------------------------------------------------------------------
+        // KONTEN 2 KOLOM SEJAJAR (KIRI: 3 GESTUR UTAMA | KANAN: GRID 3x2 = 6 KARTU)
+        // Tanpa Divider_CenterCols & tanpa Divider_Bottom (1:1 Figma)
+        // ---------------------------------------------------------------------
+        const float colsTopY = -102f;
+        const float colGap = 24f;
+        float leftColW = (contentW - colGap) * 0.42f;
+        float rightColW = contentW - colGap - leftColW;
+        float rightColX = padX + leftColW + colGap;
+
+        // --- KOLOM KIRI: 01 // 3 GESTUR UTAMA ---
+        TMP_Text leftSecTmp = CreateTopLeftText(
+            "Txt_LeftColHeader",
             guideCardRect,
-            rowY,
-            rowHeight,
-            "PUTAR + 5 JARI",
-            TagSummonBgColor,
-            TagSummonAccentColor,
-            $"<color=#54F5FF><b>Summon Gerbang:</b></color> Putar jari di ruang tengah (1 AND {dotGlyph} 2 OR {dotGlyph} 3 XOR {dotGlyph} 4 NAND {dotGlyph} Jempol NOT), lalu buka lebar 5 jari (Bloom).");
-        rowY -= rowStep;
+            new Vector2(padX, colsTopY),
+            new Vector2(leftColW, 20f),
+            "01 // 3 GESTUR UTAMA",
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.TextSecondary,
+            10.5f,
+            12f,
+            TextWrappingModes.NoWrap);
+        leftSecTmp.fontStyle = FontStyles.Bold;
 
-        CreateGuideRuleRow(
-            "Row_Rule_3",
+        const float mainCardGap = 14f;
+        const float mainCardH = 136f;
+        float leftCardY = colsTopY - 30f;
+
+        CreateMainGestureCard(
+            "Card_GestureFist",
             guideCardRect,
-            rowY,
-            rowHeight,
-            "CUBIT",
-            TagPinchBgColor,
-            TagPinchAccentColor,
-            "<color=#C6FF5C><b>Kabel Manual:</b></color> Cubit (Jempol + Telunjuk) pada orb port untuk tarik/colok; lepas di ruang kosong untuk putus.");
-        rowY -= rowStep;
+            padX,
+            leftCardY,
+            leftColW,
+            mainCardH,
+            gestureKind: 0,
+            "KEPAL (FIST)",
+            "Toggle Input A/B",
+            GwThemeTokens.AccentSwitchOrange,
+            "Kepalkan tangan dekat sakelar atau blok gerbang untuk memicu & memindahkan.");
+        leftCardY -= (mainCardH + mainCardGap);
 
-        CreateGuideRuleRow(
-            "Row_Rule_4",
+        CreateMainGestureCard(
+            "Card_GesturePinch",
             guideCardRect,
-            rowY,
-            rowHeight,
-            "KEPAL",
-            TagFistBgColor,
-            TagFistAccentColor,
-            "<color=#FFBE52><b>Pindah & Hapus:</b></color> Kepal badan gerbang untuk geser; tarik keluar dari 4 siku sudut (bingkai merah) lalu lepas untuk hapus.");
-        rowY -= rowStep;
+            padX,
+            leftCardY,
+            leftColW,
+            mainCardH,
+            gestureKind: 1,
+            "CUBIT (PINCH)",
+            "Tarik Kabel / Pindah Gerbang",
+            GwThemeTokens.SignalHighTeal,
+            "Satukan ibu jari & telunjuk pada port untuk menyambung atau melepas rute logika.");
+        leftCardY -= (mainCardH + mainCardGap);
 
-        CreateGuideRuleRow(
-            "Row_Rule_5",
+        CreateMainGestureCard(
+            "Card_GestureTwoHand",
             guideCardRect,
-            rowY,
-            rowHeight,
-            $"UJI 00{dashGlyph}11",
-            TagTestBgColor,
-            TagTestAccentColor,
-            "<color=#6EFF8F><b>Lulus Otomatis:</b></color> Balik sakelar untuk menguji 4 kombinasi sampai 4/4 hijau (Auto-Win).");
+            padX,
+            leftCardY,
+            leftColW,
+            mainCardH,
+            gestureKind: 2,
+            "DUA TANGAN",
+            "Orbit & Zoom Panggung",
+            GwThemeTokens.TextPrimary,
+            "Gunakan dua tangan untuk memutar meja 360 deg dan mengatur jarak pandang AR.");
 
-        CreateDivider("Divider_Bottom", guideCardRect, 32f, -554f, GuideCardWidth - 64f, 2f);
+        // --- KOLOM KANAN: 02 // 5 POSE SUMMON GERBANG (GRID 3x2 = 6 KARTU SEJAJAR) ---
+        TMP_Text rightSecTmp = CreateTopLeftText(
+            "Txt_RightColHeader",
+            guideCardRect,
+            new Vector2(rightColX, colsTopY),
+            new Vector2(rightColW, 20f),
+            "02 // 5 POSE SUMMON GERBANG (CIRCLE-CHARGE -> OPEN-5)",
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.TextSecondary,
+            10.5f,
+            12f,
+            TextWrappingModes.NoWrap);
+        rightSecTmp.fontStyle = FontStyles.Bold;
 
-        // 2 Tombol Responsif Bawah: MULAI LATIHAN CEPAT (sian) & TUTUP (netral)
-        const float startBtnW = 424f;
-        const float closeBtnW = 252f;
-        const float btnGap = 32f;
-        const float btnH = 64f;
-        float totalBtnW = startBtnW + btnGap + closeBtnW;
-        float startX = (GuideCardWidth - totalBtnW) * 0.5f;
-        const float btnY = -572f;
+        const float poseGap = 12f;
+        float gridCardW = (rightColW - (poseGap * 2f)) / 3f;
+        const float gridCardH = 211f;
+        float row1Y = colsTopY - 30f;
+        float row2Y = row1Y - (gridCardH + poseGap);
+
+        // Baris 1 Grid 3x2: AND (1 Telunjuk), OR (2 Jari V), NOT (Jempol Atas)
+        CreateSummonPoseCard(
+            "Card_PoseAnd",
+            guideCardRect,
+            rightColX,
+            row1Y,
+            gridCardW,
+            gridCardH,
+            "AND",
+            "A . B",
+            GwThemeTokens.IeeeGateIconKind.And,
+            GwThemeTokens.FingerPoseIconKind.OneIndex,
+            "POSE: 1 Telunjuk");
+
+        CreateSummonPoseCard(
+            "Card_PoseOr",
+            guideCardRect,
+            rightColX + gridCardW + poseGap,
+            row1Y,
+            gridCardW,
+            gridCardH,
+            "OR",
+            "A + B",
+            GwThemeTokens.IeeeGateIconKind.Or,
+            GwThemeTokens.FingerPoseIconKind.TwoV,
+            "POSE: 2 Jari V");
+
+        CreateSummonPoseCard(
+            "Card_PoseNot",
+            guideCardRect,
+            rightColX + ((gridCardW + poseGap) * 2f),
+            row1Y,
+            gridCardW,
+            gridCardH,
+            "NOT",
+            "!A",
+            GwThemeTokens.IeeeGateIconKind.Not,
+            GwThemeTokens.FingerPoseIconKind.ThumbUp,
+            "POSE: Jempol Atas");
+
+        // Baris 2 Grid 3x2: XOR (3 Jari), NAND (4 Jari), dan Sel ke-6 ALUR SUMMON 2-TAHAP
+        // 100% Akurasi Gameplay: XOR = 3 Jari, NAND = 4 Jari
+        CreateSummonPoseCard(
+            "Card_PoseXor",
+            guideCardRect,
+            rightColX,
+            row2Y,
+            gridCardW,
+            gridCardH,
+            "XOR",
+            "A (+) B",
+            GwThemeTokens.IeeeGateIconKind.Xor,
+            GwThemeTokens.FingerPoseIconKind.ThreeFingers,
+            "POSE: 3 Jari");
+
+        CreateSummonPoseCard(
+            "Card_PoseNand",
+            guideCardRect,
+            rightColX + gridCardW + poseGap,
+            row2Y,
+            gridCardW,
+            gridCardH,
+            "NAND",
+            "!(A . B)",
+            GwThemeTokens.IeeeGateIconKind.Nand,
+            GwThemeTokens.FingerPoseIconKind.FourFingers,
+            "POSE: 4 Jari");
+
+        CreateTwoStageFlowNoteCard(
+            guideCardRect,
+            rightColX + ((gridCardW + poseGap) * 2f),
+            row2Y,
+            gridCardW,
+            gridCardH);
+
+        // ---------------------------------------------------------------------
+        // FOOTER: Tips Jarak Kamera (Kiri) + Latihan Cepat & Paham, Kembali (Kanan)
+        // ---------------------------------------------------------------------
+        const float footerBtnY = -596f;
+        const float footerBtnH = 46f;
+        const float primaryCloseBtnW = 284f;
+        const float practiceBtnW = 166f;
+
+        GameObject camIconObj = new GameObject("Icon_CameraTip", typeof(RectTransform), typeof(Image));
+        camIconObj.transform.SetParent(guideCardRect, false);
+        RectTransform camIconRect = camIconObj.GetComponent<RectTransform>();
+        camIconRect.anchorMin = new Vector2(0f, 1f);
+        camIconRect.anchorMax = new Vector2(0f, 1f);
+        camIconRect.pivot = new Vector2(0f, 0.5f);
+        camIconRect.anchoredPosition = new Vector2(padX, footerBtnY - (footerBtnH * 0.5f));
+        camIconRect.sizeDelta = new Vector2(18f, 18f);
+
+        Image camIconImg = camIconObj.GetComponent<Image>();
+        camIconImg.sprite = GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.CameraTip);
+        camIconImg.type = Image.Type.Simple;
+        camIconImg.preserveAspect = true;
+        camIconImg.color = GwThemeTokens.SignalHighTeal;
+        camIconImg.raycastTarget = false;
+
+        TMP_Text tipTmp = CreateTopLeftText(
+            "Txt_CameraDistanceTip",
+            guideCardRect,
+            new Vector2(padX + 26f, footerBtnY),
+            new Vector2(contentW - primaryCloseBtnW - practiceBtnW - 56f, footerBtnH),
+            "Jarak ideal tangan 35-60 cm di depan kamera dengan pencahayaan ruangan merata.",
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.TextSecondary,
+            11.5f,
+            13.5f,
+            TextWrappingModes.NoWrap);
+        tipTmp.fontStyle = FontStyles.Normal;
+
+        float primaryLeftX = GuideCardWidth - padX - primaryCloseBtnW;
+        float practiceLeftX = primaryLeftX - 12f - practiceBtnW;
 
         btnStartPractice = CreateCardActionButton(
             "Btn_StartQuickPractice",
             guideCardRect,
-            startX,
-            btnY,
-            startBtnW,
-            btnH,
-            "MULAI LATIHAN CEPAT",
-            PrimaryBtnBgColor,
-            PrimaryBtnOutlineColor,
-            Color.white,
+            practiceLeftX,
+            footerBtnY,
+            practiceBtnW,
+            footerBtnH,
+            "LATIHAN CEPAT",
+            GwThemeTokens.CardIdle,
+            GwThemeTokens.HairlineIdle,
+            GwThemeTokens.TextSecondary,
+            12f,
+            14f,
+            hasBorder: true,
             OnStartPracticeClicked);
 
         btnCloseGuide = CreateCardActionButton(
             "Btn_CloseGestureGuide",
             guideCardRect,
-            startX + startBtnW + btnGap,
-            btnY,
-            closeBtnW,
-            btnH,
-            "TUTUP",
-            NeutralBtnBgColor,
-            NeutralBtnOutlineColor,
-            new Color(0.90f, 0.96f, 1.00f, 1f),
+            primaryLeftX,
+            footerBtnY,
+            primaryCloseBtnW,
+            footerBtnH,
+            "PAHAM, KEMBALI KE SIMULASI",
+            GwThemeTokens.PrimaryFill,
+            GwThemeTokens.PrimaryFill,
+            GwThemeTokens.PrimaryText,
+            13.5f,
+            16f,
+            hasBorder: false,
             OnCloseGuideClicked);
 
         guideRootObj.SetActive(false);
     }
 
-    private void CreateGuideRuleRow(
+    private void CreateMainGestureCard(
         string name,
         RectTransform parent,
+        float leftX,
         float topY,
+        float width,
         float height,
-        string tagLabel,
-        Color tagBgColor,
-        Color tagAccentColor,
-        string bodyRichText)
+        int gestureKind,
+        string gestureTitle,
+        string roleSubtitle,
+        Color roleColor,
+        string description)
     {
-        float rowWidth = GuideCardWidth - 64f;
-        GameObject rowObj = new GameObject(name, typeof(RectTransform), typeof(Image));
-        rowObj.transform.SetParent(parent, false);
+        GameObject cardObj = new GameObject(name, typeof(RectTransform), typeof(Image));
+        cardObj.transform.SetParent(parent, false);
+        RectTransform rect = cardObj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(leftX, topY);
+        rect.sizeDelta = new Vector2(width, height);
 
-        RectTransform rowRect = rowObj.GetComponent<RectTransform>();
-        rowRect.anchorMin = new Vector2(0f, 1f);
-        rowRect.anchorMax = new Vector2(0f, 1f);
-        rowRect.pivot = new Vector2(0f, 1f);
-        rowRect.anchoredPosition = new Vector2(32f, topY);
-        rowRect.sizeDelta = new Vector2(rowWidth, height);
+        Image bg = cardObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(bg, GwThemeTokens.CardIdle);
+        bg.raycastTarget = false;
 
-        Image rowBg = rowObj.GetComponent<Image>();
-        CompactHudMenuController.ApplyRoundedSquircle(rowBg);
-        rowBg.color = RowBgColor;
-        rowBg.raycastTarget = false;
+        GwThemeTokens.AttachHairlineBorder(rect, $"{name}_Border", GwThemeTokens.HairlineIdle);
 
-        CompactHudMenuController.AttachRoundedBorderOverlay(
-            rowRect,
-            $"{name}_Border",
-            CompactHudMenuController.GetRoundedSquircleBorderSprite(),
-            RowBorderColor);
+        // Kotak Ikon 44x44 di sisi kiri kartu (1:1 Figma)
+        GameObject iconBoxObj = new GameObject("Box_GestureIcon", typeof(RectTransform), typeof(Image));
+        iconBoxObj.transform.SetParent(rect, false);
+        RectTransform iconBoxRect = iconBoxObj.GetComponent<RectTransform>();
+        iconBoxRect.anchorMin = new Vector2(0f, 1f);
+        iconBoxRect.anchorMax = new Vector2(0f, 1f);
+        iconBoxRect.pivot = new Vector2(0f, 1f);
+        iconBoxRect.anchoredPosition = new Vector2(18f, -24f);
+        iconBoxRect.sizeDelta = new Vector2(44f, 44f);
 
-        // Strip aksen warna membulat di sisi kiri dalam baris (tidak keluar sudut membulat)
-        GameObject stripObj = new GameObject("AccentStrip", typeof(RectTransform), typeof(Image));
-        stripObj.transform.SetParent(rowRect, false);
-        RectTransform stripRect = stripObj.GetComponent<RectTransform>();
-        stripRect.anchorMin = new Vector2(0f, 0.5f);
-        stripRect.anchorMax = new Vector2(0f, 0.5f);
-        stripRect.pivot = new Vector2(0f, 0.5f);
-        stripRect.anchoredPosition = new Vector2(8f, 0f);
-        stripRect.sizeDelta = new Vector2(6f, height - 22f);
-        Image stripImg = stripObj.GetComponent<Image>();
-        CompactHudMenuController.ApplyRoundedPill(stripImg);
-        stripImg.color = tagAccentColor;
-        stripImg.raycastTarget = false;
+        Image iconBoxBg = iconBoxObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(iconBoxBg, GwThemeTokens.SmokedGlassDense);
+        iconBoxBg.raycastTarget = false;
+        GwThemeTokens.AttachHairlineBorder(iconBoxRect, "Box_GestureIcon_Border", GwThemeTokens.HairlineIdle);
 
-        // Tag gestur membulat berwarna kontras di kiri
-        GameObject tagObj = new GameObject("TagPill", typeof(RectTransform), typeof(Image), typeof(Outline));
-        tagObj.transform.SetParent(rowRect, false);
-        RectTransform tagRect = tagObj.GetComponent<RectTransform>();
-        tagRect.anchorMin = new Vector2(0f, 0.5f);
-        tagRect.anchorMax = new Vector2(0f, 0.5f);
-        tagRect.pivot = new Vector2(0f, 0.5f);
-        tagRect.anchoredPosition = new Vector2(22f, 0f);
-        tagRect.sizeDelta = new Vector2(216f, 48f);
-
-        Image tagBg = tagObj.GetComponent<Image>();
-        CompactHudMenuController.ApplyRoundedSquircle(tagBg);
-        tagBg.color = tagBgColor;
-        tagBg.raycastTarget = false;
-
-        Outline tagOutline = tagObj.GetComponent<Outline>();
-        tagOutline.effectColor = new Color(tagAccentColor.r, tagAccentColor.g, tagAccentColor.b, 0.45f);
-        tagOutline.effectDistance = new Vector2(1.4f, -1.4f);
-
-        CompactHudMenuController.AttachRoundedBorderOverlay(
-            tagRect,
-            "TagPill_Border",
-            CompactHudMenuController.GetRoundedSquircleBorderSprite(),
-            tagAccentColor);
-
-        TMP_Text tagTmp = CreateStretchedText("TagLabel", tagRect, tagLabel, TextAlignmentOptions.Center, tagAccentColor, 15.5f, 20.5f, TextWrappingModes.NoWrap);
-        tagTmp.fontStyle = FontStyles.Bold;
-
-        // Deskripsi langkah dengan font ~35% lebih besar & dukungan wrap halus bebas terpotong
-        GameObject bodyObj = new GameObject("BodyText", typeof(RectTransform), typeof(TextMeshProUGUI));
-        bodyObj.transform.SetParent(rowRect, false);
-        RectTransform bodyRect = bodyObj.GetComponent<RectTransform>();
-        bodyRect.anchorMin = new Vector2(0f, 0.5f);
-        bodyRect.anchorMax = new Vector2(1f, 0.5f);
-        bodyRect.pivot = new Vector2(0.5f, 0.5f);
-        bodyRect.offsetMin = new Vector2(254f, -34f);
-        bodyRect.offsetMax = new Vector2(-20f, 34f);
-
-        TextMeshProUGUI bodyTmp = bodyObj.GetComponent<TextMeshProUGUI>();
-        if (safeFont != null)
+        if (gestureKind == 0)
         {
-            bodyTmp.font = safeFont;
+            CreateCenteredSpriteIcon(
+                "Icon_FistBase",
+                iconBoxRect,
+                new Vector2(30f, 30f),
+                GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.FistBase),
+                GwThemeTokens.TextPrimary);
+            CreateCenteredSpriteIcon(
+                "Icon_FistOrangeDot",
+                iconBoxRect,
+                new Vector2(30f, 30f),
+                GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.FistOrangeDot),
+                GwThemeTokens.AccentSwitchOrange);
         }
-        bodyTmp.text = bodyRichText;
-        bodyTmp.richText = true;
-        bodyTmp.fontStyle = FontStyles.Normal;
-        bodyTmp.alignment = TextAlignmentOptions.MidlineLeft;
-        bodyTmp.color = RowTextColor;
-        bodyTmp.enableAutoSizing = true;
-        bodyTmp.fontSizeMin = 17f;
-        bodyTmp.fontSizeMax = 22.5f;
-        bodyTmp.textWrappingMode = TextWrappingModes.Normal;
-        bodyTmp.raycastTarget = false;
+        else if (gestureKind == 1)
+        {
+            CreateCenteredSpriteIcon(
+                "Icon_PinchCyan",
+                iconBoxRect,
+                new Vector2(30f, 30f),
+                GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.PinchCyan),
+                GwThemeTokens.SignalHighTeal);
+        }
+        else
+        {
+            CreateCenteredSpriteIcon(
+                "Icon_TwoHandChevrons",
+                iconBoxRect,
+                new Vector2(30f, 30f),
+                GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.TwoHandChevrons),
+                GwThemeTokens.TextPrimary);
+            CreateCenteredSpriteIcon(
+                "Icon_TwoHandCrosshair",
+                iconBoxRect,
+                new Vector2(30f, 30f),
+                GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.TwoHandCrosshair),
+                GwThemeTokens.SignalHighTeal);
+        }
+
+        const float textLeftX = 78f;
+        float textW = width - textLeftX - 18f;
+
+        // Baris 1: Judul Gestur
+        TMP_Text titleTmp = CreateTopLeftText(
+            "Txt_Title",
+            rect,
+            new Vector2(textLeftX, -18f),
+            new Vector2(textW, 22f),
+            gestureTitle,
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.TextPrimary,
+            13.5f,
+            16f,
+            TextWrappingModes.NoWrap);
+        titleTmp.fontStyle = FontStyles.Bold;
+
+        // Baris 2: Sub-judul peran berwarna tanpa kotak pil (1:1 Figma)
+        TMP_Text roleTmp = CreateTopLeftText(
+            "Txt_RoleSubtitle",
+            rect,
+            new Vector2(textLeftX, -42f),
+            new Vector2(textW, 18f),
+            roleSubtitle,
+            TextAlignmentOptions.MidlineLeft,
+            roleColor,
+            11f,
+            13f,
+            TextWrappingModes.NoWrap);
+        roleTmp.fontStyle = FontStyles.Bold;
+
+        // Baris 3: Deskripsi ringkas 1 kalimat (maks 2 baris)
+        TMP_Text descTmp = CreateTopLeftText(
+            "Txt_Desc",
+            rect,
+            new Vector2(textLeftX, -66f),
+            new Vector2(textW, 54f),
+            description,
+            TextAlignmentOptions.TopLeft,
+            GwThemeTokens.TextSecondary,
+            11f,
+            13f,
+            TextWrappingModes.Normal);
+        descTmp.fontStyle = FontStyles.Normal;
+    }
+
+    private void CreateSummonPoseCard(
+        string name,
+        RectTransform parent,
+        float leftX,
+        float topY,
+        float width,
+        float height,
+        string gateName,
+        string booleanNotation,
+        GwThemeTokens.IeeeGateIconKind ieeeKind,
+        GwThemeTokens.FingerPoseIconKind poseKind,
+        string fingerPoseLabel)
+    {
+        GameObject cardObj = new GameObject(name, typeof(RectTransform), typeof(Image));
+        cardObj.transform.SetParent(parent, false);
+        RectTransform rect = cardObj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(leftX, topY);
+        rect.sizeDelta = new Vector2(width, height);
+
+        Image bg = cardObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(bg, GwThemeTokens.CardIdle);
+        bg.raycastTarget = false;
+
+        GwThemeTokens.AttachHairlineBorder(rect, $"{name}_Border", GwThemeTokens.HairlineIdle);
+
+        // Baris atas kartu: Nama Gerbang putih tebal (kiri) + Notasi Boolean ringkas (kanan)
+        TMP_Text gateTmp = CreateTopLeftText(
+            "Txt_GateName",
+            rect,
+            new Vector2(16f, -14f),
+            new Vector2(width * 0.5f, 24f),
+            gateName,
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.TextPrimary,
+            15f,
+            18f,
+            TextWrappingModes.NoWrap);
+        gateTmp.fontStyle = FontStyles.Bold;
+
+        TMP_Text notationTmp = CreateTopLeftText(
+            "Txt_BooleanNotation",
+            rect,
+            new Vector2(width * 0.45f, -16f),
+            new Vector2((width * 0.55f) - 16f, 20f),
+            booleanNotation,
+            TextAlignmentOptions.MidlineRight,
+            GwThemeTokens.TextSecondary,
+            10.5f,
+            12f,
+            TextWrappingModes.NoWrap);
+        notationTmp.fontStyle = FontStyles.Bold;
+
+        // Area Visual Tengah: Simbol IEEE Sian (kiri-tengah) + Siluet Pose Jari (kanan-tengah) 1:1 Figma
+        GameObject ieeeObj = new GameObject("Icon_IeeeSymbol", typeof(RectTransform), typeof(Image));
+        ieeeObj.transform.SetParent(rect, false);
+        RectTransform ieeeRect = ieeeObj.GetComponent<RectTransform>();
+        ieeeRect.anchorMin = new Vector2(0f, 1f);
+        ieeeRect.anchorMax = new Vector2(0f, 1f);
+        ieeeRect.pivot = new Vector2(0.5f, 0.5f);
+        ieeeRect.anchoredPosition = new Vector2(width * 0.33f, -104f);
+        ieeeRect.sizeDelta = new Vector2(74f, 43f);
+
+        Image ieeeImg = ieeeObj.GetComponent<Image>();
+        ieeeImg.sprite = GwThemeTokens.GetIeeeGateSprite(ieeeKind);
+        ieeeImg.type = Image.Type.Simple;
+        ieeeImg.preserveAspect = true;
+        ieeeImg.color = GwThemeTokens.SignalHighTeal;
+        ieeeImg.raycastTarget = false;
+
+        GameObject poseIconObj = new GameObject("Icon_FingerPose", typeof(RectTransform), typeof(Image));
+        poseIconObj.transform.SetParent(rect, false);
+        RectTransform poseIconRect = poseIconObj.GetComponent<RectTransform>();
+        poseIconRect.anchorMin = new Vector2(0f, 1f);
+        poseIconRect.anchorMax = new Vector2(0f, 1f);
+        poseIconRect.pivot = new Vector2(0.5f, 0.5f);
+        poseIconRect.anchoredPosition = new Vector2(width * 0.76f, -104f);
+        poseIconRect.sizeDelta = new Vector2(44f, 44f);
+
+        Image poseIconImg = poseIconObj.GetComponent<Image>();
+        poseIconImg.sprite = GwThemeTokens.GetFingerPoseSprite(poseKind);
+        poseIconImg.type = Image.Type.Simple;
+        poseIconImg.preserveAspect = true;
+        poseIconImg.color = GwThemeTokens.SignalLowSlate;
+        poseIconImg.raycastTarget = false;
+
+        // Pil pose jari di bawah kartu (POSE: 1 Telunjuk, dst.)
+        GameObject posePillObj = new GameObject("Pill_FingerPose", typeof(RectTransform), typeof(Image));
+        posePillObj.transform.SetParent(rect, false);
+        RectTransform pillRect = posePillObj.GetComponent<RectTransform>();
+        pillRect.anchorMin = new Vector2(0f, 1f);
+        pillRect.anchorMax = new Vector2(1f, 1f);
+        pillRect.pivot = new Vector2(0.5f, 1f);
+        pillRect.offsetMin = new Vector2(14f, -(height - 14f));
+        pillRect.offsetMax = new Vector2(-14f, -(height - 42f));
+
+        Image pillBg = posePillObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(pillBg, GwThemeTokens.SmokedGlass);
+        pillBg.raycastTarget = false;
+        GwThemeTokens.AttachHairlineBorder(pillRect, "Pill_FingerPose_Border", GwThemeTokens.SignalHighTeal);
+
+        TMP_Text poseTmp = CreateStretchedText(
+            "Txt_FingerPose",
+            pillRect,
+            fingerPoseLabel,
+            TextAlignmentOptions.Center,
+            GwThemeTokens.SignalHighTeal,
+            10.5f,
+            12.5f,
+            TextWrappingModes.NoWrap);
+        poseTmp.fontStyle = FontStyles.Bold;
+    }
+
+    private void CreateTwoStageFlowNoteCard(RectTransform parent, float leftX, float topY, float width, float height)
+    {
+        GameObject noteObj = new GameObject("Card_TwoStageSummonFlow", typeof(RectTransform), typeof(Image));
+        noteObj.transform.SetParent(parent, false);
+        RectTransform rect = noteObj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = new Vector2(leftX, topY);
+        rect.sizeDelta = new Vector2(width, height);
+
+        Image bg = noteObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(bg, GwThemeTokens.CardIdle);
+        bg.raycastTarget = false;
+
+        // Border HairlineIdle tenang (tanpa border menyala berlebihan) pada sel ke-6 grid 3x2
+        GwThemeTokens.AttachHairlineBorder(rect, "Card_TwoStageSummonFlow_Border", GwThemeTokens.HairlineIdle);
+
+        TMP_Text headerTmp = CreateTopLeftText(
+            "Txt_FlowHeader",
+            rect,
+            new Vector2(16f, -16f),
+            new Vector2(width - 32f, 20f),
+            "ALUR SUMMON 2-TAHAP",
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.SignalHighTeal,
+            10.5f,
+            12f,
+            TextWrappingModes.NoWrap);
+        headerTmp.fontStyle = FontStyles.Bold;
+
+        TMP_Text step1Tmp = CreateTopLeftText(
+            "Txt_FlowStep1",
+            rect,
+            new Vector2(16f, -52f),
+            new Vector2(width - 32f, 54f),
+            "1. Bentuk pose jari & gambar lingkaran 360 deg hingga cincin penuh.",
+            TextAlignmentOptions.TopLeft,
+            GwThemeTokens.TextPrimary,
+            10.5f,
+            12.5f,
+            TextWrappingModes.Normal);
+        step1Tmp.fontStyle = FontStyles.Normal;
+
+        TMP_Text step2Tmp = CreateTopLeftText(
+            "Txt_FlowStep2",
+            rect,
+            new Vector2(16f, -114f),
+            new Vector2(width - 32f, 52f),
+            "2. Buka 5 jari (Open-5 Bloom) untuk memunculkan gerbang.",
+            TextAlignmentOptions.TopLeft,
+            GwThemeTokens.TextPrimary,
+            10.5f,
+            12.5f,
+            TextWrappingModes.Normal);
+        step2Tmp.fontStyle = FontStyles.Normal;
+
+        TMP_Text tagTmp = CreateTopLeftText(
+            "Txt_FlowFooterTag",
+            rect,
+            new Vector2(16f, -(height - 30f)),
+            new Vector2(width - 32f, 16f),
+            "DUAL-KANAL // ZERO-FALSE-SPAWN",
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.SignalLowSlate,
+            8.5f,
+            10f,
+            TextWrappingModes.NoWrap);
+        tagTmp.fontStyle = FontStyles.Bold;
+    }
+
+    private static void CreateCenteredSpriteIcon(
+        string name,
+        RectTransform parent,
+        Vector2 sizeDelta,
+        Sprite sprite,
+        Color color)
+    {
+        GameObject obj = new GameObject(name, typeof(RectTransform), typeof(Image));
+        obj.transform.SetParent(parent, false);
+        RectTransform rect = obj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = Vector2.zero;
+        rect.sizeDelta = sizeDelta;
+
+        Image img = obj.GetComponent<Image>();
+        img.sprite = sprite;
+        img.type = Image.Type.Simple;
+        img.preserveAspect = true;
+        img.color = color;
+        img.raycastTarget = false;
     }
 
     private void BuildPracticePillUi(Transform canvasTransform)
@@ -955,32 +1369,30 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         practiceSafeAreaRect.offsetMin = Vector2.zero;
         practiceSafeAreaRect.offsetMax = Vector2.zero;
 
-        // Pil Floating Rounded Glass di tengah-bawah layar (di bawah AssemblyZone, bebas Input B & OutputTruthPod)
-        practicePillObj = new GameObject("Pill_AirQuickPractice", typeof(RectTransform), typeof(Image), typeof(Outline));
+        // Pil Latihan Cepat v8.5: SmokedGlassOverlay (94% solid) + HairlineActive 1px + radius 6px (nol neon glow)
+        practicePillObj = new GameObject("Pill_AirQuickPractice", typeof(RectTransform), typeof(Image));
         practicePillObj.transform.SetParent(practiceSafeAreaRect, false);
         RectTransform pillRect = practicePillObj.GetComponent<RectTransform>();
+        practicePillRect = pillRect;
         pillRect.anchorMin = new Vector2(0.5f, 0f);
         pillRect.anchorMax = new Vector2(0.5f, 0f);
         pillRect.pivot = new Vector2(0.5f, 0f);
-        pillRect.anchoredPosition = new Vector2(0f, 14f);
+        float initialBottomY = isPedBottomStripExpanded
+            ? PracticePillBottomYWhenStripExpanded
+            : PracticePillBottomYWhenStripCollapsed;
+        pillRect.anchoredPosition = new Vector2(0f, initialBottomY);
         pillRect.sizeDelta = new Vector2(PracticePillWidth, PracticePillHeight);
 
         practicePillBg = practicePillObj.GetComponent<Image>();
-        CompactHudMenuController.ApplyRoundedPill(practicePillBg);
-        practicePillBg.color = PillBgIdleColor;
+        GwThemeTokens.ApplyRoundedRect6(practicePillBg, GwThemeTokens.SmokedGlassOverlay);
         practicePillBg.raycastTarget = false;
 
-        practicePillOutline = practicePillObj.GetComponent<Outline>();
-        practicePillOutline.effectColor = new Color(PillOutlineIdleColor.r, PillOutlineIdleColor.g, PillOutlineIdleColor.b, 0.42f);
-        practicePillOutline.effectDistance = new Vector2(1.8f, -1.8f);
-
-        practicePillBorderImg = CompactHudMenuController.AttachRoundedBorderOverlay(
+        practicePillBorderImg = GwThemeTokens.AttachHairlineBorder(
             pillRect,
             "Pill_AirQuickPractice_Border",
-            CompactHudMenuController.GetRoundedPillBorderSprite(),
-            PillOutlineIdleColor);
+            GwThemeTokens.HairlineActive);
 
-        // Lencana langkah 1/4..4/4 membulat di ujung kiri pil
+        // Lencana langkah 1/4..4/4
         GameObject badgeObj = new GameObject("Practice_StepBadge", typeof(RectTransform), typeof(Image));
         badgeObj.transform.SetParent(pillRect, false);
         RectTransform badgeRect = badgeObj.GetComponent<RectTransform>();
@@ -988,78 +1400,84 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         badgeRect.anchorMax = new Vector2(0f, 0.5f);
         badgeRect.pivot = new Vector2(0f, 0.5f);
         badgeRect.anchoredPosition = new Vector2(12f, 0f);
-        badgeRect.sizeDelta = new Vector2(88f, 44f);
+        badgeRect.sizeDelta = new Vector2(82f, 38f);
 
         practiceBadgeBg = badgeObj.GetComponent<Image>();
-        CompactHudMenuController.ApplyRoundedSquircle(practiceBadgeBg);
-        practiceBadgeBg.color = BadgeBgIdleColor;
+        GwThemeTokens.ApplyRoundedRect6(practiceBadgeBg, GwThemeTokens.CardIdle);
         practiceBadgeBg.raycastTarget = false;
 
-        practiceBadgeBorderImg = CompactHudMenuController.AttachRoundedBorderOverlay(
+        practiceBadgeBorderImg = GwThemeTokens.AttachHairlineBorder(
             badgeRect,
             "Practice_StepBadge_Border",
-            CompactHudMenuController.GetRoundedSquircleBorderSprite(),
-            PillOutlineIdleColor);
+            GwThemeTokens.SignalHighTeal);
 
-        txtPracticeBadge = CreateStretchedText("Txt_StepBadge", badgeRect, BadgeStep1, TextAlignmentOptions.Center, BadgeTextIdleColor, 16f, 22f, TextWrappingModes.NoWrap);
+        txtPracticeBadge = CreateStretchedText(
+            "Txt_StepBadge",
+            badgeRect,
+            BadgeStep1,
+            TextAlignmentOptions.Center,
+            GwThemeTokens.SignalHighTeal,
+            15f,
+            20f,
+            TextWrappingModes.NoWrap);
         txtPracticeBadge.fontStyle = FontStyles.Bold;
 
-        // Teks instruksi langkah aktif di tengah pil (~33% lebih besar)
+        // Teks instruksi langkah aktif
         GameObject promptObj = new GameObject("Txt_PracticePrompt", typeof(RectTransform), typeof(TextMeshProUGUI));
         promptObj.transform.SetParent(pillRect, false);
         practicePromptRect = promptObj.GetComponent<RectTransform>();
         practicePromptRect.anchorMin = new Vector2(0f, 0f);
         practicePromptRect.anchorMax = new Vector2(1f, 1f);
-        practicePromptRect.offsetMin = new Vector2(112f, 6f);
-        practicePromptRect.offsetMax = new Vector2(-128f, -6f);
+        practicePromptRect.offsetMin = new Vector2(108f, 6f);
+        practicePromptRect.offsetMax = new Vector2(-124f, -6f);
 
         TextMeshProUGUI promptTmp = promptObj.GetComponent<TextMeshProUGUI>();
         if (safeFont != null)
         {
             promptTmp.font = safeFont;
         }
-        promptTmp.text = step1PromptText;
+        promptTmp.text = Step1PromptText;
         promptTmp.fontStyle = FontStyles.Bold;
         promptTmp.alignment = TextAlignmentOptions.MidlineLeft;
-        promptTmp.color = PracticePromptColor;
+        promptTmp.color = GwThemeTokens.TextPrimary;
         promptTmp.enableAutoSizing = true;
-        promptTmp.fontSizeMin = 17f;
-        promptTmp.fontSizeMax = 24f;
+        promptTmp.fontSizeMin = 15.5f;
+        promptTmp.fontSizeMax = 21.5f;
         promptTmp.textWrappingMode = TextWrappingModes.NoWrap;
         promptTmp.raycastTarget = false;
         txtPracticePrompt = promptTmp;
 
-        // Tombol membulat 'Lewati' di ujung kanan pil
-        skipPracticeBtnObj = new GameObject("Btn_SkipQuickPractice", typeof(RectTransform), typeof(Image), typeof(Button), typeof(Outline));
+        // Tombol 'LEWATI' di ujung kanan pil
+        skipPracticeBtnObj = new GameObject("Btn_SkipQuickPractice", typeof(RectTransform), typeof(Image), typeof(Button));
         skipPracticeBtnObj.transform.SetParent(pillRect, false);
         RectTransform skipRect = skipPracticeBtnObj.GetComponent<RectTransform>();
         skipRect.anchorMin = new Vector2(1f, 0.5f);
         skipRect.anchorMax = new Vector2(1f, 0.5f);
         skipRect.pivot = new Vector2(1f, 0.5f);
         skipRect.anchoredPosition = new Vector2(-12f, 0f);
-        skipRect.sizeDelta = new Vector2(104f, 44f);
+        skipRect.sizeDelta = new Vector2(98f, 38f);
 
         Image skipBg = skipPracticeBtnObj.GetComponent<Image>();
-        CompactHudMenuController.ApplyRoundedSquircle(skipBg);
-        skipBg.color = SkipBtnBgColor;
+        GwThemeTokens.ApplyRoundedRect6(skipBg, GwThemeTokens.CardIdle);
         skipBg.raycastTarget = true;
 
-        Outline skipOutline = skipPracticeBtnObj.GetComponent<Outline>();
-        skipOutline.effectColor = new Color(SkipBtnOutlineColor.r, SkipBtnOutlineColor.g, SkipBtnOutlineColor.b, 0.40f);
-        skipOutline.effectDistance = new Vector2(1.2f, -1.2f);
-
-        CompactHudMenuController.AttachRoundedBorderOverlay(
-            skipRect,
-            "Btn_SkipQuickPractice_Border",
-            CompactHudMenuController.GetRoundedSquircleBorderSprite(),
-            SkipBtnOutlineColor);
+        GwThemeTokens.AttachHairlineBorder(skipRect, "Btn_SkipQuickPractice_Border", GwThemeTokens.HairlineIdle);
 
         btnSkipPractice = skipPracticeBtnObj.GetComponent<Button>();
         btnSkipPractice.targetGraphic = skipBg;
-        btnSkipPractice.colors = GuideButtonColorBlock;
+        btnSkipPractice.transition = Selectable.Transition.ColorTint;
+        btnSkipPractice.colors = GwThemeTokens.FlatGlassButtonColors;
         btnSkipPractice.onClick.AddListener(OnSkipPracticeClicked);
 
-        TMP_Text skipTmp = CreateStretchedText("Txt_SkipLabel", skipRect, "Lewati", TextAlignmentOptions.Center, SkipBtnTextColor, 15f, 19.5f, TextWrappingModes.NoWrap);
+        TMP_Text skipTmp = CreateStretchedText(
+            "Txt_SkipLabel",
+            skipRect,
+            "LEWATI",
+            TextAlignmentOptions.Center,
+            GwThemeTokens.TextSecondary,
+            13f,
+            16f,
+            TextWrappingModes.NoWrap);
         skipTmp.fontStyle = FontStyles.Bold;
 
         practiceRootObj.SetActive(false);
@@ -1074,31 +1492,33 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
 
         bool isCompleted = practiceState == PracticeState.CompletedBanner;
         bool highlightGreen = isStepFlashSuccess || isCompleted;
-        Color activeBorderCol = highlightGreen ? PillOutlineSuccessColor : PillOutlineIdleColor;
 
         if (practicePillBg != null)
         {
-            practicePillBg.color = highlightGreen ? PillBgSuccessColor : PillBgIdleColor;
+            practicePillBg.color = GwThemeTokens.SmokedGlassOverlay;
         }
+        ApplyPracticePillVerticalOffset();
         if (practicePillBorderImg != null)
         {
-            practicePillBorderImg.color = activeBorderCol;
-        }
-        if (practicePillOutline != null)
-        {
-            practicePillOutline.effectColor = new Color(activeBorderCol.r, activeBorderCol.g, activeBorderCol.b, 0.45f);
+            practicePillBorderImg.color = highlightGreen
+                ? GwThemeTokens.StatusPassEmerald
+                : GwThemeTokens.HairlineActive;
         }
         if (practiceBadgeBg != null)
         {
-            practiceBadgeBg.color = highlightGreen ? BadgeBgSuccessColor : BadgeBgIdleColor;
+            practiceBadgeBg.color = GwThemeTokens.CardIdle;
         }
         if (practiceBadgeBorderImg != null)
         {
-            practiceBadgeBorderImg.color = activeBorderCol;
+            practiceBadgeBorderImg.color = highlightGreen
+                ? GwThemeTokens.StatusPassEmerald
+                : GwThemeTokens.SignalHighTeal;
         }
         if (txtPracticeBadge != null)
         {
-            txtPracticeBadge.color = highlightGreen ? BadgeTextSuccessColor : BadgeTextIdleColor;
+            txtPracticeBadge.color = highlightGreen
+                ? GwThemeTokens.StatusPassText
+                : GwThemeTokens.SignalHighTeal;
             if (isStepFlashSuccess && !isCompleted)
             {
                 txtPracticeBadge.text = BadgeStepOk;
@@ -1124,8 +1544,8 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
 
         if (practicePromptRect != null)
         {
-            practicePromptRect.offsetMin = new Vector2(112f, 6f);
-            practicePromptRect.offsetMax = new Vector2(isCompleted ? -24f : -128f, -6f);
+            practicePromptRect.offsetMin = new Vector2(108f, 6f);
+            practicePromptRect.offsetMax = new Vector2(isCompleted ? -24f : -124f, -6f);
         }
 
         if (txtPracticePrompt != null)
@@ -1134,19 +1554,19 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
             {
                 txtPracticePrompt.text = CompletedBannerText;
                 txtPracticePrompt.alignment = TextAlignmentOptions.Center;
-                txtPracticePrompt.color = PracticeCompleteTextColor;
+                txtPracticePrompt.color = GwThemeTokens.StatusPassText;
             }
             else
             {
                 txtPracticePrompt.alignment = TextAlignmentOptions.MidlineLeft;
-                txtPracticePrompt.color = highlightGreen ? PracticeCompleteTextColor : PracticePromptColor;
+                txtPracticePrompt.color = highlightGreen ? GwThemeTokens.StatusPassText : GwThemeTokens.TextPrimary;
                 switch (practiceState)
                 {
-                    case PracticeState.Step1ToggleInput: txtPracticePrompt.text = step1PromptText; break;
-                    case PracticeState.Step2SummonGate: txtPracticePrompt.text = step2PromptText; break;
-                    case PracticeState.Step3ConnectCable: txtPracticePrompt.text = step3PromptText; break;
-                    case PracticeState.Step4DeleteGate: txtPracticePrompt.text = step4PromptText; break;
-                    default: txtPracticePrompt.text = step1PromptText; break;
+                    case PracticeState.Step1ToggleInput: txtPracticePrompt.text = Step1PromptText; break;
+                    case PracticeState.Step2SummonGate: txtPracticePrompt.text = Step2PromptText; break;
+                    case PracticeState.Step3ConnectCable: txtPracticePrompt.text = Step3PromptText; break;
+                    case PracticeState.Step4DeleteGate: txtPracticePrompt.text = Step4PromptText; break;
+                    default: txtPracticePrompt.text = Step1PromptText; break;
                 }
             }
         }
@@ -1179,7 +1599,7 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         if (guideSafeAreaRect != null)
         {
             guideSafeAreaRect.anchorMin = minAnchor;
-            guideSafeAreaRect.anchorMax = new Vector2(maxAnchor.x, 1f);
+            guideSafeAreaRect.anchorMax = maxAnchor;
             guideSafeAreaRect.offsetMin = Vector2.zero;
             guideSafeAreaRect.offsetMax = Vector2.zero;
 
@@ -1207,13 +1627,8 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
     }
 
     // =========================================================================
-    // HELPER UI PROSEDURAL
+    // HELPER UI PROSEDURAL 100% TOKEN GwThemeTokens
     // =========================================================================
-
-    private bool SupportsGlyph(char glyph)
-    {
-        return safeFont != null && safeFont.HasCharacter(glyph);
-    }
 
     private Button CreateCardActionButton(
         string name,
@@ -1224,11 +1639,14 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         float height,
         string label,
         Color bgColor,
-        Color outlineColor,
+        Color borderColor,
         Color textColor,
+        float minFontSize,
+        float maxFontSize,
+        bool hasBorder,
         UnityEngine.Events.UnityAction onClick)
     {
-        GameObject obj = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button), typeof(Outline));
+        GameObject obj = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
         obj.transform.SetParent(parent, false);
 
         RectTransform rect = obj.GetComponent<RectTransform>();
@@ -1239,29 +1657,32 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         rect.sizeDelta = new Vector2(width, height);
 
         Image bgImg = obj.GetComponent<Image>();
-        CompactHudMenuController.ApplyRoundedSquircle(bgImg);
-        bgImg.color = bgColor;
+        GwThemeTokens.ApplyRoundedRect6(bgImg, bgColor);
         bgImg.raycastTarget = true;
 
-        Outline outline = obj.GetComponent<Outline>();
-        outline.effectColor = new Color(outlineColor.r, outlineColor.g, outlineColor.b, 0.45f);
-        outline.effectDistance = new Vector2(1.8f, -1.8f);
-
-        CompactHudMenuController.AttachRoundedBorderOverlay(
-            rect,
-            $"{name}_Border",
-            CompactHudMenuController.GetRoundedSquircleBorderSprite(),
-            outlineColor);
+        if (hasBorder)
+        {
+            GwThemeTokens.AttachHairlineBorder(rect, $"{name}_Border", borderColor);
+        }
 
         Button btn = obj.GetComponent<Button>();
         btn.targetGraphic = bgImg;
-        btn.colors = GuideButtonColorBlock;
+        btn.transition = Selectable.Transition.ColorTint;
+        btn.colors = GwThemeTokens.FlatGlassButtonColors;
         if (onClick != null)
         {
             btn.onClick.AddListener(onClick);
         }
 
-        TMP_Text labelTmp = CreateStretchedText($"{name}_Label", rect, label, TextAlignmentOptions.Center, textColor, 18f, 24f, TextWrappingModes.NoWrap);
+        TMP_Text labelTmp = CreateStretchedText(
+            $"{name}_Label",
+            rect,
+            label,
+            TextAlignmentOptions.Center,
+            textColor,
+            minFontSize,
+            maxFontSize,
+            TextWrappingModes.NoWrap);
         labelTmp.fontStyle = FontStyles.Bold;
 
         return btn;
@@ -1353,7 +1774,7 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         rect.sizeDelta = new Vector2(width, height);
 
         Image img = obj.GetComponent<Image>();
-        img.color = CardDividerColor;
+        img.color = GwThemeTokens.HairlineIdle;
         img.raycastTarget = false;
     }
 

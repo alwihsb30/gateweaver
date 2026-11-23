@@ -7,20 +7,19 @@ using TMPro;
 
 /// <summary>
 /// Visual Pedagogis Informatika (Fase E) Hybrid 2 Pita Horizontal 2D Overlay + 3D World-Space khusus Mode Udara
-/// (GateWeaver AR v8.0 Tahap 10):
-/// 1. Pita Horizontal Atas (tepat di bawah Top HUD bar, tinggi 54px): Abstraksi variabel dunia nyata A &amp; B,
-///    status biner live [0/1], serta grafik gelombang kotak digital (Square Wave) 16-langkah berbasis segmen
-///    UnityEngine.UI.Image pra-alokasi Zero-GC + tombol lipat '-' / 'INPUT [+]'.
-/// 2. Pita Horizontal Bawah (tepi bawah layar, tinggi 68px): Generator ekspresi Boolean live Zero-GC
-///    (StringBuilder + cycle guard visited) + status Output kontekstual + Tabel Kebenaran Horizontal 4 sel
-///    sejajar ([0,0], [0,1], [1,0], [1,1]) yang mempertahankan uji aktif 4 kombinasi sakelar (baris belum diuji
-///    tetap menampilkan Y:- tanpa OK/X) + tombol lipat '-' / '[+] TABEL'.
-/// 3. Area Tengah 3D World-Space: Proyeksi simbol skematik standar ANSI/IEEE Std 91 (AND, OR, NOT, NAND, XOR)
-///    di atas setiap gerbang aktif area rakit + lencana nilai biner 0/1 kontras tinggi di setiap ujung port
-///    kabel aktif tersambung, ikut membesar secara alami saat di-zoom masuk / didekatkan ke kamera.
-/// - Membuka 100% sisi kiri, tengah, &amp; kanan panggung 3D (nol tabrakan dengan pod Input A/B &amp; Output),
-///   100% Zero-GC di runtime loop, event-driven, tanpa Collider, raycastTarget=false pada semua elemen non-tombol,
-///   ASCII 7-bit murni, otomatis sembunyi saat overlay UI terbuka atau kembali ke Mode Kartu Vuforia v5.
+/// (GateWeaver AR v8.5 - Smoked Optical Glass + Brushed Titanium):
+/// 1. Pita Horizontal Atas (tepat di bawah Top HUD bar, tinggi 44px): Abstraksi ringkas variabel A &amp; B
+///    (mis. "A KARTU 1" | "B MODE 0"), grafik gelombang kotak digital (Square Wave) 16-langkah berbasis segmen
+///    UnityEngine.UI.Image pra-alokasi Zero-GC + tombol lipat '-' (28x28) / pil kompak 'INPUT [+]'.
+/// 2. Pita Horizontal Bawah (tepi bawah layar, tinggi 56px): Generator ekspresi Boolean live Zero-GC
+///    (mis. "Y = NOT (A OR B)") + titik status &amp; label konteks ("LAB: 0 TERKUNCI") + Tabel Kebenaran Horizontal
+///    4 sel sejajar ([0,0], [0,1], [1,0], [1,1]) format ringkas (-/1, 0/1 X, 1/1 OK) + tombol lipat '-' / '[+] TABEL'.
+/// 3. Sinkronisasi tema v8.5 Smoked Optical Glass (radius 6px, hairline 1px) pada Top HUD Bar &amp; Toast Bawah
+///    khusus saat Mode Udara aktif, dengan restorasi penuh 100% saat kembali ke Mode Kartu Vuforia v5.
+/// 4. Area Tengah 3D World-Space: Proyeksi simbol skematik standar ANSI/IEEE Std 91 (AND, OR, NOT, NAND, XOR)
+///    di atas setiap gerbang aktif + lencana nilai biner 0/1 di setiap ujung port kabel tersambung.
+/// - 100% Zero-GC di runtime loop, event-driven, tanpa Collider, raycastTarget=false pada semua elemen non-tombol,
+///   ASCII 7-bit murni, 0 perubahan di Core/ &amp; Levels/, 0% regresi Mode Kartu Vuforia v5.
 /// </summary>
 public sealed class AirWeavingPedagogicalHud : MonoBehaviour
 {
@@ -28,23 +27,24 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
     private const float ReferenceCanvasWidth = 1920f;
     private const float ReferenceCanvasHeight = 1080f;
 
-    // Geometri 2 Pita Horizontal Ramping (ruang referensi 1920x1080, dalam PedHud_SafeArea)
-    private const float StripSideMarginX = 24f;
-    private const float TopStripTopOffsetY = -82f;
-    private const float TopStripExpandedHeight = 54f;
-    private const float TopStripCollapsedWidth = 148f;
+    // Geometri 2 Pita Horizontal Ramping v8.5 (ruang referensi 1920x1080, dalam PedHud_SafeArea)
+    private const float StripSideMarginX = GwThemeTokens.StripSideMarginX;
+    private const float TopStripTopOffsetY = GwThemeTokens.TopStripTopOffsetY;
+    private const float TopStripExpandedHeight = GwThemeTokens.TopInputStripHeight;
+    private const float TopStripCollapsedWidth = GwThemeTokens.TopCollapsedPillWidth;
 
-    private const float BottomStripBottomMarginY = 12f;
-    private const float BottomStripExpandedHeight = 68f;
-    private const float BottomStripCollapsedWidth = 158f;
-    private const float StripCollapsedHeight = 40f;
+    private const float BottomStripBottomMarginY = GwThemeTokens.BottomStripBottomMarginY;
+    private const float BottomStripExpandedHeight = GwThemeTokens.BottomOutputStripHeight;
+    private const float BottomStripCollapsedWidth = GwThemeTokens.BottomCollapsedPillWidth;
+    private const float StripCollapsedHeight = GwThemeTokens.CollapsedPillHeight;
+    private const float CollapseBtnSize = GwThemeTokens.CollapseButtonSize;
 
     // Parameter Gelombang Kotak 16-langkah horizontal ramping berbasis UnityEngine.UI.Image (Zero-GC)
     private const int WaveStepCount = 16;
     private const int WaveEdgeCount = WaveStepCount - 1;
-    private const float WaveHighLocalY = 8.5f;
-    private const float WaveLowLocalY = -8.5f;
-    private const float WaveStrokeThickness = 2.8f;
+    private const float WaveHighLocalY = 6.5f;
+    private const float WaveLowLocalY = -6.5f;
+    private const float WaveStrokeThickness = 2.0f;
 
     // Pool kapasitas tetap (Zero-GC)
     private const int TruthRowCount = 4;
@@ -62,71 +62,18 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
     // Cached const ASCII strings (0 alokasi string per frame)
     private const string StrZero = "0";
     private const string StrOne = "1";
-    private const string StrDash = "-";
-    private const string StrOk = "OK";
-    private const string StrFailX = "X";
-    private const string StrCollapseMinus = "-";
     private const string StrTopCollapsedPill = "INPUT [+]";
     private const string StrBottomCollapsedPill = "[+] TABEL";
-    private const string StrHeaderLeft = "VARIABEL INPUT";
-    private const string StrHeaderTruthTable = "TABEL KEBENARAN:";
-    private const string StrHeaderTruthTableCompact = "TABEL:";
-    private const string StrUnconnectedFormula = "Y = -- (BELUM TERSAMBUNG)";
+    private const string StrUnconnectedFormula = "Y = --";
     private const string StrCycleToken = "(SIKLUS)";
     private static readonly string[] StrComboPrefixes = { "[0,0] ", "[0,1] ", "[1,0] ", "[1,1] " };
 
-    // Palet warna Floating Glass v8.0 kontras tinggi (alpha ~0.84)
-    private static readonly Color StripGlassBgColor = new Color(0.024f, 0.056f, 0.108f, 0.84f);
-    private static readonly Color StripBorderCyanColor = new Color(0.22f, 0.90f, 1.00f, 0.76f);
-    private static readonly Color StripInsetBgColor = new Color(0.014f, 0.036f, 0.072f, 0.90f);
-    private static readonly Color StripDividerColor = new Color(0.24f, 0.86f, 1.00f, 0.36f);
-
-    private static readonly Color ToggleBtnBgColor = new Color(0.08f, 0.25f, 0.39f, 0.95f);
-    private static readonly Color ToggleBtnBorderColor = new Color(0.30f, 0.94f, 1.00f, 0.90f);
-    private static readonly Color ToggleBtnTextColor = new Color(0.95f, 0.99f, 1.00f, 1.00f);
-
-    private static readonly Color ChannelABgColor = new Color(0.028f, 0.098f, 0.165f, 0.82f);
-    private static readonly Color ChannelBBgColor = new Color(0.112f, 0.088f, 0.030f, 0.82f);
-    private static readonly Color InputACyanColor = new Color(0.26f, 0.95f, 1.00f, 1.00f);
-    private static readonly Color InputACyanDimColor = new Color(0.20f, 0.64f, 0.78f, 0.95f);
-    private static readonly Color InputBGoldColor = new Color(1.00f, 0.86f, 0.26f, 1.00f);
-    private static readonly Color InputBGoldDimColor = new Color(0.78f, 0.60f, 0.18f, 0.95f);
-    private static readonly Color WaveRailColor = new Color(0.44f, 0.62f, 0.78f, 0.32f);
-
-    private static readonly Color SignalHighColor = new Color(0.24f, 1.00f, 0.76f, 1.00f);
-    private static readonly Color SignalLowColor = new Color(1.00f, 0.54f, 0.30f, 1.00f);
-    private static readonly Color SignalIdleColor = new Color(0.70f, 0.84f, 0.95f, 0.95f);
-    private static readonly Color HeaderTextColor = new Color(0.88f, 0.98f, 1.00f, 1.00f);
-    private static readonly Color FormulaReadyColor = new Color(0.95f, 1.00f, 1.00f, 1.00f);
-    private static readonly Color FormulaIncompleteColor = new Color(1.00f, 0.84f, 0.36f, 1.00f);
-    private static readonly Color FormulaDisconnectedColor = new Color(0.68f, 0.80f, 0.92f, 1.00f);
-
-    private static readonly Color CellIdleBgColor = new Color(0.045f, 0.086f, 0.152f, 0.78f);
-    private static readonly Color CellActiveBgColor = new Color(0.075f, 0.275f, 0.425f, 0.92f);
-    private static readonly Color CellPassedBgColor = new Color(0.055f, 0.325f, 0.195f, 0.90f);
-    private static readonly Color CellFailedBgColor = new Color(0.430f, 0.095f, 0.118f, 0.92f);
-    private static readonly Color CellActiveCyanBorderColor = new Color(0.30f, 0.98f, 1.00f, 1.00f);
-    private static readonly Color CellActiveRedBorderColor = new Color(1.00f, 0.34f, 0.28f, 1.00f);
-    private static readonly Color StatusPassPillBg = new Color(0.08f, 0.54f, 0.29f, 0.96f);
-    private static readonly Color StatusFailPillBg = new Color(0.70f, 0.14f, 0.16f, 0.96f);
-    private static readonly Color StatusPassTextColor = new Color(0.90f, 1.00f, 0.93f, 1.00f);
-    private static readonly Color StatusFailTextColor = new Color(1.00f, 0.92f, 0.90f, 1.00f);
-    private static readonly Color CellTextPrimaryColor = new Color(0.95f, 0.99f, 1.00f, 1.00f);
-    private static readonly Color CellTextMutedColor = new Color(0.62f, 0.74f, 0.86f, 0.94f);
-
-    private static readonly Color IeeeBackdropColor = new Color(0.020f, 0.048f, 0.095f, 0.84f);
-    private static readonly Color PortBadgeBgColor = new Color(0.018f, 0.045f, 0.092f, 0.94f);
-
-    private static readonly ColorBlock HudToggleBtnColors = new ColorBlock
-    {
-        normalColor = Color.white,
-        highlightedColor = new Color(0.92f, 0.98f, 1.00f, 1f),
-        pressedColor = new Color(0.74f, 0.84f, 0.92f, 1f),
-        selectedColor = Color.white,
-        disabledColor = new Color(0.45f, 0.48f, 0.52f, 0.55f),
-        colorMultiplier = 1f,
-        fadeDuration = 0.08f
-    };
+    // Palet warna 1:1 GwThemeTokens (Smoked Optical Glass + Brushed Titanium, nol neon glow)
+    private static readonly Color SignalHighColor = GwThemeTokens.SignalHighTeal;
+    private static readonly Color SignalLowColor = GwThemeTokens.SignalLowSlate;
+    private static readonly Color SignalIdleColor = GwThemeTokens.TextSecondary;
+    private static readonly Color IeeeBackdropColor = GwThemeTokens.SmokedGlassDense;
+    private static readonly Color PortBadgeBgColor = GwThemeTokens.SmokedGlassDense;
 
     private sealed class SquareWaveUiTrack
     {
@@ -138,10 +85,32 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
     private sealed class TruthCellUi
     {
         public Image bgImage;
-        public Image activeBorderImage;
+        public Image borderImage;
+        public Image activeBarImage;
         public TextMeshProUGUI txtSummary;
-        public Image statusPillBg;
-        public TextMeshProUGUI txtStatus;
+    }
+
+    private struct SavedImageStyle
+    {
+        public Image image;
+        public Sprite sprite;
+        public Image.Type type;
+        public float ppuMultiplier;
+        public Color color;
+    }
+
+    private struct SavedOutlineStyle
+    {
+        public Outline outline;
+        public bool enabled;
+        public Color effectColor;
+        public Vector2 effectDistance;
+    }
+
+    private struct SavedTmpStyle
+    {
+        public TMP_Text text;
+        public Color color;
     }
 
     private sealed class GateSymbolSlot
@@ -181,9 +150,14 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
 
     // Pita Horizontal Atas (Variabel Input A/B + Square Wave 16-langkah)
     private RectTransform topStripRect;
+    private Image topStripBg;
+    private Image topStripBorder;
     private GameObject topStripBodyObj;
     private Button btnToggleTopStrip;
     private RectTransform btnToggleTopRect;
+    private Image btnToggleTopBg;
+    private Image btnToggleTopBorder;
+    private Image imgToggleTopMinusBar;
     private TextMeshProUGUI txtToggleTopLabel;
     private TextMeshProUGUI txtInputATitle;
     private TextMeshProUGUI txtInputAState;
@@ -197,15 +171,59 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
 
     // Pita Horizontal Bawah (Ekspresi Boolean Live + Tabel Kebenaran Horizontal 4 Sel)
     private RectTransform bottomStripRect;
+    private Image bottomStripBg;
+    private Image bottomStripBorder;
     private GameObject bottomStripBodyObj;
     private Button btnToggleBottomStrip;
     private RectTransform btnToggleBottomRect;
+    private Image btnToggleBottomBg;
+    private Image btnToggleBottomBorder;
+    private Image imgToggleBottomMinusBar;
     private TextMeshProUGUI txtToggleBottomLabel;
     private TextMeshProUGUI txtBooleanFormula;
+    private Image imgOutputStatusDot;
     private TextMeshProUGUI txtOutputContext;
-    private TextMeshProUGUI txtTruthTableLabel;
     private readonly TruthCellUi[] truthCells = new TruthCellUi[TruthRowCount];
     private bool isBottomStripCollapsed = false;
+
+    // Sinkronisasi tema v8.5 Smoked Optical Glass untuk Top HUD Bar & Toast Bawah (Zero-GC, lossless restore Mode Kartu)
+    private CompactHudMenuController externalHudMenu;
+    private TMP_Text externalFeedbackText;
+    private bool externalHudThemeCached = false;
+    private bool externalHudThemeApplied = false;
+    private readonly List<SavedImageStyle> savedExternalImages = new List<SavedImageStyle>(28);
+    private readonly List<SavedOutlineStyle> savedExternalOutlines = new List<SavedOutlineStyle>(6);
+    private readonly List<SavedTmpStyle> savedExternalTmps = new List<SavedTmpStyle>(8);
+
+    private Image extLevelPillBg;
+    private Image extLevelPillBorder;
+    private Image extLevelBadgeBg;
+    private Image extLevelBadgeBorder;
+    private TMP_Text extLevelBadgeTxt;
+    private TMP_Text extLevelTitleTxt;
+    private Image extMissionPillBg;
+    private Image extMissionPillBorder;
+    private TMP_Text extMissionDescTxt;
+    private Image extQuotaPillBg;
+    private Image extQuotaPillBorder;
+    private Outline extQuotaPillOutline;
+    private TMP_Text extQuotaStatusTxt;
+    private Image extRecenterBg;
+    private Image extRecenterBorder;
+    private Outline extRecenterOutline;
+    private readonly Image[] extRecenterIcons = new Image[6];
+    private Image extGuideBg;
+    private Image extGuideBorder;
+    private Outline extGuideOutline;
+    private TMP_Text extGuideIconTxt;
+    private Image extMenuBg;
+    private Image extMenuBorder;
+    private Outline extMenuOutline;
+    private readonly Image[] extMenuBars = new Image[3];
+    private GameObject extToastBackdropObj;
+    private Image extToastBg;
+    private Image extToastBorder;
+    private Outline extToastOutline;
 
     // 3D World-Space Billboard Overlays (5 Simbol IEEE Std 91 + 20 Lencana Port 0/1)
     private GameObject billboardOverlaysRootObj;
@@ -264,6 +282,18 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
     public bool IsHudActive => isHudActive;
     public bool IsBottomStripExpanded => isHudActive && !isBottomStripCollapsed && hudCanvasObj != null && hudCanvasObj.activeSelf;
     public event Action<bool> OnBottomStripExpandedChanged;
+
+    public void BindExternalHudTargets(CompactHudMenuController hudMenu, TMP_Text feedbackText)
+    {
+        if (hudMenu != null)
+        {
+            externalHudMenu = hudMenu;
+        }
+        if (feedbackText != null)
+        {
+            externalFeedbackText = feedbackText;
+        }
+    }
 
     public void EnsureVisualsCreated(Transform stageRoot, TMP_FontAsset preferredFont = null)
     {
@@ -359,6 +389,7 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         sandboxTestedRowMask = 0;
         sandboxMeasuredHighMask = 0;
         InvalidateDirtyCaches();
+        RestoreExternalTopHudAndToastTheme();
 
         if (!isInitialized)
         {
@@ -371,8 +402,9 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
     }
 
     /// <summary>
-    /// Pembaruan event-driven Pita 2D Atas/Bawah serta sinkronisasi 3D Simbol IEEE &amp; Lencana Port 0/1
-    /// dengan zoom alami proporsional. Dipanggil dari AirWeavingController.LateUpdate(). 100% Zero-GC.
+    /// Pembaruan event-driven Pita 2D Atas/Bawah, sinkronisasi tema Top HUD &amp; Toast v8.5,
+    /// serta 3D Simbol IEEE &amp; Lencana Port 0/1 dengan zoom alami proporsional.
+    /// Dipanggil dari AirWeavingController.LateUpdate(). 100% Zero-GC.
     /// </summary>
     public void TickLateVisuals(
         Camera mainCam,
@@ -388,7 +420,8 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         GateNode outputNode,
         List<GateNode> activePlacedGates,
         int debugPassedRowMask,
-        int debugFailedRowMask)
+        int debugFailedRowMask,
+        bool isGuideOverlayOpen = false)
     {
         _ = stageRoot;
         if (!isInitialized)
@@ -398,10 +431,14 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
 
         if (!isAirWeavingActive || !isHudActive || mainCam == null)
         {
+            RestoreExternalTopHudAndToastTheme();
             SetHudCanvasVisible(false);
             SetBillboardRootVisible(false);
             return;
         }
+
+        // 0. Pertahankan tema Smoked Optical Glass v8.5 pada Top HUD Bar & Toast Bawah selama Mode Udara aktif
+        SyncExternalTopHudAndToastTheme(levelManager, circuitManager, isGuideOverlayOpen);
 
         // 1. Sembunyikan otomatis seluruh HUD 2D & overlay 3D saat overlay/modal UI terbuka (Menu, Level Selector, Panduan)
         if (isUiOverlayOpen)
@@ -509,6 +546,7 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
 
     private void OnDisable()
     {
+        RestoreExternalTopHudAndToastTheme();
         if (isInitialized)
         {
             HideImmediate();
@@ -543,13 +581,32 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
 
         safeAreaRect = null;
         topStripRect = null;
+        topStripBg = null;
+        topStripBorder = null;
         topStripBodyObj = null;
         btnToggleTopRect = null;
+        btnToggleTopBg = null;
+        btnToggleTopBorder = null;
+        imgToggleTopMinusBar = null;
         bottomStripRect = null;
+        bottomStripBg = null;
+        bottomStripBorder = null;
         bottomStripBodyObj = null;
         btnToggleBottomRect = null;
+        btnToggleBottomBg = null;
+        btnToggleBottomBorder = null;
+        imgToggleBottomMinusBar = null;
+        imgOutputStatusDot = null;
         gateSymbolsRootObj = null;
         portBadgesRootObj = null;
+
+        savedExternalImages.Clear();
+        savedExternalOutlines.Clear();
+        savedExternalTmps.Clear();
+        externalHudThemeCached = false;
+        externalHudThemeApplied = false;
+        externalHudMenu = null;
+        externalFeedbackText = null;
 
         for (int i = 0; i < ownedMaterials.Count; i++)
         {
@@ -617,65 +674,47 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         stripObj.transform.SetParent(parent, false);
         topStripRect = stripObj.GetComponent<RectTransform>();
 
-        Image stripBg = stripObj.GetComponent<Image>();
-        stripBg.color = StripGlassBgColor;
-        stripBg.raycastTarget = false;
-        CompactHudMenuController.ApplyRoundedPill(stripBg);
+        topStripBg = stripObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(topStripBg, GwThemeTokens.SmokedGlass);
+        topStripBg.raycastTarget = false;
 
-        Image stripBorder = CompactHudMenuController.AttachRoundedBorderOverlay(
-            topStripRect,
-            "TopStrip_Border",
-            CompactHudMenuController.GetRoundedPillBorderSprite(),
-            StripBorderCyanColor);
-        if (stripBorder != null)
-        {
-            stripBorder.raycastTarget = false;
-        }
+        topStripBorder = GwThemeTokens.AttachHairlineBorder(topStripRect, "TopStrip_Border", GwThemeTokens.HairlineIdle);
 
-        // Kontainer isi 1 baris horizontal (menyisakan ruang 52px di kanan untuk tombol '-')
+        // Kontainer isi 1 baris horizontal ramping H=44px (ruang 44px di kanan untuk tombol '-' 28x28)
         topStripBodyObj = new GameObject("TopStrip_Body", typeof(RectTransform));
         topStripBodyObj.transform.SetParent(topStripRect, false);
         RectTransform bodyRect = topStripBodyObj.GetComponent<RectTransform>();
         bodyRect.anchorMin = Vector2.zero;
         bodyRect.anchorMax = Vector2.one;
         bodyRect.offsetMin = new Vector2(14f, 4f);
-        bodyRect.offsetMax = new Vector2(-52f, -4f);
+        bodyRect.offsetMax = new Vector2(-44f, -4f);
 
-        // 1. Label kiri 'VARIABEL INPUT' (0.000..0.112)
-        CreateUiTmp(
-            "TopStrip_HeaderTxt",
-            bodyRect,
-            new Vector2(0.000f, 0f),
-            new Vector2(0.112f, 1f),
-            new Vector2(2f, 0f),
-            new Vector2(-4f, 0f),
-            16f,
-            12f,
-            16.5f,
-            HeaderTextColor,
-            TextAlignmentOptions.MidlineLeft,
-            StrHeaderLeft);
+        // 1. Kanal A (kiri, 0.000..0.488): "A  KARTU  1" + Square Wave
+        RectTransform chARect = CreateTransparentAnchorContainer("TopStrip_ChannelA", bodyRect, 0.000f, 0.488f);
+        CreateUiTmp("ChA_Var", chARect, new Vector2(0.000f, 0f), new Vector2(0.040f, 1f), new Vector2(2f, 0f), Vector2.zero, 16f, 12f, 17f, GwThemeTokens.TextPrimary, TextAlignmentOptions.MidlineLeft, "A", FontStyles.Bold);
+        txtInputATitle = CreateUiTmp("ChA_Title", chARect, new Vector2(0.042f, 0f), new Vector2(0.225f, 1f), new Vector2(2f, 0f), new Vector2(-4f, 0f), 14.5f, 11f, 15.5f, GwThemeTokens.TextSecondary, TextAlignmentOptions.MidlineLeft, "INPUT A", FontStyles.Normal);
+        txtInputAState = CreateUiTmp("ChA_State", chARect, new Vector2(0.228f, 0f), new Vector2(0.278f, 1f), Vector2.zero, Vector2.zero, 17f, 12.5f, 18f, GwThemeTokens.SignalLowSlate, TextAlignmentOptions.Center, StrZero, FontStyles.Bold);
+        waveTrackA = BuildHorizontalSquareWaveTrack("WaveTrack_A", chARect, 0.292f, 0.992f, GwThemeTokens.SignalLowSlate);
 
-        CreateVerticalAnchorDivider("TopStrip_Div0", bodyRect, 0.116f, 32f);
+        // Pembatas vertikal 1px HairlineIdle tepat di tengah
+        CreateVerticalAnchorDivider("TopStrip_DivMid", bodyRect, 0.500f, 24f);
 
-        // 2. Kanal A (aksen sian, 0.123..0.548)
-        RectTransform chARect = CreateAnchorUiPanel("TopStrip_ChannelA", bodyRect, 0.123f, 0.548f, ChannelABgColor);
-        CreateUiRectImage("ChA_Accent", chARect, new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(0f, 0.5f), new Vector2(4f, 0f), new Vector2(4f, -10f), InputACyanColor);
-        txtInputATitle = CreateUiTmp("ChA_Title", chARect, new Vector2(0.018f, 0f), new Vector2(0.245f, 1f), new Vector2(4f, 0f), new Vector2(-2f, 0f), 18.5f, 13f, 19f, InputACyanColor, TextAlignmentOptions.MidlineLeft, "A = INPUT A");
-        txtInputAState = CreateUiTmp("ChA_State", chARect, new Vector2(0.248f, 0f), new Vector2(0.568f, 1f), new Vector2(2f, 0f), new Vector2(-4f, 0f), 17.5f, 12.5f, 18f, SignalLowColor, TextAlignmentOptions.MidlineLeft, "[0] OFF (LOW)");
-        waveTrackA = BuildHorizontalSquareWaveTrack("WaveTrack_A", chARect, 0.574f, 0.990f, InputACyanColor);
+        // 2. Kanal B (kanan, 0.512..1.000): "B  MODE  0" + Square Wave
+        RectTransform chBRect = CreateTransparentAnchorContainer("TopStrip_ChannelB", bodyRect, 0.512f, 1.000f);
+        CreateUiTmp("ChB_Var", chBRect, new Vector2(0.000f, 0f), new Vector2(0.040f, 1f), new Vector2(2f, 0f), Vector2.zero, 16f, 12f, 17f, GwThemeTokens.TextPrimary, TextAlignmentOptions.MidlineLeft, "B", FontStyles.Bold);
+        txtInputBTitle = CreateUiTmp("ChB_Title", chBRect, new Vector2(0.042f, 0f), new Vector2(0.225f, 1f), new Vector2(2f, 0f), new Vector2(-4f, 0f), 14.5f, 11f, 15.5f, GwThemeTokens.TextSecondary, TextAlignmentOptions.MidlineLeft, "INPUT B", FontStyles.Normal);
+        txtInputBState = CreateUiTmp("ChB_State", chBRect, new Vector2(0.228f, 0f), new Vector2(0.278f, 1f), Vector2.zero, Vector2.zero, 17f, 12.5f, 18f, GwThemeTokens.SignalLowSlate, TextAlignmentOptions.Center, StrZero, FontStyles.Bold);
+        waveTrackB = BuildHorizontalSquareWaveTrack("WaveTrack_B", chBRect, 0.292f, 0.992f, GwThemeTokens.SignalLowSlate);
 
-        CreateVerticalAnchorDivider("TopStrip_Div1", bodyRect, 0.556f, 32f);
-
-        // 3. Kanal B (aksen emas, 0.564..0.994)
-        RectTransform chBRect = CreateAnchorUiPanel("TopStrip_ChannelB", bodyRect, 0.564f, 0.994f, ChannelBBgColor);
-        CreateUiRectImage("ChB_Accent", chBRect, new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(0f, 0.5f), new Vector2(4f, 0f), new Vector2(4f, -10f), InputBGoldColor);
-        txtInputBTitle = CreateUiTmp("ChB_Title", chBRect, new Vector2(0.018f, 0f), new Vector2(0.245f, 1f), new Vector2(4f, 0f), new Vector2(-2f, 0f), 18.5f, 13f, 19f, InputBGoldColor, TextAlignmentOptions.MidlineLeft, "B = INPUT B");
-        txtInputBState = CreateUiTmp("ChB_State", chBRect, new Vector2(0.248f, 0f), new Vector2(0.568f, 1f), new Vector2(2f, 0f), new Vector2(-4f, 0f), 17.5f, 12.5f, 18f, SignalLowColor, TextAlignmentOptions.MidlineLeft, "[0] OFF (LOW)");
-        waveTrackB = BuildHorizontalSquareWaveTrack("WaveTrack_B", chBRect, 0.574f, 0.990f, InputBGoldColor);
-
-        // 4. Tombol Lipat '-' / 'INPUT [+]'
-        btnToggleTopStrip = CreateStripCollapseButton("Btn_ToggleTopStrip", topStripRect, out btnToggleTopRect, out txtToggleTopLabel);
+        // 3. Tombol Lipat '-' (28x28) / Pil Kompak 'INPUT [+]'
+        btnToggleTopStrip = CreateStripCollapseButton(
+            "Btn_ToggleTopStrip",
+            topStripRect,
+            out btnToggleTopRect,
+            out btnToggleTopBg,
+            out btnToggleTopBorder,
+            out imgToggleTopMinusBar,
+            out txtToggleTopLabel);
         btnToggleTopStrip.onClick.AddListener(ToggleTopStripCollapsed);
     }
 
@@ -692,16 +731,12 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         trackRect.anchorMin = new Vector2(anchorMinX, 0.5f);
         trackRect.anchorMax = new Vector2(anchorMaxX, 0.5f);
         trackRect.pivot = new Vector2(0.5f, 0.5f);
-        trackRect.offsetMin = new Vector2(0f, -15f);
-        trackRect.offsetMax = new Vector2(0f, 15f); // tinggi total track 30px (grafik 20px di dalam)
+        trackRect.offsetMin = new Vector2(0f, -12f);
+        trackRect.offsetMax = new Vector2(0f, 12f); // tinggi total track 24px dalam pita 44px
 
         Image trackBg = trackObj.GetComponent<Image>();
-        trackBg.color = StripInsetBgColor;
+        GwThemeTokens.ApplyRoundedRect6(trackBg, GwThemeTokens.SmokedGlassSoft);
         trackBg.raycastTarget = false;
-
-        // Sumbu mini 1 & 0 di kiri track
-        CreateUiTmp("Tick_1", trackRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(2f, WaveHighLocalY - 7f), new Vector2(16f, WaveHighLocalY + 7f), 11f, 9f, 11.5f, CellTextMutedColor, TextAlignmentOptions.Center, StrOne);
-        CreateUiTmp("Tick_0", trackRect, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(2f, WaveLowLocalY - 7f), new Vector2(16f, WaveLowLocalY + 7f), 11f, 9f, 11.5f, CellTextMutedColor, TextAlignmentOptions.Center, StrZero);
 
         // Area plot dinamis proporsional (otomatis rapi pada 4:3, 16:9, maupun 20:9)
         GameObject plotObj = new GameObject("WavePlotArea", typeof(RectTransform));
@@ -709,12 +744,12 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         RectTransform plotRect = plotObj.GetComponent<RectTransform>();
         plotRect.anchorMin = Vector2.zero;
         plotRect.anchorMax = Vector2.one;
-        plotRect.offsetMin = new Vector2(17f, 2f);
-        plotRect.offsetMax = new Vector2(-5f, -2f);
+        plotRect.offsetMin = new Vector2(8f, 2f);
+        plotRect.offsetMax = new Vector2(-8f, -2f);
 
-        // Rel referensi HIGH & LOW tipis
-        CreateUiRectImage("Rail_High", plotRect, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, WaveHighLocalY), new Vector2(0f, 1.0f), WaveRailColor);
-        CreateUiRectImage("Rail_Low", plotRect, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, WaveLowLocalY), new Vector2(0f, 1.0f), WaveRailColor);
+        // Rel referensi HIGH & LOW tipis 1px
+        CreateUiRectImage("Rail_High", plotRect, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, WaveHighLocalY), new Vector2(0f, 1.0f), GwThemeTokens.WaveRailFaint);
+        CreateUiRectImage("Rail_Low", plotRect, new Vector2(0f, 0.5f), new Vector2(1f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, WaveLowLocalY), new Vector2(0f, 1.0f), GwThemeTokens.WaveRailFaint);
 
         SquareWaveUiTrack track = new SquareWaveUiTrack();
         float invSteps = 1f / WaveStepCount;
@@ -732,7 +767,7 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                 new Vector2(ax1, 0.5f),
                 new Vector2(0.5f, 0.5f),
                 new Vector2(0f, WaveLowLocalY),
-                new Vector2(0.8f, WaveStrokeThickness),
+                new Vector2(0.6f, WaveStrokeThickness),
                 initialWaveColor);
             track.stepImages[s] = segImg;
             track.stepRects[s] = segImg.rectTransform;
@@ -764,78 +799,72 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         stripObj.transform.SetParent(parent, false);
         bottomStripRect = stripObj.GetComponent<RectTransform>();
 
-        Image stripBg = stripObj.GetComponent<Image>();
-        stripBg.color = StripGlassBgColor;
-        stripBg.raycastTarget = false;
-        CompactHudMenuController.ApplyRoundedCard(stripBg);
+        bottomStripBg = stripObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(bottomStripBg, GwThemeTokens.SmokedGlass);
+        bottomStripBg.raycastTarget = false;
 
-        Image stripBorder = CompactHudMenuController.AttachRoundedBorderOverlay(
-            bottomStripRect,
-            "BottomStrip_Border",
-            CompactHudMenuController.GetRoundedCardBorderSprite(),
-            StripBorderCyanColor);
-        if (stripBorder != null)
-        {
-            stripBorder.raycastTarget = false;
-        }
+        bottomStripBorder = GwThemeTokens.AttachHairlineBorder(bottomStripRect, "BottomStrip_Border", GwThemeTokens.HairlineIdle);
 
-        // Kontainer isi 1 baris horizontal (menyisakan ruang 52px di kanan untuk tombol '-')
+        // Kontainer isi 1 baris horizontal H=56px (ruang 44px di kanan untuk tombol '-' 28x28)
         bottomStripBodyObj = new GameObject("BottomStrip_Body", typeof(RectTransform));
         bottomStripBodyObj.transform.SetParent(bottomStripRect, false);
         RectTransform bodyRect = bottomStripBodyObj.GetComponent<RectTransform>();
         bodyRect.anchorMin = Vector2.zero;
         bodyRect.anchorMax = Vector2.one;
-        bodyRect.offsetMin = new Vector2(12f, 5f);
-        bodyRect.offsetMax = new Vector2(-52f, -5f);
+        bodyRect.offsetMin = new Vector2(14f, 4f);
+        bodyRect.offsetMax = new Vector2(-44f, -4f);
 
-        // 1. Bagian Kiri (~35% lebar: 0.000..0.348): Ekspresi Boolean Live + Status Output Kontekstual
-        RectTransform formulaPanel = CreateAnchorUiPanel("Bottom_FormulaPanel", bodyRect, 0.000f, 0.348f, StripInsetBgColor);
+        // 1. Bagian Kiri (0.000..0.340): Rumus Boolean Live ("Y = NOT (A OR B)") + titik status & label ("LAB: 0 TERKUNCI")
+        RectTransform leftBlock = CreateTransparentAnchorContainer("Bottom_FormulaBlock", bodyRect, 0.000f, 0.340f);
         txtBooleanFormula = CreateUiTmp(
             "Bottom_FormulaTxt",
-            formulaPanel,
-            new Vector2(0f, 0.44f),
+            leftBlock,
+            new Vector2(0f, 0.50f),
             new Vector2(1f, 0.98f),
-            new Vector2(12f, 0f),
-            new Vector2(-10f, 0f),
-            20f,
-            13.5f,
-            21.5f,
-            FormulaDisconnectedColor,
+            new Vector2(4f, 0f),
+            new Vector2(-6f, -1f),
+            18f,
+            12.5f,
+            19.5f,
+            GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
-            "EKSPRESI BOOLEAN: Y = -- (BELUM TERSAMBUNG)");
+            StrUnconnectedFormula,
+            FontStyles.Bold);
+
+        GameObject dotObj = new GameObject("Bottom_OutputStatusDot", typeof(RectTransform), typeof(Image));
+        dotObj.transform.SetParent(leftBlock, false);
+        RectTransform dotRect = dotObj.GetComponent<RectTransform>();
+        dotRect.anchorMin = new Vector2(0f, 0.28f);
+        dotRect.anchorMax = new Vector2(0f, 0.28f);
+        dotRect.pivot = new Vector2(0.5f, 0.5f);
+        dotRect.anchoredPosition = new Vector2(8f, 1f);
+        dotRect.sizeDelta = new Vector2(GwThemeTokens.StatusDotSizePx, GwThemeTokens.StatusDotSizePx);
+
+        imgOutputStatusDot = dotObj.GetComponent<Image>();
+        imgOutputStatusDot.sprite = GwThemeTokens.GetCircleSprite();
+        imgOutputStatusDot.type = Image.Type.Simple;
+        imgOutputStatusDot.color = GwThemeTokens.SignalLowSlate;
+        imgOutputStatusDot.raycastTarget = false;
 
         txtOutputContext = CreateUiTmp(
             "Bottom_OutputCtxTxt",
-            formulaPanel,
-            new Vector2(0f, 0.04f),
-            new Vector2(1f, 0.46f),
-            new Vector2(12f, 0f),
-            new Vector2(-10f, 0f),
-            15.5f,
-            12f,
-            16f,
-            SignalIdleColor,
-            TextAlignmentOptions.MidlineLeft,
-            "OUTPUT: --");
-
-        CreateVerticalAnchorDivider("Bottom_MidDiv", bodyRect, 0.356f, 46f);
-
-        // 2. Bagian Kanan (~63% lebar: 0.364..0.996): Label berjarak napas + 4 Sel Tabel Kebenaran Horizontal Sejajar
-        txtTruthTableLabel = CreateUiTmp(
-            "Bottom_TruthLabel",
-            bodyRect,
-            new Vector2(0.364f, 0f),
-            new Vector2(0.478f, 1f),
-            new Vector2(2f, 0f),
-            new Vector2(-14f, 0f),
-            15f,
+            leftBlock,
+            new Vector2(0f, 0.06f),
+            new Vector2(1f, 0.50f),
+            new Vector2(18f, 2f),
+            new Vector2(-6f, 0f),
+            13.5f,
             10.5f,
-            15.5f,
-            HeaderTextColor,
+            14.5f,
+            GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
-            StrHeaderTruthTable);
+            "OUTPUT: --",
+            FontStyles.Normal);
 
-        const float cellsMinX = 0.490f;
+        CreateVerticalAnchorDivider("Bottom_MidDiv", bodyRect, 0.348f, 34f);
+
+        // 2. Bagian Kanan (0.358..0.996): 4 Sel Tabel Kebenaran Horizontal Sejajar ([0,0]..[1,1])
+        const float cellsMinX = 0.358f;
         const float cellsMaxX = 0.996f;
         float cellSpan = (cellsMaxX - cellsMinX) / TruthRowCount;
 
@@ -849,83 +878,62 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
             RectTransform cellRect = cellObj.GetComponent<RectTransform>();
             cellRect.anchorMin = new Vector2(ax0, 0f);
             cellRect.anchorMax = new Vector2(ax1, 1f);
-            cellRect.offsetMin = new Vector2(4f, 2f);
-            cellRect.offsetMax = new Vector2(-4f, -2f);
+            cellRect.offsetMin = new Vector2(4f, 4f);
+            cellRect.offsetMax = new Vector2(-4f, -4f);
 
             Image cellBg = cellObj.GetComponent<Image>();
-            cellBg.color = CellIdleBgColor;
+            GwThemeTokens.ApplyRoundedRect6(cellBg, GwThemeTokens.CardIdle);
             cellBg.raycastTarget = false;
-            CompactHudMenuController.ApplyRoundedSquircle(cellBg);
 
-            // Bingkai sorot aktif per sel (sian jika netral/cocok, merah jika gagal)
-            Image activeBorder = CompactHudMenuController.AttachRoundedBorderOverlay(
+            // Hairline border 1px seragam (idle / active / error #EF4444 / pass #10B981)
+            Image cellBorder = GwThemeTokens.AttachHairlineBorder(cellRect, "Cell_Border", GwThemeTokens.HairlineIdle);
+
+            // Indikator tipis 2px di bawah sel untuk menandai baris kombinasi sakelar aktif saat ini
+            Image activeBar = CreateUiRectImage(
+                "Cell_ActiveBar",
                 cellRect,
-                "Cell_ActiveBorder",
-                CompactHudMenuController.GetRoundedSquircleBorderSprite(),
-                CellActiveCyanBorderColor);
-            if (activeBorder != null)
-            {
-                activeBorder.raycastTarget = false;
-                activeBorder.enabled = false;
-            }
+                new Vector2(0.14f, 0f),
+                new Vector2(0.86f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2(0f, 2f),
+                new Vector2(0f, 2f),
+                GwThemeTokens.SignalHighTeal);
+            activeBar.enabled = false;
 
-            // Teks ringkas sel: "[0,0] Y:- | TGT:0" (atau "[0,0] Y:-" pada Mode Sandbox)
+            // Teks ringkas sel: "[0,0] -/1", "[1,0] 0/1 X", "[0,0] 1/1 OK"
             TextMeshProUGUI txtSummary = CreateUiTmp(
                 "Cell_SummaryTxt",
                 cellRect,
-                new Vector2(0.03f, 0f),
-                new Vector2(0.73f, 1f),
-                new Vector2(4f, 0f),
-                new Vector2(-2f, 0f),
-                17.5f,
-                12.5f,
-                18.5f,
-                CellTextPrimaryColor,
-                TextAlignmentOptions.MidlineLeft,
-                StrComboPrefixes[r]);
-
-            // Lencana status kanan sel ('OK' hijau / 'X' merah / '-' abu)
-            GameObject pillObj = new GameObject("Cell_StPill", typeof(RectTransform), typeof(Image));
-            pillObj.transform.SetParent(cellRect, false);
-            RectTransform pillRect = pillObj.GetComponent<RectTransform>();
-            pillRect.anchorMin = new Vector2(0.74f, 0.5f);
-            pillRect.anchorMax = new Vector2(0.97f, 0.5f);
-            pillRect.pivot = new Vector2(0.5f, 0.5f);
-            pillRect.offsetMin = new Vector2(0f, -14f);
-            pillRect.offsetMax = new Vector2(0f, 14f);
-
-            Image pillImg = pillObj.GetComponent<Image>();
-            pillImg.color = StatusPassPillBg;
-            pillImg.raycastTarget = false;
-            CompactHudMenuController.ApplyRoundedPill(pillImg);
-            pillImg.enabled = false;
-
-            TextMeshProUGUI txtStatus = CreateUiTmp(
-                "Cell_StTxt",
-                cellRect,
-                new Vector2(0.74f, 0f),
-                new Vector2(0.97f, 1f),
                 Vector2.zero,
-                Vector2.zero,
+                Vector2.one,
+                new Vector2(8f, 0f),
+                new Vector2(-8f, 0f),
                 15.5f,
-                12f,
+                11.5f,
                 16.5f,
-                CellTextMutedColor,
+                GwThemeTokens.TextSecondary,
                 TextAlignmentOptions.Center,
-                StrDash);
+                StrComboPrefixes[r],
+                FontStyles.Bold);
 
             truthCells[r] = new TruthCellUi
             {
                 bgImage = cellBg,
-                activeBorderImage = activeBorder,
-                txtSummary = txtSummary,
-                statusPillBg = pillImg,
-                txtStatus = txtStatus
+                borderImage = cellBorder,
+                activeBarImage = activeBar,
+                txtSummary = txtSummary
             };
         }
 
-        // 3. Tombol Lipat '-' / '[+] TABEL'
-        btnToggleBottomStrip = CreateStripCollapseButton("Btn_ToggleBottomStrip", bottomStripRect, out btnToggleBottomRect, out txtToggleBottomLabel);
+        // 3. Tombol Lipat '-' (28x28) / Pil Kompak '[+] TABEL'
+        btnToggleBottomStrip = CreateStripCollapseButton(
+            "Btn_ToggleBottomStrip",
+            bottomStripRect,
+            out btnToggleBottomRect,
+            out btnToggleBottomBg,
+            out btnToggleBottomBorder,
+            out imgToggleBottomMinusBar,
+            out txtToggleBottomLabel);
         btnToggleBottomStrip.onClick.AddListener(ToggleBottomStripCollapsed);
     }
 
@@ -933,45 +941,52 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         string name,
         RectTransform parentStrip,
         out RectTransform rectOut,
+        out Image bgOut,
+        out Image borderOut,
+        out Image minusBarOut,
         out TextMeshProUGUI labelOut)
     {
         GameObject btnObj = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
         btnObj.transform.SetParent(parentStrip, false);
         rectOut = btnObj.GetComponent<RectTransform>();
 
-        Image bg = btnObj.GetComponent<Image>();
-        bg.color = ToggleBtnBgColor;
-        bg.raycastTarget = true;
-        CompactHudMenuController.ApplyRoundedSquircle(bg);
+        bgOut = btnObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(bgOut, GwThemeTokens.CardIdle);
+        bgOut.raycastTarget = true;
 
-        Image border = CompactHudMenuController.AttachRoundedBorderOverlay(
-            rectOut,
-            "Btn_Border",
-            CompactHudMenuController.GetRoundedSquircleBorderSprite(),
-            ToggleBtnBorderColor);
-        if (border != null)
-        {
-            border.raycastTarget = false;
-        }
+        borderOut = GwThemeTokens.AttachHairlineBorder(rectOut, "Btn_Border", GwThemeTokens.HairlineIdle);
 
         Button btn = btnObj.GetComponent<Button>();
-        btn.targetGraphic = bg;
+        btn.targetGraphic = bgOut;
         btn.transition = Selectable.Transition.ColorTint;
-        btn.colors = HudToggleBtnColors;
+        btn.colors = GwThemeTokens.FlatGlassButtonColors;
+
+        // Ikon '-' geometris prosedural (10x2px): selalu tajam & identik pada tombol 28x28 atas maupun bawah
+        minusBarOut = CreateUiRectImage(
+            "Icon_MinusBar",
+            rectOut,
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            Vector2.zero,
+            new Vector2(10f, 2f),
+            GwThemeTokens.TextPrimary);
 
         labelOut = CreateUiTmp(
             "Txt_Toggle",
             rectOut,
             Vector2.zero,
             Vector2.one,
-            new Vector2(4f, 0f),
-            new Vector2(-4f, 0f),
-            20f,
+            new Vector2(6f, 0f),
+            new Vector2(-6f, 0f),
             14f,
-            22f,
-            ToggleBtnTextColor,
+            11f,
+            16f,
+            GwThemeTokens.TextPrimary,
             TextAlignmentOptions.Center,
-            StrCollapseMinus);
+            string.Empty,
+            FontStyles.Bold);
+        labelOut.enabled = false;
         return btn;
     }
 
@@ -990,7 +1005,7 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
 
     private void ApplyStripCollapseLayout()
     {
-        // 1. Pita Horizontal Atas: melebar penuh di bawah Top HUD bar, atau mengecil menjadi pil 'INPUT [+]' di pojok kiri-atas
+        // 1. Pita Horizontal Atas: H=44px melebar penuh, atau mengecil jadi pil 'INPUT [+]' (SmokedGlassDense + HairlineIdle)
         if (topStripRect != null)
         {
             if (isTopStripCollapsed)
@@ -1010,6 +1025,14 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                 topStripRect.offsetMax = new Vector2(-StripSideMarginX, TopStripTopOffsetY);
             }
         }
+        if (topStripBg != null)
+        {
+            topStripBg.enabled = !isTopStripCollapsed;
+        }
+        if (topStripBorder != null)
+        {
+            topStripBorder.enabled = !isTopStripCollapsed;
+        }
         if (topStripBodyObj != null && topStripBodyObj.activeSelf == isTopStripCollapsed)
         {
             topStripBodyObj.SetActive(!isTopStripCollapsed);
@@ -1021,8 +1044,8 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                 btnToggleTopRect.anchorMin = Vector2.zero;
                 btnToggleTopRect.anchorMax = Vector2.one;
                 btnToggleTopRect.pivot = new Vector2(0.5f, 0.5f);
-                btnToggleTopRect.offsetMin = new Vector2(4f, 4f);
-                btnToggleTopRect.offsetMax = new Vector2(-4f, -4f);
+                btnToggleTopRect.offsetMin = Vector2.zero;
+                btnToggleTopRect.offsetMax = Vector2.zero;
             }
             else
             {
@@ -1030,15 +1053,33 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                 btnToggleTopRect.anchorMax = new Vector2(1f, 0.5f);
                 btnToggleTopRect.pivot = new Vector2(1f, 0.5f);
                 btnToggleTopRect.anchoredPosition = new Vector2(-8f, 0f);
-                btnToggleTopRect.sizeDelta = new Vector2(38f, 36f);
+                btnToggleTopRect.sizeDelta = new Vector2(CollapseBtnSize, CollapseBtnSize);
             }
+        }
+        if (btnToggleTopBg != null)
+        {
+            btnToggleTopBg.color = isTopStripCollapsed ? GwThemeTokens.SmokedGlassDense : GwThemeTokens.CardIdle;
+        }
+        if (btnToggleTopBorder != null)
+        {
+            btnToggleTopBorder.color = GwThemeTokens.HairlineIdle;
+        }
+        if (imgToggleTopMinusBar != null)
+        {
+            imgToggleTopMinusBar.enabled = !isTopStripCollapsed;
+            imgToggleTopMinusBar.color = GwThemeTokens.TextPrimary;
         }
         if (txtToggleTopLabel != null)
         {
-            txtToggleTopLabel.text = isTopStripCollapsed ? StrTopCollapsedPill : StrCollapseMinus;
+            txtToggleTopLabel.enabled = isTopStripCollapsed;
+            if (isTopStripCollapsed)
+            {
+                txtToggleTopLabel.text = StrTopCollapsedPill;
+                txtToggleTopLabel.color = GwThemeTokens.TextPrimary;
+            }
         }
 
-        // 2. Pita Horizontal Bawah: melebar penuh di tepi bawah, atau mengecil menjadi pil '[+] TABEL' di pojok kanan-bawah
+        // 2. Pita Horizontal Bawah: H=56px melebar penuh, atau mengecil jadi pil '[+] TABEL' (SmokedGlassDense + HairlineIdle)
         if (bottomStripRect != null)
         {
             if (isBottomStripCollapsed)
@@ -1058,6 +1099,14 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                 bottomStripRect.offsetMax = new Vector2(-StripSideMarginX, BottomStripBottomMarginY + BottomStripExpandedHeight);
             }
         }
+        if (bottomStripBg != null)
+        {
+            bottomStripBg.enabled = !isBottomStripCollapsed;
+        }
+        if (bottomStripBorder != null)
+        {
+            bottomStripBorder.enabled = !isBottomStripCollapsed;
+        }
         if (bottomStripBodyObj != null && bottomStripBodyObj.activeSelf == isBottomStripCollapsed)
         {
             bottomStripBodyObj.SetActive(!isBottomStripCollapsed);
@@ -1069,8 +1118,8 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                 btnToggleBottomRect.anchorMin = Vector2.zero;
                 btnToggleBottomRect.anchorMax = Vector2.one;
                 btnToggleBottomRect.pivot = new Vector2(0.5f, 0.5f);
-                btnToggleBottomRect.offsetMin = new Vector2(4f, 4f);
-                btnToggleBottomRect.offsetMax = new Vector2(-4f, -4f);
+                btnToggleBottomRect.offsetMin = Vector2.zero;
+                btnToggleBottomRect.offsetMax = Vector2.zero;
             }
             else
             {
@@ -1078,12 +1127,30 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                 btnToggleBottomRect.anchorMax = new Vector2(1f, 0.5f);
                 btnToggleBottomRect.pivot = new Vector2(1f, 0.5f);
                 btnToggleBottomRect.anchoredPosition = new Vector2(-8f, 0f);
-                btnToggleBottomRect.sizeDelta = new Vector2(38f, 42f);
+                btnToggleBottomRect.sizeDelta = new Vector2(CollapseBtnSize, CollapseBtnSize);
             }
+        }
+        if (btnToggleBottomBg != null)
+        {
+            btnToggleBottomBg.color = isBottomStripCollapsed ? GwThemeTokens.SmokedGlassDense : GwThemeTokens.CardIdle;
+        }
+        if (btnToggleBottomBorder != null)
+        {
+            btnToggleBottomBorder.color = GwThemeTokens.HairlineIdle;
+        }
+        if (imgToggleBottomMinusBar != null)
+        {
+            imgToggleBottomMinusBar.enabled = !isBottomStripCollapsed;
+            imgToggleBottomMinusBar.color = GwThemeTokens.TextPrimary;
         }
         if (txtToggleBottomLabel != null)
         {
-            txtToggleBottomLabel.text = isBottomStripCollapsed ? StrBottomCollapsedPill : StrCollapseMinus;
+            txtToggleBottomLabel.enabled = isBottomStripCollapsed;
+            if (isBottomStripCollapsed)
+            {
+                txtToggleBottomLabel.text = StrBottomCollapsedPill;
+                txtToggleBottomLabel.color = GwThemeTokens.TextPrimary;
+            }
         }
     }
 
@@ -1112,16 +1179,6 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         safeAreaRect.anchorMax = new Vector2(Mathf.Clamp01(sa.xMax / denomW), Mathf.Clamp01(sa.yMax / denomH));
         safeAreaRect.offsetMin = Vector2.zero;
         safeAreaRect.offsetMax = Vector2.zero;
-
-        if (txtTruthTableLabel != null)
-        {
-            float safeAspect = Mathf.Max(0.1f, sa.width) / Mathf.Max(1f, sa.height);
-            string desiredLabel = safeAspect < 1.50f ? StrHeaderTruthTableCompact : StrHeaderTruthTable;
-            if (!string.Equals(txtTruthTableLabel.text, desiredLabel, StringComparison.Ordinal))
-            {
-                txtTruthTableLabel.text = desiredLabel;
-            }
-        }
     }
 
     private void Build3DBillboardOverlays()
@@ -1281,8 +1338,8 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         }
 
         waveHistoryInitialized = true;
-        RefreshSquareWaveUiTrack(waveTrackA, waveHistoryA, curA ? InputACyanColor : InputACyanDimColor);
-        RefreshSquareWaveUiTrack(waveTrackB, waveHistoryB, curB ? InputBGoldColor : InputBGoldDimColor);
+        RefreshSquareWaveUiTrack(waveTrackA, waveHistoryA, GwThemeTokens.GetSignalColor(curA));
+        RefreshSquareWaveUiTrack(waveTrackB, waveHistoryB, GwThemeTokens.GetSignalColor(curB));
     }
 
     private void PushWaveHistoryStep(bool nextA, bool nextB)
@@ -1295,8 +1352,8 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         waveHistoryA[WaveStepCount - 1] = nextA;
         waveHistoryB[WaveStepCount - 1] = nextB;
 
-        RefreshSquareWaveUiTrack(waveTrackA, waveHistoryA, nextA ? InputACyanColor : InputACyanDimColor);
-        RefreshSquareWaveUiTrack(waveTrackB, waveHistoryB, nextB ? InputBGoldColor : InputBGoldDimColor);
+        RefreshSquareWaveUiTrack(waveTrackA, waveHistoryA, GwThemeTokens.GetSignalColor(nextA));
+        RefreshSquareWaveUiTrack(waveTrackB, waveHistoryB, GwThemeTokens.GetSignalColor(nextB));
     }
 
     private static void RefreshSquareWaveUiTrack(SquareWaveUiTrack track, bool[] history, Color waveColor)
@@ -1349,36 +1406,24 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
 
         if (txtInputATitle != null)
         {
-            textBuilder.Clear();
-            textBuilder.Append("A = ").Append(cachedInAName);
-            txtInputATitle.SetText(textBuilder);
+            txtInputATitle.text = cachedInAName;
         }
 
         if (txtInputAState != null)
         {
-            textBuilder.Clear();
-            textBuilder.Append(curA ? "[1] " : "[0] ")
-                .Append(curA ? cachedInA1 : cachedInA0)
-                .Append(curA ? " (HIGH)" : " (LOW)");
-            txtInputAState.color = curA ? SignalHighColor : SignalLowColor;
-            txtInputAState.SetText(textBuilder);
+            txtInputAState.text = curA ? StrOne : StrZero;
+            txtInputAState.color = GwThemeTokens.GetSignalColor(curA);
         }
 
         if (txtInputBTitle != null)
         {
-            textBuilder.Clear();
-            textBuilder.Append("B = ").Append(cachedInBName);
-            txtInputBTitle.SetText(textBuilder);
+            txtInputBTitle.text = cachedInBName;
         }
 
         if (txtInputBState != null)
         {
-            textBuilder.Clear();
-            textBuilder.Append(curB ? "[1] " : "[0] ")
-                .Append(curB ? cachedInB1 : cachedInB0)
-                .Append(curB ? " (HIGH)" : " (LOW)");
-            txtInputBState.color = curB ? SignalHighColor : SignalLowColor;
-            txtInputBState.SetText(textBuilder);
+            txtInputBState.text = curB ? StrOne : StrZero;
+            txtInputBState.color = GwThemeTokens.GetSignalColor(curB);
         }
     }
 
@@ -1396,7 +1441,7 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         int passedRowMask,
         int failedRowMask)
     {
-        // 1. Generator ekspresi Boolean live Zero-GC (StringBuilder + cycle guard visited)
+        // 1. Generator ekspresi Boolean live Zero-GC ("Y = NOT (A OR B)")
         BuildLiveBooleanExpressionZeroGc(outputNode, out bool isConnected, out bool hasMissingBranch, out bool hasCycle);
         lastFormulaIsComplete = isConnected && !hasMissingBranch && !hasCycle;
 
@@ -1405,56 +1450,101 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
             txtBooleanFormula.SetText(textBuilder);
             if (!isConnected)
             {
-                txtBooleanFormula.color = FormulaDisconnectedColor;
+                txtBooleanFormula.color = GwThemeTokens.TextSecondary;
             }
             else if (hasMissingBranch || hasCycle)
             {
-                txtBooleanFormula.color = FormulaIncompleteColor;
+                txtBooleanFormula.color = GwThemeTokens.AccentSwitchOrange;
             }
             else
             {
-                txtBooleanFormula.color = FormulaReadyColor;
+                txtBooleanFormula.color = GwThemeTokens.TextPrimary;
             }
         }
 
-        // 2. Baris status Output kontekstual live
+        // 2. Baris status Output kontekstual live (titik status + "LAB: 0 TERKUNCI")
+        bool curA = inputANode != null && inputANode.currentOutputValue;
+        bool curB = inputBNode != null && inputBNode.currentOutputValue;
+        int activeRow = (curA ? 2 : 0) + (curB ? 1 : 0);
+        int activeBit = 1 << activeRow;
+
+        bool outputTracked = isConnected && outputNode != null && outputNode.isTracked;
+        bool outVal = outputTracked && outputNode.currentOutputValue;
+
         if (txtOutputContext != null)
         {
             textBuilder.Clear();
             textBuilder.Append(cachedOutName).Append(": ");
-            if (isConnected && outputNode != null && outputNode.isTracked)
+            if (outputTracked)
             {
-                bool outVal = outputNode.currentOutputValue;
-                textBuilder.Append(outVal ? "1 [" : "0 [")
-                    .Append(outVal ? cachedOut1 : cachedOut0)
-                    .Append(']');
-                txtOutputContext.color = outVal ? SignalHighColor : SignalLowColor;
+                textBuilder.Append(outVal ? "1 " : "0 ")
+                    .Append(outVal ? cachedOut1 : cachedOut0);
             }
             else
             {
-                textBuilder.Append("-- [BELUM TERSAMBUNG]");
-                txtOutputContext.color = SignalIdleColor;
+                textBuilder.Append("--");
             }
+            txtOutputContext.color = GwThemeTokens.TextSecondary;
             txtOutputContext.SetText(textBuilder);
         }
 
-        // 3. Tabel Kebenaran Horizontal 4 Sel Sejajar: [0,0], [0,1], [1,0], [1,1]
-        bool curA = inputANode != null && inputANode.currentOutputValue;
-        bool curB = inputBNode != null && inputBNode.currentOutputValue;
-        int activeRow = (curA ? 2 : 0) + (curB ? 1 : 0);
-
-        bool outputReadyForActiveEval = lastFormulaIsComplete && outputNode != null && outputNode.isTracked;
-        if (isSandbox && !isVerifying && outputReadyForActiveEval)
+        if (imgOutputStatusDot != null)
         {
-            int bit = 1 << activeRow;
-            sandboxTestedRowMask |= bit;
-            if (outputNode.currentOutputValue)
+            Color dotColor;
+            if (!outputTracked)
             {
-                sandboxMeasuredHighMask |= bit;
+                dotColor = GwThemeTokens.SignalLowSlate;
+            }
+            else if (isSandbox)
+            {
+                dotColor = GwThemeTokens.GetSignalColor(outVal);
             }
             else
             {
-                sandboxMeasuredHighMask &= ~bit;
+                bool activeRowFailed = (failedRowMask & activeBit) != 0;
+                bool activeRowPassed = (passedRowMask & activeBit) != 0;
+                if (!activeRowFailed && !activeRowPassed && lastFormulaIsComplete && cachedHasExpectedTruth)
+                {
+                    bool expected = cachedExpectedTruth[activeRow];
+                    if (outVal == expected)
+                    {
+                        activeRowPassed = true;
+                    }
+                    else
+                    {
+                        activeRowFailed = true;
+                    }
+                }
+
+                if (activeRowFailed || failedRowMask != 0)
+                {
+                    dotColor = GwThemeTokens.StatusErrorRed;
+                }
+                else if (activeRowPassed)
+                {
+                    dotColor = GwThemeTokens.StatusPassEmerald;
+                }
+                else
+                {
+                    dotColor = GwThemeTokens.AccentSwitchOrange;
+                }
+            }
+
+            imgOutputStatusDot.color = dotColor;
+        }
+
+        // 3. Tabel Kebenaran Horizontal 4 Sel Sejajar: [0,0], [0,1], [1,0], [1,1]
+        bool outputReadyForActiveEval = lastFormulaIsComplete && outputNode != null && outputNode.isTracked;
+        if (isSandbox && !isVerifying && outputReadyForActiveEval)
+        {
+            sandboxTestedRowMask |= activeBit;
+            if (outputNode.currentOutputValue)
+            {
+                sandboxMeasuredHighMask |= activeBit;
+            }
+            else
+            {
+                sandboxMeasuredHighMask &= ~activeBit;
             }
         }
 
@@ -1478,18 +1568,21 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                 {
                     bool yVal = (sandboxMeasuredHighMask & rowBit) != 0;
                     textBuilder.Append(yVal ? '1' : '0');
-                    cell.txtSummary.color = yVal ? SignalHighColor : SignalLowColor;
+                    cell.txtSummary.color = GwThemeTokens.GetSignalColor(yVal);
                 }
                 else
                 {
                     textBuilder.Append('-');
-                    cell.txtSummary.color = isActiveRow ? CellTextPrimaryColor : CellTextMutedColor;
+                    cell.txtSummary.color = isActiveRow ? GwThemeTokens.TextPrimary : GwThemeTokens.TextSecondary;
                 }
                 cell.txtSummary.SetText(textBuilder);
 
-                SetCellStatusBadge(cell, state: 0);
-                cell.bgImage.color = isActiveRow ? CellActiveBgColor : CellIdleBgColor;
-                SetCellActiveBorder(cell, isActiveRow, isFailed: false);
+                cell.bgImage.color = GwThemeTokens.CardIdle;
+                ApplyCellBorderAndBar(
+                    cell,
+                    isActiveRow ? GwThemeTokens.HairlineActive : GwThemeTokens.HairlineIdle,
+                    isActiveRow,
+                    GwThemeTokens.SignalHighTeal);
                 continue;
             }
 
@@ -1502,23 +1595,27 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
             char yChar;
             int statusState; // 1 = OK, -1 = X, 0 = untested
             Color bgColor;
+            Color borderColor;
             Color textColor;
-            bool cellIsFailedVisual = false;
+            Color activeBarColor;
 
             if (isPassed)
             {
                 yChar = targetVal ? '1' : '0';
                 statusState = 1;
-                bgColor = CellPassedBgColor;
-                textColor = CellTextPrimaryColor;
+                bgColor = GwThemeTokens.SmokedGlassDense;
+                borderColor = GwThemeTokens.StatusPassEmerald;
+                textColor = GwThemeTokens.StatusPassText;
+                activeBarColor = GwThemeTokens.StatusPassEmerald;
             }
             else if (isFailed)
             {
                 yChar = targetVal ? '0' : '1';
                 statusState = -1;
-                bgColor = CellFailedBgColor;
-                textColor = CellTextPrimaryColor;
-                cellIsFailedVisual = true;
+                bgColor = GwThemeTokens.SmokedGlassDense;
+                borderColor = GwThemeTokens.StatusErrorRed;
+                textColor = GwThemeTokens.StatusErrorText;
+                activeBarColor = GwThemeTokens.StatusErrorRed;
             }
             else if (isActiveRow && (isCircuitCompleteLive || outputReadyForActiveEval) && outputNode != null && outputNode.isTracked && lastFormulaIsComplete)
             {
@@ -1526,78 +1623,85 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                 bool matchesTarget = cachedHasExpectedTruth && (liveY == targetVal);
                 yChar = liveY ? '1' : '0';
                 statusState = cachedHasExpectedTruth ? (matchesTarget ? 1 : -1) : 0;
-                bgColor = cachedHasExpectedTruth ? (matchesTarget ? CellPassedBgColor : CellFailedBgColor) : CellActiveBgColor;
-                textColor = CellTextPrimaryColor;
-                cellIsFailedVisual = cachedHasExpectedTruth && !matchesTarget;
+                if (cachedHasExpectedTruth)
+                {
+                    bgColor = GwThemeTokens.SmokedGlassDense;
+                    borderColor = matchesTarget ? GwThemeTokens.StatusPassEmerald : GwThemeTokens.StatusErrorRed;
+                    textColor = matchesTarget ? GwThemeTokens.StatusPassText : GwThemeTokens.StatusErrorText;
+                    activeBarColor = borderColor;
+                }
+                else
+                {
+                    bgColor = GwThemeTokens.CardIdle;
+                    borderColor = GwThemeTokens.HairlineActive;
+                    textColor = GwThemeTokens.TextPrimary;
+                    activeBarColor = GwThemeTokens.SignalHighTeal;
+                }
             }
             else
             {
-                // Belum diuji: Y:- tanpa lencana OK/X
+                // Belum diuji: "[0,0] -/1" tanpa lencana OK/X
                 yChar = '-';
                 statusState = 0;
-                bgColor = isActiveRow ? CellActiveBgColor : CellIdleBgColor;
-                textColor = isActiveRow ? CellTextPrimaryColor : CellTextMutedColor;
+                bgColor = GwThemeTokens.CardIdle;
+                borderColor = isActiveRow ? GwThemeTokens.HairlineActive : GwThemeTokens.HairlineIdle;
+                textColor = isActiveRow ? GwThemeTokens.TextPrimary : GwThemeTokens.TextSecondary;
+                activeBarColor = GwThemeTokens.SignalHighTeal;
             }
 
             textBuilder.Clear();
             textBuilder.Append(StrComboPrefixes[row])
-                .Append("Y:")
                 .Append(yChar)
-                .Append(" | TGT:")
+                .Append('/')
                 .Append(tgtChar);
+            if (statusState > 0)
+            {
+                textBuilder.Append(" OK");
+            }
+            else if (statusState < 0)
+            {
+                textBuilder.Append(" X");
+            }
+
             cell.txtSummary.color = textColor;
             cell.txtSummary.SetText(textBuilder);
-
-            SetCellStatusBadge(cell, statusState);
             cell.bgImage.color = bgColor;
-            SetCellActiveBorder(cell, isActiveRow, cellIsFailedVisual);
+            ApplyCellBorderAndBar(cell, borderColor, isActiveRow, activeBarColor);
         }
     }
 
-    private static void SetCellStatusBadge(TruthCellUi cell, int state)
+    private static void ApplyCellBorderAndBar(TruthCellUi cell, Color borderColor, bool isActiveRow, Color barColor)
     {
-        if (cell == null || cell.txtStatus == null || cell.statusPillBg == null)
+        if (cell == null)
         {
             return;
         }
 
-        if (state > 0)
+        if (cell.borderImage != null)
         {
-            cell.statusPillBg.enabled = true;
-            cell.statusPillBg.color = StatusPassPillBg;
-            cell.txtStatus.text = StrOk;
-            cell.txtStatus.color = StatusPassTextColor;
+            cell.borderImage.color = borderColor;
         }
-        else if (state < 0)
+        if (cell.activeBarImage != null)
         {
-            cell.statusPillBg.enabled = true;
-            cell.statusPillBg.color = StatusFailPillBg;
-            cell.txtStatus.text = StrFailX;
-            cell.txtStatus.color = StatusFailTextColor;
-        }
-        else
-        {
-            cell.statusPillBg.enabled = false;
-            cell.txtStatus.text = StrDash;
-            cell.txtStatus.color = CellTextMutedColor;
+            if (cell.activeBarImage.enabled != isActiveRow)
+            {
+                cell.activeBarImage.enabled = isActiveRow;
+            }
+            if (isActiveRow)
+            {
+                cell.activeBarImage.color = barColor;
+            }
         }
     }
 
-    private static void SetCellActiveBorder(TruthCellUi cell, bool isActive, bool isFailed)
+    /// <summary>
+    /// Menghasilkan snapshot string ekspresi Boolean rangkaian saat ini (dipanggil event-driven
+    /// satu kali saat Modal Verifikasi Menang terbuka, bukan di runtime loop).
+    /// </summary>
+    public string FormatBooleanExpressionSnapshot(GateNode outputNode)
     {
-        if (cell == null || cell.activeBorderImage == null)
-        {
-            return;
-        }
-
-        if (cell.activeBorderImage.enabled != isActive)
-        {
-            cell.activeBorderImage.enabled = isActive;
-        }
-        if (isActive)
-        {
-            cell.activeBorderImage.color = isFailed ? CellActiveRedBorderColor : CellActiveCyanBorderColor;
-        }
+        BuildLiveBooleanExpressionZeroGc(outputNode, out _, out _, out _);
+        return textBuilder.ToString();
     }
 
     private void BuildLiveBooleanExpressionZeroGc(
@@ -1610,8 +1714,6 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         formulaVisited.Clear();
         hasMissingBranch = false;
         hasCycle = false;
-
-        textBuilder.Append("EKSPRESI BOOLEAN: ");
 
         if (outputNode == null
             || !outputNode.isTracked
@@ -1801,7 +1903,6 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
     {
         Vector3 camPos = camT.position;
         Vector3 camForward = camT.forward;
-        Vector3 camUp = camT.up;
         Quaternion camRot = camT.rotation;
 
         int usedCount = 0;
@@ -1830,23 +1931,22 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                     ConfigureIeeeSymbolGeometry(slot, gate.nodeType);
                 }
 
-                Vector3 anchorPos = gate.statusLabel != null
-                    ? gate.statusLabel.transform.position
-                    : (gate.transform.position + (camUp * 0.30f));
+                // Melayang presisi tepat di atas jendela inti kaca asap gelap (Smoked Optical Glass Window y=0.144f)
+                Vector3 anchorPos = gate.transform.TransformPoint(new Vector3(0f, 0.218f, 0f));
 
                 float camDepth = Mathf.Max(0.65f, Vector3.Dot(anchorPos - camPos, camForward));
                 float distRatio = Mathf.Clamp(camDepth / ReferenceWorkbenchDepth, 0.16f, 2.25f);
                 float depthProximityGain = Mathf.Clamp(ReferenceWorkbenchDepth / camDepth, 0.50f, 2.80f);
                 float naturalZoomGain = Mathf.Clamp(zoomRatio * Mathf.Lerp(1f, depthProximityGain, 0.72f), 0.55f, 2.75f);
-                float worldScale = 1.06f * distRatio * naturalZoomGain;
+                float worldScale = 0.96f * distRatio * naturalZoomGain;
 
-                slot.rootTransform.position = anchorPos + (camUp * (0.148f * worldScale)) - (camForward * 0.014f);
+                slot.rootTransform.position = anchorPos - (camForward * 0.018f);
                 slot.rootTransform.rotation = camRot;
                 slot.rootTransform.localScale = Vector3.one * worldScale;
 
-                float strokeW = 0.0082f * worldScale;
-                float extraW = 0.0074f * worldScale;
-                float leadW = 0.0068f * worldScale;
+                float strokeW = 0.0080f * worldScale;
+                float extraW = 0.0072f * worldScale;
+                float leadW = 0.0066f * worldScale;
                 slot.bodyLine.widthMultiplier = strokeW;
                 slot.extraLine.widthMultiplier = extraW;
                 slot.leadInALine.widthMultiplier = leadW;
@@ -1864,7 +1964,10 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                 if (stateKey != slot.lastStateKey)
                 {
                     slot.lastStateKey = stateKey;
-                    Color bodyColor = !anyInConn
+                    Color bodyColor = gate.currentOutputValue
+                        ? SignalHighColor
+                        : new Color(SignalHighColor.r, SignalHighColor.g, SignalHighColor.b, 0.82f);
+                    Color outLeadColor = !anyInConn
                         ? SignalIdleColor
                         : (gate.currentOutputValue ? SignalHighColor : SignalLowColor);
                     Color inAColor = !gate.isInputAConnected
@@ -1876,7 +1979,7 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
 
                     ApplyLineColor(slot.bodyLine, slot.bodyMat, bodyColor);
                     ApplyLineColor(slot.extraLine, slot.extraMat, bodyColor);
-                    ApplyLineColor(slot.leadOutLine, slot.leadOutMat, bodyColor);
+                    ApplyLineColor(slot.leadOutLine, slot.leadOutMat, outLeadColor);
                     ApplyLineColor(slot.leadInALine, slot.leadInAMat, inAColor);
                     ApplyLineColor(slot.leadInBLine, slot.leadInBMat, inBColor);
                 }
@@ -2201,20 +2304,414 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         lastVerifyingFlag = -1;
     }
 
-    private static RectTransform CreateAnchorUiPanel(string name, RectTransform parent, float anchorMinX, float anchorMaxX, Color color)
+    // =========================================================================
+    // SINKRONISASI TEMA v8.5 TOP HUD BAR & TOAST BAWAH (ZERO-GC, 0 EDIT LEVELS/)
+    // =========================================================================
+
+    public void SyncExternalTopHudAndToastTheme(
+        LevelAndUIManager levelManager,
+        CircuitManager circuitManager,
+        bool isGuideOverlayOpen)
     {
-        GameObject obj = new GameObject(name, typeof(RectTransform), typeof(Image));
+        if (!externalHudThemeCached)
+        {
+            TryCacheExternalHudTargets(levelManager);
+            if (!externalHudThemeCached)
+            {
+                return;
+            }
+        }
+
+        externalHudThemeApplied = true;
+
+        // 1. Pill Level kiri (SmokedGlass + HairlineIdle 1px + 6px radius)
+        bool isSandbox = levelManager != null && levelManager.IsSandboxMode;
+        ApplyRect6IfChanged(extLevelPillBg, GwThemeTokens.SmokedGlass);
+        ApplyHairlineIfChanged(extLevelPillBorder, GwThemeTokens.HairlineIdle);
+        ApplyRect6IfChanged(extLevelBadgeBg, GwThemeTokens.CardIdle);
+        ApplyHairlineIfChanged(extLevelBadgeBorder, isSandbox ? GwThemeTokens.SignalHighTeal : GwThemeTokens.HairlineActive);
+        ApplyTmpColorIfChanged(extLevelBadgeTxt, GwThemeTokens.TextPrimary);
+        ApplyTmpColorIfChanged(extLevelTitleTxt, GwThemeTokens.TextPrimary);
+
+        // 2. Pill Misi tengah (SmokedGlass + HairlineIdle 1px + 6px radius)
+        ApplyRect6IfChanged(extMissionPillBg, GwThemeTokens.SmokedGlass);
+        ApplyHairlineIfChanged(extMissionPillBorder, GwThemeTokens.HairlineIdle);
+        ApplyTmpColorIfChanged(extMissionDescTxt, GwThemeTokens.TextPrimary);
+
+        // 3. Pill Kuota Gerbang kanan
+        bool isOverQuota = false;
+        if (!isSandbox
+            && circuitManager != null
+            && levelManager != null
+            && levelManager.levels != null
+            && levelManager.currentLevelIndex >= 0
+            && levelManager.currentLevelIndex < levelManager.levels.Count)
+        {
+            LevelScenario activeScenario = levelManager.levels[levelManager.currentLevelIndex];
+            if (activeScenario != null)
+            {
+                isOverQuota = circuitManager.activeGateCardsCount > activeScenario.maxGateCardsQuota;
+            }
+        }
+
+        DisableOutlineIfEnabled(extQuotaPillOutline);
+        ApplyRect6IfChanged(extQuotaPillBg, isOverQuota ? GwThemeTokens.SmokedGlassDense : GwThemeTokens.SmokedGlass);
+        ApplyHairlineIfChanged(extQuotaPillBorder, isOverQuota ? GwThemeTokens.StatusErrorRed : GwThemeTokens.HairlineIdle);
+        ApplyTmpColorIfChanged(
+            extQuotaStatusTxt,
+            isOverQuota
+                ? GwThemeTokens.StatusErrorText
+                : (isSandbox ? GwThemeTokens.SignalHighTeal : GwThemeTokens.TextPrimary));
+
+        // 4. Tombol Re-Center, '?', & Menu '=' (SmokedGlass + HairlineIdle 1px + 6px radius)
+        DisableOutlineIfEnabled(extRecenterOutline);
+        ApplyRect6IfChanged(extRecenterBg, GwThemeTokens.SmokedGlass);
+        ApplyHairlineIfChanged(extRecenterBorder, GwThemeTokens.HairlineIdle);
+        for (int i = 0; i < extRecenterIcons.Length; i++)
+        {
+            ApplyImageColorOnlyIfChanged(extRecenterIcons[i], GwThemeTokens.TextPrimary);
+        }
+
+        DisableOutlineIfEnabled(extGuideOutline);
+        ApplyRect6IfChanged(extGuideBg, isGuideOverlayOpen ? GwThemeTokens.CardIdle : GwThemeTokens.SmokedGlass);
+        ApplyHairlineIfChanged(extGuideBorder, isGuideOverlayOpen ? GwThemeTokens.HairlineActive : GwThemeTokens.HairlineIdle);
+        ApplyTmpColorIfChanged(extGuideIconTxt, GwThemeTokens.TextPrimary);
+
+        bool isMenuOpen = externalHudMenu != null && externalHudMenu.IsMenuDrawerOpen;
+        DisableOutlineIfEnabled(extMenuOutline);
+        ApplyRect6IfChanged(extMenuBg, isMenuOpen ? GwThemeTokens.CardIdle : GwThemeTokens.SmokedGlass);
+        ApplyHairlineIfChanged(extMenuBorder, isMenuOpen ? GwThemeTokens.HairlineActive : GwThemeTokens.HairlineIdle);
+        for (int i = 0; i < extMenuBars.Length; i++)
+        {
+            ApplyImageColorOnlyIfChanged(extMenuBars[i], GwThemeTokens.TextPrimary);
+        }
+
+        // 5. Toast Bawah ("Arahkan tangan ke kamera..." & feedback status)
+        DisableOutlineIfEnabled(extToastOutline);
+        if (extToastBackdropObj != null && extToastBackdropObj.activeSelf)
+        {
+            string msg = externalFeedbackText != null ? externalFeedbackText.text : string.Empty;
+            Color toastBorder = GwThemeTokens.HairlineIdle;
+            Color toastText = GwThemeTokens.TextPrimary;
+
+            if (!string.IsNullOrEmpty(msg))
+            {
+                if (msg.StartsWith("Gagal", StringComparison.Ordinal))
+                {
+                    toastBorder = GwThemeTokens.StatusErrorRed;
+                    toastText = GwThemeTokens.StatusErrorText;
+                }
+                else if (msg.StartsWith("BERHASIL", StringComparison.Ordinal)
+                         || msg.StartsWith("SELAMAT", StringComparison.Ordinal))
+                {
+                    toastBorder = GwThemeTokens.StatusPassEmerald;
+                    toastText = GwThemeTokens.StatusPassText;
+                }
+                else if (msg.StartsWith("[Petunjuk", StringComparison.Ordinal)
+                         || msg.StartsWith("Gerbang ", StringComparison.Ordinal)
+                         || msg.StartsWith("[Air-", StringComparison.Ordinal))
+                {
+                    toastBorder = GwThemeTokens.HairlineActive;
+                    toastText = GwThemeTokens.TextPrimary;
+                }
+            }
+
+            ApplyRect6IfChanged(extToastBg, GwThemeTokens.SmokedGlassDense);
+            ApplyHairlineIfChanged(extToastBorder, toastBorder);
+            ApplyTmpColorIfChanged(externalFeedbackText, toastText);
+        }
+        else
+        {
+            ApplyRect6IfChanged(extToastBg, GwThemeTokens.SmokedGlassDense);
+            ApplyHairlineIfChanged(extToastBorder, GwThemeTokens.HairlineIdle);
+        }
+    }
+
+    public void RestoreExternalTopHudAndToastTheme()
+    {
+        if (!externalHudThemeApplied)
+        {
+            return;
+        }
+
+        for (int i = 0; i < savedExternalImages.Count; i++)
+        {
+            SavedImageStyle s = savedExternalImages[i];
+            if (s.image != null)
+            {
+                s.image.sprite = s.sprite;
+                s.image.type = s.type;
+                s.image.pixelsPerUnitMultiplier = s.ppuMultiplier;
+                s.image.color = s.color;
+            }
+        }
+
+        for (int i = 0; i < savedExternalOutlines.Count; i++)
+        {
+            SavedOutlineStyle s = savedExternalOutlines[i];
+            if (s.outline != null)
+            {
+                s.outline.enabled = s.enabled;
+                s.outline.effectColor = s.effectColor;
+                s.outline.effectDistance = s.effectDistance;
+            }
+        }
+
+        for (int i = 0; i < savedExternalTmps.Count; i++)
+        {
+            SavedTmpStyle s = savedExternalTmps[i];
+            if (s.text != null)
+            {
+                s.text.color = s.color;
+            }
+        }
+
+        externalHudThemeApplied = false;
+    }
+
+    private void TryCacheExternalHudTargets(LevelAndUIManager levelManager)
+    {
+        Transform topBarTr = ResolveExternalTopBarTransform(levelManager);
+        if (topBarTr == null && externalFeedbackText == null)
+        {
+            return;
+        }
+
+        savedExternalImages.Clear();
+        savedExternalOutlines.Clear();
+        savedExternalTmps.Clear();
+
+        if (topBarTr != null)
+        {
+            Transform levelPillTr = topBarTr.Find("Pill_TopLevel");
+            if (levelPillTr != null)
+            {
+                extLevelPillBg = CaptureImage(levelPillTr.GetComponent<Image>());
+                extLevelPillBorder = CaptureChildImage(levelPillTr, "Pill_TopLevel_Border");
+                Transform badgeTr = levelPillTr.Find("Badge_LevelTag");
+                if (badgeTr != null)
+                {
+                    extLevelBadgeBg = CaptureImage(badgeTr.GetComponent<Image>());
+                    extLevelBadgeBorder = CaptureChildImage(badgeTr, "Badge_LevelTag_Border");
+                    Transform badgeTxtTr = badgeTr.Find("Txt_LevelBadge");
+                    if (badgeTxtTr != null)
+                    {
+                        extLevelBadgeTxt = CaptureTmp(badgeTxtTr.GetComponent<TMP_Text>());
+                    }
+                }
+            }
+
+            if (levelManager != null)
+            {
+                extLevelTitleTxt = CaptureTmp(levelManager.txtLevelTitle);
+                extMissionDescTxt = CaptureTmp(levelManager.txtMissionDesc);
+                extQuotaStatusTxt = CaptureTmp(levelManager.txtQuotaStatus);
+            }
+
+            Transform missionPillTr = topBarTr.Find("Pill_TopMission");
+            if (missionPillTr != null)
+            {
+                extMissionPillBg = CaptureImage(missionPillTr.GetComponent<Image>());
+                extMissionPillBorder = CaptureChildImage(missionPillTr, "Pill_TopMission_Border");
+            }
+
+            Transform quotaPillTr = topBarTr.Find("Quota_AlertPill");
+            if (quotaPillTr != null)
+            {
+                extQuotaPillBg = CaptureImage(quotaPillTr.GetComponent<Image>());
+                extQuotaPillBorder = CaptureChildImage(quotaPillTr, "Quota_AlertPill_Border");
+                extQuotaPillOutline = CaptureOutline(quotaPillTr.GetComponent<Outline>());
+            }
+
+            Transform recenterTr = topBarTr.Find("Btn_AirStageRecenter");
+            if (recenterTr != null)
+            {
+                extRecenterBg = CaptureImage(recenterTr.GetComponent<Image>());
+                extRecenterBorder = CaptureChildImage(recenterTr, "Btn_AirStageRecenter_Border");
+                extRecenterOutline = CaptureOutline(recenterTr.GetComponent<Outline>());
+                extRecenterIcons[0] = CaptureChildImage(recenterTr, "Icon_RecenterRing");
+                extRecenterIcons[1] = CaptureChildImage(recenterTr, "Icon_RecenterDot");
+                extRecenterIcons[2] = CaptureChildImage(recenterTr, "Icon_RecenterTop");
+                extRecenterIcons[3] = CaptureChildImage(recenterTr, "Icon_RecenterBottom");
+                extRecenterIcons[4] = CaptureChildImage(recenterTr, "Icon_RecenterLeft");
+                extRecenterIcons[5] = CaptureChildImage(recenterTr, "Icon_RecenterRight");
+            }
+
+            Transform guideTr = topBarTr.Find("Btn_AirGestureGuide");
+            if (guideTr != null)
+            {
+                extGuideBg = CaptureImage(guideTr.GetComponent<Image>());
+                extGuideBorder = CaptureChildImage(guideTr, "Btn_AirGestureGuide_Border");
+                extGuideOutline = CaptureOutline(guideTr.GetComponent<Outline>());
+                Transform guideTxtTr = guideTr.Find("Txt_GuideIcon");
+                if (guideTxtTr != null)
+                {
+                    extGuideIconTxt = CaptureTmp(guideTxtTr.GetComponent<TMP_Text>());
+                }
+            }
+
+            Transform menuTr = topBarTr.Find("Btn_CompactMenu");
+            if (menuTr != null)
+            {
+                extMenuBg = CaptureImage(menuTr.GetComponent<Image>());
+                extMenuBorder = CaptureChildImage(menuTr, "Btn_CompactMenu_Border");
+                extMenuOutline = CaptureOutline(menuTr.GetComponent<Outline>());
+                extMenuBars[0] = CaptureChildImage(menuTr, "Bar_Top");
+                extMenuBars[1] = CaptureChildImage(menuTr, "Bar_Mid");
+                extMenuBars[2] = CaptureChildImage(menuTr, "Bar_Bot");
+            }
+        }
+
+        if (externalFeedbackText != null)
+        {
+            CaptureTmp(externalFeedbackText);
+            RectTransform fbRect = externalFeedbackText.rectTransform;
+            Transform fbParent = fbRect != null ? fbRect.parent : null;
+            if (fbParent != null)
+            {
+                Transform toastBgTr = fbParent.Find("Txt_Feedback_Backdrop");
+                if (toastBgTr != null)
+                {
+                    extToastBackdropObj = toastBgTr.gameObject;
+                    extToastBg = CaptureImage(toastBgTr.GetComponent<Image>());
+                    extToastBorder = CaptureChildImage(toastBgTr, "Txt_Feedback_Backdrop_Border");
+                    extToastOutline = CaptureOutline(toastBgTr.GetComponent<Outline>());
+                }
+            }
+        }
+
+        externalHudThemeCached = savedExternalImages.Count > 0 || savedExternalTmps.Count > 0;
+    }
+
+    private Transform ResolveExternalTopBarTransform(LevelAndUIManager levelManager)
+    {
+        if (levelManager != null && levelManager.txtLevelTitle != null)
+        {
+            Transform pillTr = levelManager.txtLevelTitle.transform.parent;
+            if (pillTr != null && pillTr.parent != null)
+            {
+                return pillTr.parent;
+            }
+        }
+
+        if (externalHudMenu != null && externalHudMenu.TargetCanvas != null)
+        {
+            return externalHudMenu.TargetCanvas.transform.Find("Panel_TopHud");
+        }
+
+        return null;
+    }
+
+    private Image CaptureChildImage(Transform parent, string childName)
+    {
+        if (parent == null)
+        {
+            return null;
+        }
+
+        Transform child = parent.Find(childName);
+        return child != null ? CaptureImage(child.GetComponent<Image>()) : null;
+    }
+
+    private Image CaptureImage(Image img)
+    {
+        if (img == null)
+        {
+            return null;
+        }
+
+        savedExternalImages.Add(new SavedImageStyle
+        {
+            image = img,
+            sprite = img.sprite,
+            type = img.type,
+            ppuMultiplier = img.pixelsPerUnitMultiplier,
+            color = img.color
+        });
+        return img;
+    }
+
+    private Outline CaptureOutline(Outline outline)
+    {
+        if (outline == null)
+        {
+            return null;
+        }
+
+        savedExternalOutlines.Add(new SavedOutlineStyle
+        {
+            outline = outline,
+            enabled = outline.enabled,
+            effectColor = outline.effectColor,
+            effectDistance = outline.effectDistance
+        });
+        return outline;
+    }
+
+    private TMP_Text CaptureTmp(TMP_Text tmp)
+    {
+        if (tmp == null)
+        {
+            return null;
+        }
+
+        savedExternalTmps.Add(new SavedTmpStyle
+        {
+            text = tmp,
+            color = tmp.color
+        });
+        return tmp;
+    }
+
+    private static void ApplyRect6IfChanged(Image img, Color color)
+    {
+        if (img != null)
+        {
+            GwThemeTokens.ApplyRoundedRect6(img, color);
+        }
+    }
+
+    private static void ApplyHairlineIfChanged(Image img, Color color)
+    {
+        if (img != null)
+        {
+            GwThemeTokens.ApplyHairlineBorder6(img, color);
+        }
+    }
+
+    private static void ApplyImageColorOnlyIfChanged(Image img, Color color)
+    {
+        if (img != null && img.color != color)
+        {
+            img.color = color;
+        }
+    }
+
+    private static void ApplyTmpColorIfChanged(TMP_Text tmp, Color color)
+    {
+        if (tmp != null && tmp.color != color)
+        {
+            tmp.color = color;
+        }
+    }
+
+    private static void DisableOutlineIfEnabled(Outline outline)
+    {
+        if (outline != null && outline.enabled)
+        {
+            outline.enabled = false;
+        }
+    }
+
+    private static RectTransform CreateTransparentAnchorContainer(string name, RectTransform parent, float anchorMinX, float anchorMaxX)
+    {
+        GameObject obj = new GameObject(name, typeof(RectTransform));
         obj.transform.SetParent(parent, false);
         RectTransform rect = obj.GetComponent<RectTransform>();
         rect.anchorMin = new Vector2(anchorMinX, 0f);
         rect.anchorMax = new Vector2(anchorMaxX, 1f);
-        rect.offsetMin = new Vector2(0f, 2f);
-        rect.offsetMax = new Vector2(0f, -2f);
-
-        Image img = obj.GetComponent<Image>();
-        img.color = color;
-        img.raycastTarget = false;
-        CompactHudMenuController.ApplyRoundedSquircle(img);
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
         return rect;
     }
 
@@ -2227,8 +2724,8 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
             new Vector2(anchorX, 0.5f),
             new Vector2(0.5f, 0.5f),
             Vector2.zero,
-            new Vector2(1.5f, height),
-            StripDividerColor);
+            new Vector2(GwThemeTokens.HairlineBorderPx, height),
+            GwThemeTokens.HairlineIdle);
     }
 
     private static Image CreateUiRectImage(
@@ -2268,7 +2765,8 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         float maxSize,
         Color color,
         TextAlignmentOptions alignment,
-        string initialText)
+        string initialText,
+        FontStyles fontStyle = FontStyles.Bold)
     {
         GameObject obj = new GameObject(name, typeof(RectTransform), typeof(TextMeshProUGUI));
         obj.transform.SetParent(parent, false);
@@ -2288,7 +2786,7 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
         tmp.enableAutoSizing = true;
         tmp.fontSizeMin = minSize;
         tmp.fontSizeMax = maxSize;
-        tmp.fontStyle = FontStyles.Bold;
+        tmp.fontStyle = fontStyle;
         tmp.alignment = alignment;
         tmp.textWrappingMode = TextWrappingModes.NoWrap;
         tmp.color = color;
