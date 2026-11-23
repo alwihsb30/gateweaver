@@ -1903,7 +1903,6 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
     {
         Vector3 camPos = camT.position;
         Vector3 camForward = camT.forward;
-        Vector3 camUp = camT.up;
         Quaternion camRot = camT.rotation;
 
         int usedCount = 0;
@@ -1932,23 +1931,22 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                     ConfigureIeeeSymbolGeometry(slot, gate.nodeType);
                 }
 
-                Vector3 anchorPos = gate.statusLabel != null
-                    ? gate.statusLabel.transform.position
-                    : (gate.transform.position + (camUp * 0.30f));
+                // Melayang presisi tepat di atas jendela inti kaca asap gelap (Smoked Optical Glass Window y=0.144f)
+                Vector3 anchorPos = gate.transform.TransformPoint(new Vector3(0f, 0.218f, 0f));
 
                 float camDepth = Mathf.Max(0.65f, Vector3.Dot(anchorPos - camPos, camForward));
                 float distRatio = Mathf.Clamp(camDepth / ReferenceWorkbenchDepth, 0.16f, 2.25f);
                 float depthProximityGain = Mathf.Clamp(ReferenceWorkbenchDepth / camDepth, 0.50f, 2.80f);
                 float naturalZoomGain = Mathf.Clamp(zoomRatio * Mathf.Lerp(1f, depthProximityGain, 0.72f), 0.55f, 2.75f);
-                float worldScale = 1.06f * distRatio * naturalZoomGain;
+                float worldScale = 0.96f * distRatio * naturalZoomGain;
 
-                slot.rootTransform.position = anchorPos + (camUp * (0.148f * worldScale)) - (camForward * 0.014f);
+                slot.rootTransform.position = anchorPos - (camForward * 0.018f);
                 slot.rootTransform.rotation = camRot;
                 slot.rootTransform.localScale = Vector3.one * worldScale;
 
-                float strokeW = 0.0082f * worldScale;
-                float extraW = 0.0074f * worldScale;
-                float leadW = 0.0068f * worldScale;
+                float strokeW = 0.0080f * worldScale;
+                float extraW = 0.0072f * worldScale;
+                float leadW = 0.0066f * worldScale;
                 slot.bodyLine.widthMultiplier = strokeW;
                 slot.extraLine.widthMultiplier = extraW;
                 slot.leadInALine.widthMultiplier = leadW;
@@ -1966,7 +1964,10 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
                 if (stateKey != slot.lastStateKey)
                 {
                     slot.lastStateKey = stateKey;
-                    Color bodyColor = !anyInConn
+                    Color bodyColor = gate.currentOutputValue
+                        ? SignalHighColor
+                        : new Color(SignalHighColor.r, SignalHighColor.g, SignalHighColor.b, 0.82f);
+                    Color outLeadColor = !anyInConn
                         ? SignalIdleColor
                         : (gate.currentOutputValue ? SignalHighColor : SignalLowColor);
                     Color inAColor = !gate.isInputAConnected
@@ -1978,7 +1979,7 @@ public sealed class AirWeavingPedagogicalHud : MonoBehaviour
 
                     ApplyLineColor(slot.bodyLine, slot.bodyMat, bodyColor);
                     ApplyLineColor(slot.extraLine, slot.extraMat, bodyColor);
-                    ApplyLineColor(slot.leadOutLine, slot.leadOutMat, bodyColor);
+                    ApplyLineColor(slot.leadOutLine, slot.leadOutMat, outLeadColor);
                     ApplyLineColor(slot.leadInALine, slot.leadInAMat, inAColor);
                     ApplyLineColor(slot.leadInBLine, slot.leadInBMat, inBColor);
                 }

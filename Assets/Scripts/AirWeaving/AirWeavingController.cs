@@ -52,7 +52,7 @@ public class AirWeavingController : MonoBehaviour
     private const float InputAHoverHeight = BaseHoverHeight + 0.050f;
     private const float InputBHoverHeight = BaseHoverHeight + 0.014f;
     private const float OutputHoverHeight = BaseHoverHeight + 0.032f;
-    private const float ParkingRackHoverHeight = 0.340f;
+    private const float ParkingRackHoverHeight = 0.115f;
     private const float ArenaArcHeightY = 0.028f;
     private const float ParkingRackArcDepthZ = 0.150f;
     private const float InputATerminalArcYawDeg = 22.0f;
@@ -284,7 +284,6 @@ public class AirWeavingController : MonoBehaviour
     private static readonly Color HoverGrabbedRingColor = new Color(1.00f, 0.88f, 0.26f, 0.96f);
     private static readonly Color HoverReturnRackColor = new Color(1.00f, 0.56f, 0.26f, 0.95f);
     private static readonly Color HoverInputRingColor = new Color(0.42f, 1.00f, 0.68f, 0.92f);
-    private static readonly Color AirWeavingLabelPillColor = new Color(0.02f, 0.05f, 0.11f, 0.94f);
     private static readonly Color FeedbackActiveColor = new Color(0.35f, 0.96f, 1.00f, 1.00f);
     private static readonly Color FeedbackPinchColor = new Color(0.76f, 1.00f, 0.30f, 1.00f);
     private static readonly Color FeedbackWaitingColor = new Color(1.00f, 0.82f, 0.34f, 1.00f);
@@ -720,14 +719,32 @@ public class AirWeavingController : MonoBehaviour
         public GateNode node;
         public Vector3 originalLocalPos;
         public Vector3 originalLocalScale;
+        public Color originalTextColor;
         public MeshRenderer labelMeshRenderer;
         public int originalSortingOrder;
+        public GameObject backdropObj;
+        public bool originalBackdropActive;
+        public Renderer backdropRenderer;
+        public bool originalBackdropEnabled;
         public Material backdropMat;
         public Color originalBackdropColor;
         public int originalBackdropQueue;
+        public GameObject pipObj;
+        public bool originalPipActive;
+        public Renderer pipRenderer;
+        public bool originalPipEnabled;
         public Material pipMat;
+        public Color originalPipColor;
         public int originalPipQueue;
+        public GameObject v85PillRootObj;
+        public SpriteRenderer v85BackdropRenderer;
+        public SpriteRenderer v85BorderRenderer;
+        public string lastObservedLabelText;
     }
+
+    private const float V85LabelPillSpriteScale = 0.12f;
+    private Material v85LabelBackdropSharedMat;
+    private Material v85LabelBorderSharedMat;
 
     private readonly List<SavedNodeLabelStyle> savedNodeLabelStyles = new List<SavedNodeLabelStyle>(12);
     private Transform cachedOutputTruthPodRootTransform;
@@ -4701,8 +4718,8 @@ public class AirWeavingController : MonoBehaviour
     {
         int safeIdx = Mathf.Clamp(slotIndex, 0, ParkingSlotBaseX.Length - 1);
         float normX = (safeIdx - 2.0f) * 0.5f;
-        float archOffset = 0.028f * (1f - (normX * normX));
-        float staggerOffset = ((safeIdx & 1) == 0) ? 0.012f : -0.010f;
+        float archOffset = 0.010f * (1f - (normX * normX));
+        float staggerOffset = ((safeIdx & 1) == 0) ? 0.004f : -0.004f;
         return ParkingRackHoverHeight + archOffset + staggerOffset;
     }
 
@@ -9340,15 +9357,31 @@ public class AirWeavingController : MonoBehaviour
         pinchRingMat = null;
         hoverRingMat = null;
         airDrawStrokeMat = null;
+        v85LabelBackdropSharedMat = null;
+        v85LabelBorderSharedMat = null;
     }
 
     /// <summary>
     /// Merapikan offset ketinggian Label_Status3D agar duduk dekat di atas masing-masing objek (anti-tabrakan dengan HUD atas),
-    /// mempertegas pil gelap AR_LabelBackdrop, &amp; mengangkat renderQueue (2998..3000) khusus selama Mode Udara aktif (0 diff di GateNode.cs).
+    /// menyeragamkan seluruh label 3D (KARTU, MODE, LAB, AND..NOT) ke gaya GwThemeTokens (SmokedGlassDense + hairline 1px +
+    /// TextPrimary/SignalTeal/StatusPassText), menyembunyikan strip bar biru/kuning tebal lama di Mode Udara,
+    /// dan memulihkan 100% saat kembali ke Mode Kartu v5 (0 diff di GateNode.cs).
     /// </summary>
     private void ApplyAirWeavingLabelReadabilityStyles()
     {
         RestoreAirWeavingLabelReadabilityStyles();
+
+        if (v85LabelBackdropSharedMat == null)
+        {
+            v85LabelBackdropSharedMat = CreateSafeSpritesMaterial(Color.white, 2998);
+        }
+        if (v85LabelBorderSharedMat == null)
+        {
+            v85LabelBorderSharedMat = CreateSafeSpritesMaterial(Color.white, 2999);
+        }
+
+        Sprite roundedSprite = GwThemeTokens.GetRoundedRect6Sprite();
+        Sprite borderSprite = GwThemeTokens.GetHairlineBorder6Sprite();
 
         for (int i = 0; i < cachedGateNodes.Count; i++)
         {
@@ -9361,28 +9394,123 @@ public class AirWeavingController : MonoBehaviour
             Transform labelT = node.statusLabel.transform;
             MeshRenderer labelMr = node.statusLabel.GetComponent<MeshRenderer>();
             Transform backdropT = labelT.Find("AR_LabelBackdrop");
+            GameObject backdropObj = backdropT != null ? backdropT.gameObject : null;
             Renderer backdropRend = backdropT != null ? backdropT.GetComponent<Renderer>() : null;
             Material backdropMat = backdropRend != null ? backdropRend.sharedMaterial : null;
             Transform pipT = labelT.Find("AR_LabelIdentityPip");
+            GameObject pipObj = pipT != null ? pipT.gameObject : null;
             Renderer pipRend = pipT != null ? pipT.GetComponent<Renderer>() : null;
             Material pipMat = pipRend != null ? pipRend.sharedMaterial : null;
+
+            bool isLogicGate = node.nodeType != NodeType.InputSource && node.nodeType != NodeType.OutputActuator;
+            Vector2 initialSlicedSize = ComputeTightLabelSlicedSize(node.statusLabel, node.statusLabel.text);
+
+            Transform existingPillT = labelT.Find("AR_V85LabelPillRoot");
+            GameObject pillRootObj;
+            SpriteRenderer pillBgSr;
+            SpriteRenderer pillBorderSr;
+
+            if (existingPillT != null)
+            {
+                pillRootObj = existingPillT.gameObject;
+                Transform bgT = existingPillT.Find("Pill_Backdrop");
+                Transform bdT = existingPillT.Find("Pill_Border");
+                pillBgSr = bgT != null ? bgT.GetComponent<SpriteRenderer>() : null;
+                pillBorderSr = bdT != null ? bdT.GetComponent<SpriteRenderer>() : null;
+                if (bgT != null)
+                {
+                    bgT.localScale = Vector3.one * V85LabelPillSpriteScale;
+                }
+                if (bdT != null)
+                {
+                    bdT.localScale = Vector3.one * V85LabelPillSpriteScale;
+                }
+            }
+            else
+            {
+                pillRootObj = new GameObject("AR_V85LabelPillRoot");
+                pillRootObj.transform.SetParent(labelT, false);
+                pillRootObj.transform.localPosition = Vector3.zero;
+                pillRootObj.transform.localRotation = Quaternion.identity;
+                pillRootObj.transform.localScale = Vector3.one;
+
+                GameObject bgObj = new GameObject("Pill_Backdrop");
+                bgObj.transform.SetParent(pillRootObj.transform, false);
+                bgObj.transform.localPosition = new Vector3(0f, 0f, 0.010f);
+                bgObj.transform.localRotation = Quaternion.identity;
+                bgObj.transform.localScale = Vector3.one * V85LabelPillSpriteScale;
+                pillBgSr = bgObj.AddComponent<SpriteRenderer>();
+                pillBgSr.sprite = roundedSprite;
+                pillBgSr.drawMode = SpriteDrawMode.Sliced;
+                pillBgSr.sortingOrder = 18;
+                pillBgSr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                pillBgSr.receiveShadows = false;
+                if (v85LabelBackdropSharedMat != null)
+                {
+                    pillBgSr.sharedMaterial = v85LabelBackdropSharedMat;
+                }
+
+                GameObject bdObj = new GameObject("Pill_Border");
+                bdObj.transform.SetParent(pillRootObj.transform, false);
+                bdObj.transform.localPosition = new Vector3(0f, 0f, 0.008f);
+                bdObj.transform.localRotation = Quaternion.identity;
+                bdObj.transform.localScale = Vector3.one * V85LabelPillSpriteScale;
+                pillBorderSr = bdObj.AddComponent<SpriteRenderer>();
+                pillBorderSr.sprite = borderSprite;
+                pillBorderSr.drawMode = SpriteDrawMode.Sliced;
+                pillBorderSr.sortingOrder = 19;
+                pillBorderSr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                pillBorderSr.receiveShadows = false;
+                if (v85LabelBorderSharedMat != null)
+                {
+                    pillBorderSr.sharedMaterial = v85LabelBorderSharedMat;
+                }
+            }
+
+            if (pillBgSr != null)
+            {
+                pillBgSr.size = initialSlicedSize;
+                pillBgSr.color = GwThemeTokens.SmokedGlassDense;
+            }
+            if (pillBorderSr != null)
+            {
+                pillBorderSr.size = initialSlicedSize;
+                pillBorderSr.color = GwThemeTokens.HairlineIdle;
+            }
+            if (!pillRootObj.activeSelf)
+            {
+                pillRootObj.SetActive(true);
+            }
 
             SavedNodeLabelStyle saved = new SavedNodeLabelStyle
             {
                 node = node,
                 originalLocalPos = labelT.localPosition,
                 originalLocalScale = labelT.localScale,
+                originalTextColor = node.statusLabel.color,
                 labelMeshRenderer = labelMr,
                 originalSortingOrder = labelMr != null ? labelMr.sortingOrder : 0,
+                backdropObj = backdropObj,
+                originalBackdropActive = backdropObj != null && backdropObj.activeSelf,
+                backdropRenderer = backdropRend,
+                originalBackdropEnabled = backdropRend != null && backdropRend.enabled,
                 backdropMat = backdropMat,
                 originalBackdropColor = backdropMat != null ? backdropMat.color : Color.black,
                 originalBackdropQueue = backdropMat != null ? backdropMat.renderQueue : 2995,
+                pipObj = pipObj,
+                originalPipActive = pipObj != null && pipObj.activeSelf,
+                pipRenderer = pipRend,
+                originalPipEnabled = pipRend != null && pipRend.enabled,
                 pipMat = pipMat,
-                originalPipQueue = pipMat != null ? pipMat.renderQueue : 2996
+                originalPipColor = pipMat != null ? pipMat.color : Color.white,
+                originalPipQueue = pipMat != null ? pipMat.renderQueue : 2996,
+                v85PillRootObj = pillRootObj,
+                v85BackdropRenderer = pillBgSr,
+                v85BorderRenderer = pillBorderSr,
+                lastObservedLabelText = node.statusLabel.text
             };
             savedNodeLabelStyles.Add(saved);
 
-            bool isLogicGate = node.nodeType != NodeType.InputSource && node.nodeType != NodeType.OutputActuator;
             Vector3 compactPos = saved.originalLocalPos;
             compactPos.y = Mathf.Max(0.46f, saved.originalLocalPos.y - (isLogicGate ? 0.065f : 0.055f));
             compactPos.z = 0.0f;
@@ -9392,18 +9520,56 @@ public class AirWeavingController : MonoBehaviour
             {
                 labelMr.sortingOrder = 20;
             }
+
+            // Sembunyikan quad backdrop lama & strip bar biru/kuning tebal lama selama Mode Udara aktif
+            // (termasuk alpha 0 & SetActive(false) pada pipObj agar kebal RestoreExternalChildRenderers() di GateNode.cs)
             if (backdropMat != null)
             {
-                backdropMat.color = AirWeavingLabelPillColor;
-                backdropMat.renderQueue = 2998;
+                backdropMat.color = Color.clear;
+            }
+            if (backdropRend != null)
+            {
+                backdropRend.enabled = false;
             }
             if (pipMat != null)
             {
-                pipMat.renderQueue = 2999;
+                pipMat.color = Color.clear;
+            }
+            if (pipRend != null)
+            {
+                pipRend.enabled = false;
+            }
+            if (pipObj != null && pipObj.activeSelf)
+            {
+                pipObj.SetActive(false);
             }
         }
 
         SuppressLegacyOutputTruthPodForAirMode();
+    }
+
+    private static Vector2 ComputeTightLabelSlicedSize(TMP_Text label, string text)
+    {
+        if (label == null)
+        {
+            return new Vector2(0.32f / V85LabelPillSpriteScale, 0.088f / V85LabelPillSpriteScale);
+        }
+
+        Vector2 pref = string.IsNullOrEmpty(text)
+            ? label.GetPreferredValues()
+            : label.GetPreferredValues(text);
+
+        // Padding tipis rapat (~15-18% + margin mikro) mengikuti renderedWidth/bounds teks 3D aktual (fontSize=0.55f)
+        float tightWidth = pref.x > 0.005f
+            ? Mathf.Clamp((pref.x * 1.15f) + 0.028f, 0.145f, 0.92f)
+            : 0.28f;
+        float tightHeight = pref.y > 0.005f
+            ? Mathf.Clamp((pref.y * 1.22f) + 0.014f, 0.076f, 0.104f)
+            : 0.088f;
+
+        return new Vector2(
+            tightWidth / V85LabelPillSpriteScale,
+            tightHeight / V85LabelPillSpriteScale);
     }
 
     private void SuppressLegacyOutputTruthPodForAirMode()
@@ -9470,28 +9636,50 @@ public class AirWeavingController : MonoBehaviour
             {
                 s.node.statusLabel.transform.localPosition = s.originalLocalPos;
                 s.node.statusLabel.transform.localScale = s.originalLocalScale;
+                s.node.statusLabel.color = s.originalTextColor;
             }
             if (s.labelMeshRenderer != null)
             {
                 s.labelMeshRenderer.sortingOrder = s.originalSortingOrder;
+            }
+            if (s.backdropObj != null && s.backdropObj.activeSelf != s.originalBackdropActive)
+            {
+                s.backdropObj.SetActive(s.originalBackdropActive);
+            }
+            if (s.backdropRenderer != null)
+            {
+                s.backdropRenderer.enabled = s.originalBackdropEnabled;
             }
             if (s.backdropMat != null)
             {
                 s.backdropMat.color = s.originalBackdropColor;
                 s.backdropMat.renderQueue = s.originalBackdropQueue;
             }
+            if (s.pipObj != null && s.pipObj.activeSelf != s.originalPipActive)
+            {
+                s.pipObj.SetActive(s.originalPipActive);
+            }
+            if (s.pipRenderer != null)
+            {
+                s.pipRenderer.enabled = s.originalPipEnabled;
+            }
             if (s.pipMat != null)
             {
+                s.pipMat.color = s.originalPipColor;
                 s.pipMat.renderQueue = s.originalPipQueue;
+            }
+            if (s.v85PillRootObj != null && s.v85PillRootObj.activeSelf)
+            {
+                s.v85PillRootObj.SetActive(false);
             }
         }
         savedNodeLabelStyles.Clear();
     }
 
     /// <summary>
-    /// Mengatur skala alami &amp; keterbacaan seluruh label world-space 3D (KARTU, MODE, LAB, AND/OR/XOR/NAND/NOT)
-    /// agar ~1.5x lebih besar pada zoom default dan ikut membesar proporsional saat di-zoom masuk / didekatkan,
-    /// sekaligus menyupresi OutputTruthPod3D 2x2 lama (digantikan Kartu 2D Tabel Kebenaran Tahap 10). Zero-GC.
+    /// Mengatur skala alami, ukuran pil 9-slice rapat mengikuti teks, warna GwThemeTokens (TextPrimary / SignalTeal / StatusPassText),
+    /// &amp; border hairline 1px seluruh label world-space 3D (KARTU, MODE, LAB, AND/OR/XOR/NAND/NOT) di LateUpdate,
+    /// sekaligus menyupresi OutputTruthPod3D 2x2 lama dan bar biru/kuning lama. Zero-GC.
     /// </summary>
     private void UpdateAirWeavingLabelsAndTruthPodSpatialPose(Camera mainCam)
     {
@@ -9508,13 +9696,27 @@ public class AirWeavingController : MonoBehaviour
         float stageZoom = stageController != null ? stageController.CurrentZoomScale : AirWeavingStageController.DefaultZoomScale;
         float zoomRatio = Mathf.Max(0.20f, stageZoom / AirWeavingStageController.DefaultZoomScale);
 
-        // 1. Skala Label 3D (Input A/B, Output, & 5 gerbang): ~1.5x lebih besar & ikut membesar alami hingga 2.85x saat zoom masuk
+        // 1. Skala, Ukuran Pil Rapat, & Warna Label 3D (Input A/B, Output, & 5 gerbang) sesuai GwThemeTokens
         for (int i = 0; i < savedNodeLabelStyles.Count; i++)
         {
             SavedNodeLabelStyle s = savedNodeLabelStyles[i];
             if (s.node == null || s.node.statusLabel == null)
             {
                 continue;
+            }
+
+            // Pastikan quad backdrop lama & strip bar biru/kuning lama tetap mati setelah RestoreExternalChildRenderers() di Update()
+            if (s.backdropRenderer != null && s.backdropRenderer.enabled)
+            {
+                s.backdropRenderer.enabled = false;
+            }
+            if (s.pipRenderer != null && s.pipRenderer.enabled)
+            {
+                s.pipRenderer.enabled = false;
+            }
+            if (s.pipObj != null && s.pipObj.activeSelf)
+            {
+                s.pipObj.SetActive(false);
             }
 
             Transform labelT = s.node.statusLabel.transform;
@@ -9533,6 +9735,58 @@ public class AirWeavingController : MonoBehaviour
             float parentScale = Mathf.Max(0.08f, s.node.transform.localScale.x);
             float clampedLocalScale = Mathf.Clamp(desiredWorldLabelScale / parentScale, 0.04f, 2.65f);
             labelT.localScale = Vector3.one * clampedLocalScale;
+
+            // Hitung ulang ukuran pil 9-slice rapat bila teks label berubah (Zero-GC string reference check)
+            string curText = s.node.statusLabel.text;
+            if (!ReferenceEquals(curText, s.lastObservedLabelText)
+                && !string.Equals(curText, s.lastObservedLabelText, StringComparison.Ordinal))
+            {
+                s.lastObservedLabelText = curText;
+                savedNodeLabelStyles[i] = s;
+                Vector2 tightSliced = ComputeTightLabelSlicedSize(s.node.statusLabel, curText);
+                if (s.v85BackdropRenderer != null)
+                {
+                    s.v85BackdropRenderer.size = tightSliced;
+                }
+                if (s.v85BorderRenderer != null)
+                {
+                    s.v85BorderRenderer.size = tightSliced;
+                }
+            }
+
+            // Seragamkan warna teks & border hairline 1px ke GwThemeTokens (menimpa warna kuning/hijau v5 dari GateNode.Update)
+            Color desiredTextCol;
+            Color desiredBorderCol;
+            if (s.node.nodeType == NodeType.OutputActuator)
+            {
+                bool isOutUnlocked = s.node.currentOutputValue || isLiveCircuitPassedAllFour;
+                desiredTextCol = isOutUnlocked ? GwThemeTokens.StatusPassText : GwThemeTokens.TextPrimary;
+                desiredBorderCol = isOutUnlocked ? GwThemeTokens.StatusPassEmerald : GwThemeTokens.HairlineIdle;
+            }
+            else if (isParkedGate)
+            {
+                desiredTextCol = GwThemeTokens.TextPrimary;
+                desiredBorderCol = GwThemeTokens.HairlineIdle;
+            }
+            else if (s.node.currentOutputValue)
+            {
+                desiredTextCol = GwThemeTokens.SignalHighTeal;
+                desiredBorderCol = GwThemeTokens.HairlineActive;
+            }
+            else
+            {
+                desiredTextCol = GwThemeTokens.TextPrimary;
+                desiredBorderCol = GwThemeTokens.HairlineIdle;
+            }
+
+            if (s.node.statusLabel.color != desiredTextCol)
+            {
+                s.node.statusLabel.color = desiredTextCol;
+            }
+            if (s.v85BorderRenderer != null && s.v85BorderRenderer.color != desiredBorderCol)
+            {
+                s.v85BorderRenderer.color = desiredBorderCol;
+            }
         }
 
         // 2. Supresi OutputTruthPod3D 2x2 lama (digantikan Tabel Kebenaran Eksplisit di Panel Kanan Tahap 10)

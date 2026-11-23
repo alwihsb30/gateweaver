@@ -14,7 +14,7 @@ using UnityEngine;
 ///   * Pinch pada Port_In yang terisi MENCABUT ujung kabel lama (pindah ke Port_In lain, atau lepas di ruang kosong untuk hapus).
 ///   * Menempelkan kabel ke Port_In yang sudah terisi otomatis mengganti (replace) kabel lama pada slot tersebut.
 /// - Merender 100% seluruh kabel Mode Udara (pool 20 kabel terpasang + 1 kabel live drag) sebagai mesh tabung 3D PBR
-///   berbasis kurva Bezier 3D &amp; Parallel Transport Frame (Bishop Frame) agar bebas puntiran pada orbit 360°,
+///   berbasis kurva Bezier 3D &amp; Parallel Transport Frame (Bishop Frame) agar bebas puntiran pada orbit 360 deg,
 ///   100% Zero-GC di runtime loop, 1 shared material Built-in Standard + MaterialPropertyBlock (OpenGLES3-safe).
 /// </summary>
 public sealed class AirWeavingCableRouter : MonoBehaviour
@@ -90,62 +90,62 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
     private static readonly int RimPowerPropId = Shader.PropertyToID("_RimPower");
     private static readonly int RimIntensityPropId = Shader.PropertyToID("_RimIntensity");
 
-    // Palet Fresnel Rim Glow dalam Linear Space eksplisit untuk MaterialPropertyBlock.SetColor (tajam, bebas pucat)
-    private static readonly Color CableHighRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.24f, 1.00f, 0.94f);
-    private static readonly Color CableLowRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.95f, 0.34f, 0.14f);
-    private static readonly Color DragFreeRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.26f, 0.98f, 1.00f);
-    private static readonly Color DragSnappedRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(1.00f, 0.90f, 0.24f);
-    private static readonly Color DragInvalidRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(1.00f, 0.22f, 0.16f);
-    private static readonly Color PortIdleRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.32f, 0.78f, 1.00f);
-    private static readonly Color PortHoverRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.36f, 1.00f, 0.98f);
-    private static readonly Color PortValidRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.26f, 1.00f, 0.56f);
-    private static readonly Color PortReplaceRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(1.00f, 0.80f, 0.22f);
-    private static readonly Color PortSnapRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(1.00f, 0.94f, 0.26f);
-    private static readonly Color PacketHighRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.60f, 1.00f, 1.00f);
-    private static readonly Color PacketLowRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(1.00f, 0.44f, 0.16f);
+    // Palet Fresnel Rim Glow dalam Linear Space eksplisit untuk MaterialPropertyBlock.SetColor (v8.5 SignalTeal & SignalSlate)
+    private static readonly Color CableHighRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.22f, 0.74f, 0.97f);
+    private static readonly Color CableLowRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.38f, 0.45f, 0.55f);
+    private static readonly Color DragFreeRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.22f, 0.74f, 0.97f);
+    private static readonly Color DragSnappedRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.98f, 0.45f, 0.09f);
+    private static readonly Color DragInvalidRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.94f, 0.27f, 0.27f);
+    private static readonly Color PortIdleRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.78f, 0.82f, 0.86f);
+    private static readonly Color PortHoverRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.22f, 0.74f, 0.97f);
+    private static readonly Color PortValidRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.06f, 0.73f, 0.51f);
+    private static readonly Color PortReplaceRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.98f, 0.45f, 0.09f);
+    private static readonly Color PortSnapRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.98f, 0.45f, 0.09f);
+    private static readonly Color PacketHighRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.52f, 0.88f, 1.00f);
+    private static readonly Color PacketLowRimLinear = AirWeavingLightingAndShaderRig.SrgbToLinearColor(0.44f, 0.51f, 0.60f);
 
-    // Palet PBR Built-in Forward (Linear Color Space) — kontras kuat Sinyal 1 vs Sinyal 0 vs Live Drag
-    private static readonly Color CableHighAlbedo = new Color(0.10f, 0.88f, 1.00f, 1f);
-    private static readonly Color CableHighEmission = new Color(0.14f, 0.78f, 1.06f, 1f);
-    private static readonly Color CableLowAlbedo = new Color(0.36f, 0.11f, 0.05f, 1f);
-    private static readonly Color CableLowEmission = new Color(0.24f, 0.055f, 0.015f, 1f);
+    // Palet PBR v8.5: Kabel 1 = SignalTeal (#38BDF8) tanpa bloom pecah; Kabel 0 = SignalSlate (#475569) bersih
+    private static readonly Color CableHighAlbedo = new Color(0.22f, 0.74f, 0.97f, 1f);
+    private static readonly Color CableHighEmission = new Color(0.14f, 0.52f, 0.74f, 1f);
+    private static readonly Color CableLowAlbedo = new Color(0.28f, 0.33f, 0.41f, 1f);
+    private static readonly Color CableLowEmission = new Color(0.08f, 0.10f, 0.13f, 1f);
 
-    private static readonly Color DragFreeAlbedo = new Color(0.18f, 0.90f, 1.00f, 1f);
-    private static readonly Color DragFreeEmission = new Color(0.14f, 0.68f, 0.92f, 1f);
-    private static readonly Color DragSnappedAlbedo = new Color(1.00f, 0.84f, 0.22f, 1f);
-    private static readonly Color DragSnappedEmission = new Color(0.88f, 0.66f, 0.10f, 1f);
-    private static readonly Color DragInvalidAlbedo = new Color(1.00f, 0.20f, 0.14f, 1f);
-    private static readonly Color DragInvalidEmission = new Color(0.86f, 0.10f, 0.06f, 1f);
+    private static readonly Color DragFreeAlbedo = new Color(0.22f, 0.74f, 0.97f, 1f);
+    private static readonly Color DragFreeEmission = new Color(0.14f, 0.52f, 0.74f, 1f);
+    private static readonly Color DragSnappedAlbedo = new Color(0.98f, 0.45f, 0.09f, 1f);
+    private static readonly Color DragSnappedEmission = new Color(0.72f, 0.32f, 0.06f, 1f);
+    private static readonly Color DragInvalidAlbedo = new Color(0.94f, 0.27f, 0.27f, 1f);
+    private static readonly Color DragInvalidEmission = new Color(0.68f, 0.16f, 0.16f, 1f);
 
-    private static readonly Color PacketHighAlbedo = new Color(0.76f, 0.98f, 1.00f, 1f);
-    private static readonly Color PacketHighEmission = new Color(0.55f, 1.25f, 1.45f, 1f);
-    private static readonly Color PacketLowAlbedo = new Color(0.95f, 0.44f, 0.16f, 1f);
-    private static readonly Color PacketLowEmission = new Color(0.62f, 0.18f, 0.04f, 1f);
+    private static readonly Color PacketHighAlbedo = new Color(0.72f, 0.93f, 1.00f, 1f);
+    private static readonly Color PacketHighEmission = new Color(0.32f, 0.82f, 0.98f, 1f);
+    private static readonly Color PacketLowAlbedo = new Color(0.36f, 0.43f, 0.52f, 1f);
+    private static readonly Color PacketLowEmission = new Color(0.12f, 0.15f, 0.19f, 1f);
 
-    // Palet Soket Port 3D (Torus Collar logam sci-fi + Inti Orb energi)
-    private static readonly Color CollarDarkMetal = new Color(0.18f, 0.23f, 0.30f, 1f);
-    private static readonly Color CollarCopperDarkMetal = new Color(0.28f, 0.14f, 0.10f, 1f);
-    private static readonly Color CollarCyanMetal = new Color(0.18f, 0.56f, 0.70f, 1f);
-    private static readonly Color CollarGoldMetal = new Color(0.86f, 0.68f, 0.18f, 1f);
-    private static readonly Color CollarGreenMetal = new Color(0.18f, 0.68f, 0.38f, 1f);
-    private static readonly Color CollarAmberMetal = new Color(0.84f, 0.56f, 0.16f, 1f);
+    // Palet Soket Port 3D (Anodized Graphite + Brushed Titanium + Inti Orb Sinyal)
+    private static readonly Color CollarDarkMetal = new Color(0.11f, 0.13f, 0.16f, 1f);
+    private static readonly Color CollarCopperDarkMetal = new Color(0.20f, 0.24f, 0.30f, 1f);
+    private static readonly Color CollarCyanMetal = new Color(0.22f, 0.62f, 0.82f, 1f);
+    private static readonly Color CollarGoldMetal = new Color(0.98f, 0.45f, 0.09f, 1f);
+    private static readonly Color CollarGreenMetal = new Color(0.06f, 0.73f, 0.51f, 1f);
+    private static readonly Color CollarAmberMetal = new Color(0.98f, 0.45f, 0.09f, 1f);
 
-    private static readonly Color PortInEmptyOrbColor = new Color(0.68f, 0.86f, 1.00f, 1f);
-    private static readonly Color PortInEmptyOrbEmission = new Color(0.16f, 0.34f, 0.50f, 1f);
-    private static readonly Color PortInConnectedHighOrbColor = new Color(0.18f, 0.96f, 0.88f, 1f);
-    private static readonly Color PortInConnectedHighOrbEmission = new Color(0.14f, 0.82f, 0.76f, 1f);
-    private static readonly Color PortInConnectedLowOrbColor = new Color(0.78f, 0.28f, 0.12f, 1f);
-    private static readonly Color PortInConnectedLowOrbEmission = new Color(0.32f, 0.08f, 0.02f, 1f);
-    private static readonly Color PortReplaceHintOrbColor = new Color(1.00f, 0.78f, 0.22f, 1f);
-    private static readonly Color PortReplaceHintOrbEmission = new Color(0.76f, 0.48f, 0.06f, 1f);
-    private static readonly Color PortHoverOrbColor = new Color(0.46f, 1.00f, 0.96f, 1f);
-    private static readonly Color PortHoverOrbEmission = new Color(0.32f, 0.98f, 0.92f, 1f);
-    private static readonly Color PortValidTargetOrbColor = new Color(0.28f, 1.00f, 0.54f, 1f);
-    private static readonly Color PortValidTargetOrbEmission = new Color(0.18f, 0.90f, 0.38f, 1f);
-    private static readonly Color PortSnapLockOrbColor = new Color(0.96f, 1.00f, 0.30f, 1f);
-    private static readonly Color PortSnapLockOrbEmission = new Color(0.88f, 0.96f, 0.16f, 1f);
+    private static readonly Color PortInEmptyOrbColor = new Color(0.78f, 0.82f, 0.86f, 1f);
+    private static readonly Color PortInEmptyOrbEmission = new Color(0.14f, 0.18f, 0.24f, 1f);
+    private static readonly Color PortInConnectedHighOrbColor = new Color(0.22f, 0.74f, 0.97f, 1f);
+    private static readonly Color PortInConnectedHighOrbEmission = new Color(0.14f, 0.52f, 0.74f, 1f);
+    private static readonly Color PortInConnectedLowOrbColor = new Color(0.28f, 0.33f, 0.41f, 1f);
+    private static readonly Color PortInConnectedLowOrbEmission = new Color(0.09f, 0.11f, 0.14f, 1f);
+    private static readonly Color PortReplaceHintOrbColor = new Color(0.98f, 0.45f, 0.09f, 1f);
+    private static readonly Color PortReplaceHintOrbEmission = new Color(0.66f, 0.30f, 0.06f, 1f);
+    private static readonly Color PortHoverOrbColor = new Color(0.42f, 0.84f, 1.00f, 1f);
+    private static readonly Color PortHoverOrbEmission = new Color(0.24f, 0.66f, 0.90f, 1f);
+    private static readonly Color PortValidTargetOrbColor = new Color(0.06f, 0.73f, 0.51f, 1f);
+    private static readonly Color PortValidTargetOrbEmission = new Color(0.05f, 0.56f, 0.38f, 1f);
+    private static readonly Color PortSnapLockOrbColor = new Color(0.98f, 0.45f, 0.09f, 1f);
+    private static readonly Color PortSnapLockOrbEmission = new Color(0.76f, 0.34f, 0.08f, 1f);
 
-    private static readonly Color StubIdleAlbedo = new Color(0.20f, 0.26f, 0.34f, 1f);
+    private static readonly Color StubIdleAlbedo = new Color(0.11f, 0.13f, 0.16f, 1f);
 
     private struct ActivePortEntry
     {
@@ -541,7 +541,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         // 4. Cincin Lock Halo 3D untuk Port yang sedang di-Hover / Dikunci Aim-Assist Sticky Snap
         lockHaloRingRenderer = CreateStaticMeshObject("Holo_PortLockHalo3D", sharedLockRingMesh, out lockHaloRingTransform);
 
-        // 5. Pool 20 Kabel Tabung 3D PBR Terpasang + 1 Kabel Live Drag (Pinch) — semua MarkDynamic() & buffer pra-alokasi
+        // 5. Pool 20 Kabel Tabung 3D PBR Terpasang + 1 Kabel Live Drag (Pinch) -- semua MarkDynamic() & buffer pra-alokasi
         installedTubePool = new TubeCableSlot[MaxCableBeams];
         cablePacketPhases = new float[MaxCableBeams];
         for (int i = 0; i < MaxCableBeams; i++)
@@ -763,7 +763,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         }
 
         // Koordinat livePinchLocalXY & stabilizedPinchLocalXY sudah disatukan pada bidang sinar referensi (workbenchDepth)
-        // oleh AirWeavingHandGestureDetector — hindari proyeksi ganda agar bidikan 100% sinkron pada jarak tangan berapa pun.
+        // oleh AirWeavingHandGestureDetector -- hindari proyeksi ganda agar bidikan 100% sinkron pada jarak tangan berapa pun.
         Vector3 pinchCamLocal = camT.InverseTransformPoint(pinchWorldPos);
         float pinchDepth = Mathf.Max(0.35f, pinchCamLocal.z);
         float pinchProjFactor = workbenchDepth / pinchDepth;
@@ -1120,7 +1120,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
         float hitRadiusScale)
     {
         // Anti-Nyasar Wajib: jika kabel lepas karena tangan hilang dari kamera (tracking lost),
-        // WAJIB batalkan drag secara bersih — JANGAN pernah auto-snap atau commit ke soket terdekat!
+        // WAJIB batalkan drag secara bersih -- JANGAN pernah auto-snap atau commit ke soket terdekat!
         if (!isHandLiveTracking || pinchEndedByTrackingLoss)
         {
             LastSfxWorldPosition = hasLastValidPinchWorld
@@ -2493,7 +2493,7 @@ public sealed class AirWeavingCableRouter : MonoBehaviour
 
     /// <summary>
     /// Memperbarui vertex &amp; normal mesh tabung 3D melengkung mengikuti kurva Bezier 3D memakai
-    /// Parallel Transport Frame (Bishop Frame) agar bebas puntiran/gepeng pada orbit 360° penuh. 100% Zero-GC.
+    /// Parallel Transport Frame (Bishop Frame) agar bebas puntiran/gepeng pada orbit 360 deg penuh. 100% Zero-GC.
     /// </summary>
     private void UpdateTubeMeshCubicBezier(
         TubeCableSlot slot,

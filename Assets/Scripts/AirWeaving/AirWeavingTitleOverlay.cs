@@ -34,23 +34,19 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
     private const float PanelWidth = 536f;
     private const float PanelHeight = 708f;
 
-    private const string StrTargetAirHint = "Target: Mode Udara (Hand Tracking) - Kurikulum 7 Level";
-    private const string StrTargetCardHint = "Target: Mode Kartu (Vuforia AR) - Kurikulum 7 Level";
-    private const string StrMetaStandby = "AR ENGINE // STANDBY";
-    private const string StrMetaAirActive = "AIRWEAVING ENGINE // AKTIF";
-    private const string StrMetaCardActive = "VUFORIA ENGINE // AKTIF";
+    private const string StrMetaStandby = "AR OPTICS READY // 1920x1080 // 60 FPS";
+    private const string StrMetaAirActive = "AIRWEAVING ENGINE // 1920x1080 // 60 FPS";
+    private const string StrMetaCardActive = "VUFORIA ENGINE // 1920x1080 // AKTIF";
 
     private sealed class TitleModeCardUi
     {
         public Button button;
         public Image bgImage;
         public Image borderImage;
-        public Image leftAccentBar;
-        public Image activeDotImage;
+        public Image radioRingImage;
+        public Image radioDotImage;
         public TMP_Text txtTitle;
         public TMP_Text txtEngineTag;
-        public TMP_Text txtDesc;
-        public TMP_Text txtSelectBadge;
     }
 
     public event Action<TitleModeSelection> OnStartSimulationRequested;
@@ -64,6 +60,7 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
     private Button scrimDismissButton;
     private RectTransform safeAreaRect;
     private RectTransform mainPanelRect;
+    private Image topMetaDotImg;
     private TMP_Text txtTopMetaStatus;
     private GameObject btnCloseXObj;
     private Button btnCloseX;
@@ -72,7 +69,6 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
     private TitleModeCardUi cardModeCard;
     private Button btnStartSimulation;
     private Button btnSandboxMode;
-    private TMP_Text txtSelectionSummary;
 
     private bool isUiBuilt = false;
     private bool isTitleOpen = false;
@@ -85,7 +81,15 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
     private int lastScreenH = -1;
     private bool hasAppliedScale = false;
 
+    // Supresi non-destruktif Canvas HUD bermain (Top HUD & tombol bawah Vuforia) selama Layar Judul terbuka
+    private CanvasGroup suppressedHudCanvasGroup;
+    private float savedHudCanvasAlpha = 1f;
+    private bool savedHudCanvasInteractable = true;
+    private bool savedHudCanvasBlocksRaycasts = true;
+    private bool isHudCanvasSuppressed = false;
+
     public bool IsTitleOpen => isTitleOpen;
+    public bool IsVisible => isTitleOpen;
 
     public void Configure(
         CompactHudMenuController hudMenu,
@@ -138,6 +142,7 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
 
         isTitleOpen = true;
         overlayRootObj.SetActive(true);
+        SetBackgroundGameplayHudSuppressed(true);
         ApplySafeAreaAndResponsiveScaleIfNeeded(force: true);
         RefreshDynamicVisuals();
     }
@@ -145,6 +150,7 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
     public void CloseOverlay()
     {
         isTitleOpen = false;
+        SetBackgroundGameplayHudSuppressed(false);
         if (overlayRootObj != null && overlayRootObj.activeSelf)
         {
             overlayRootObj.SetActive(false);
@@ -160,13 +166,18 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
     }
 
     /// <summary>
-    /// Menjaga skala responsif &amp; redaman hum audio selama Layar Masuk terbuka (baik saat startup Mode Kartu maupun Mode Udara). 100% Zero-GC.
+    /// Menjaga skala responsif, supresi HUD belakang, &amp; redaman hum audio selama Layar Masuk terbuka (baik saat startup Mode Kartu maupun Mode Udara). 100% Zero-GC.
     /// </summary>
     public void Tick()
     {
         if (!isTitleOpen)
         {
             return;
+        }
+
+        if (!isHudCanvasSuppressed)
+        {
+            SetBackgroundGameplayHudSuppressed(true);
         }
 
         ApplySafeAreaAndResponsiveScaleIfNeeded(force: false);
@@ -176,8 +187,64 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
         }
     }
 
+    private void SetBackgroundGameplayHudSuppressed(bool suppress)
+    {
+        if (suppress)
+        {
+            Canvas hudCanvas = compactHudMenu != null ? compactHudMenu.TargetCanvas : null;
+            if (hudCanvas == null)
+            {
+                return;
+            }
+
+            if (suppressedHudCanvasGroup == null || suppressedHudCanvasGroup.gameObject != hudCanvas.gameObject)
+            {
+                CanvasGroup cg = hudCanvas.gameObject.GetComponent<CanvasGroup>();
+                if (cg == null)
+                {
+                    cg = hudCanvas.gameObject.AddComponent<CanvasGroup>();
+                }
+                suppressedHudCanvasGroup = cg;
+                savedHudCanvasAlpha = cg.alpha;
+                savedHudCanvasInteractable = cg.interactable;
+                savedHudCanvasBlocksRaycasts = cg.blocksRaycasts;
+            }
+            else if (!isHudCanvasSuppressed)
+            {
+                savedHudCanvasAlpha = suppressedHudCanvasGroup.alpha;
+                savedHudCanvasInteractable = suppressedHudCanvasGroup.interactable;
+                savedHudCanvasBlocksRaycasts = suppressedHudCanvasGroup.blocksRaycasts;
+            }
+
+            suppressedHudCanvasGroup.alpha = 0f;
+            suppressedHudCanvasGroup.interactable = false;
+            suppressedHudCanvasGroup.blocksRaycasts = false;
+            isHudCanvasSuppressed = true;
+            return;
+        }
+
+        if (isHudCanvasSuppressed && suppressedHudCanvasGroup != null)
+        {
+            suppressedHudCanvasGroup.alpha = savedHudCanvasAlpha;
+            suppressedHudCanvasGroup.interactable = savedHudCanvasInteractable;
+            suppressedHudCanvasGroup.blocksRaycasts = savedHudCanvasBlocksRaycasts;
+        }
+        isHudCanvasSuppressed = false;
+    }
+
+    private void OnDisable()
+    {
+        if (isHudCanvasSuppressed)
+        {
+            SetBackgroundGameplayHudSuppressed(false);
+        }
+    }
+
     public void CleanupImmediate()
     {
+        SetBackgroundGameplayHudSuppressed(false);
+        suppressedHudCanvasGroup = null;
+
         RemoveBtnListener(scrimDismissButton, HandleScrimClicked);
         RemoveBtnListener(btnCloseX, HandleCloseXClicked);
         if (airModeCard != null) RemoveBtnListener(airModeCard.button, HandleSelectAirModeClicked);
@@ -196,6 +263,7 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
         scrimDismissButton = null;
         safeAreaRect = null;
         mainPanelRect = null;
+        topMetaDotImg = null;
         txtTopMetaStatus = null;
         btnCloseXObj = null;
         btnCloseX = null;
@@ -203,7 +271,6 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
         cardModeCard = null;
         btnStartSimulation = null;
         btnSandboxMode = null;
-        txtSelectionSummary = null;
         compactHudMenu = null;
         spatialSfx = null;
         safeFont = null;
@@ -276,27 +343,25 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
         ApplyModeCardVisual(airModeCard, isSelected: airSelected);
         ApplyModeCardVisual(cardModeCard, isSelected: !airSelected);
 
-        if (txtSelectionSummary != null)
-        {
-            txtSelectionSummary.text = airSelected ? StrTargetAirHint : StrTargetCardHint;
-        }
-
         if (txtTopMetaStatus != null)
         {
             if (isInitialStartupSession)
             {
                 txtTopMetaStatus.text = StrMetaStandby;
                 txtTopMetaStatus.color = GwThemeTokens.TextSecondary;
+                if (topMetaDotImg != null) topMetaDotImg.color = GwThemeTokens.StatusPassEmerald;
             }
             else if (currentAirWeavingActive)
             {
                 txtTopMetaStatus.text = StrMetaAirActive;
-                txtTopMetaStatus.color = GwThemeTokens.SignalHighTeal;
+                txtTopMetaStatus.color = GwThemeTokens.TextSecondary;
+                if (topMetaDotImg != null) topMetaDotImg.color = GwThemeTokens.SignalHighTeal;
             }
             else
             {
                 txtTopMetaStatus.text = StrMetaCardActive;
-                txtTopMetaStatus.color = GwThemeTokens.StatusPassText;
+                txtTopMetaStatus.color = GwThemeTokens.TextSecondary;
+                if (topMetaDotImg != null) topMetaDotImg.color = GwThemeTokens.StatusPassEmerald;
             }
         }
     }
@@ -316,37 +381,28 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
         {
             card.borderImage.color = isSelected ? GwThemeTokens.SignalHighTeal : GwThemeTokens.HairlineIdle;
         }
-        if (card.leftAccentBar != null)
+        if (card.radioRingImage != null)
         {
-            if (card.leftAccentBar.enabled != isSelected)
+            card.radioRingImage.color = isSelected ? GwThemeTokens.SignalHighTeal : GwThemeTokens.HairlineActive;
+        }
+        if (card.radioDotImage != null)
+        {
+            if (card.radioDotImage.enabled != isSelected)
             {
-                card.leftAccentBar.enabled = isSelected;
+                card.radioDotImage.enabled = isSelected;
             }
             if (isSelected)
             {
-                card.leftAccentBar.color = GwThemeTokens.SignalHighTeal;
+                card.radioDotImage.color = GwThemeTokens.SignalHighTeal;
             }
-        }
-        if (card.activeDotImage != null)
-        {
-            card.activeDotImage.color = isSelected ? GwThemeTokens.SignalHighTeal : GwThemeTokens.SignalLowSlate;
         }
         if (card.txtTitle != null)
         {
-            card.txtTitle.color = isSelected ? GwThemeTokens.TextPrimary : GwThemeTokens.TextSecondary;
+            card.txtTitle.color = GwThemeTokens.TextPrimary;
         }
         if (card.txtEngineTag != null)
         {
             card.txtEngineTag.color = isSelected ? GwThemeTokens.SignalHighTeal : GwThemeTokens.SignalLowSlate;
-        }
-        if (card.txtDesc != null)
-        {
-            card.txtDesc.color = GwThemeTokens.TextSecondary;
-        }
-        if (card.txtSelectBadge != null)
-        {
-            card.txtSelectBadge.text = isSelected ? "DIPILIH" : "PILIH";
-            card.txtSelectBadge.color = isSelected ? GwThemeTokens.SignalHighTeal : GwThemeTokens.SignalLowSlate;
         }
     }
 
@@ -434,7 +490,8 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
 
     private void BuildTopMetadataHeader(RectTransform parent)
     {
-        GameObject barObj = new GameObject("Header_TitleMetadata_V85", typeof(RectTransform), typeof(Image));
+        // Header metadata atas transparan (tanpa background solid), hanya garis tepi bawah 1px HairlineIdle seperti Figma
+        GameObject barObj = new GameObject("Header_TitleMetadata_V85", typeof(RectTransform));
         barObj.transform.SetParent(parent, false);
         RectTransform barRect = barObj.GetComponent<RectTransform>();
         barRect.anchorMin = new Vector2(0f, 1f);
@@ -443,11 +500,6 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
         barRect.anchoredPosition = Vector2.zero;
         barRect.sizeDelta = new Vector2(0f, TopMetaBarHeight);
 
-        Image barBg = barObj.GetComponent<Image>();
-        barBg.color = GwThemeTokens.TitleSurfaceSolid;
-        barBg.raycastTarget = false;
-
-        // Garis tepi bawah tipis 1px HairlineIdle
         CreateFlatImage(
             "Header_MetaBottomLine",
             barRect,
@@ -458,22 +510,19 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
             new Vector2(0f, GwThemeTokens.HairlineBorderPx),
             GwThemeTokens.HairlineIdle);
 
-        // Titik indikator kiri sejajar margin kiri 64px
-        CreateCircleDot("Header_MetaDot", barRect, LeftMarginPx + 4f, -TopMetaBarHeight * 0.5f, 7f, GwThemeTokens.SignalHighTeal);
-
         CreateTopLeftTmp(
             "Txt_TitleTopMetadata",
             barRect,
-            new Vector2(LeftMarginPx + 18f, 0f),
+            new Vector2(LeftMarginPx, 0f),
             new Vector2(760f, TopMetaBarHeight),
             "GATEWEAVER AR // v8.5 // SPATIAL COMPUTING LAB",
-            11.5f,
-            13.5f,
+            10.5f,
+            12f,
             GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
-        // Status engine ringkas kanan atas
+        // Status telemetri ringkas kanan atas + titik indikator hijau kecil
         GameObject statusObj = new GameObject("Txt_TitleTopMetaStatus", typeof(RectTransform), typeof(TextMeshProUGUI));
         statusObj.transform.SetParent(barRect, false);
         RectTransform statusRect = statusObj.GetComponent<RectTransform>();
@@ -481,7 +530,7 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
         statusRect.anchorMax = new Vector2(1f, 1f);
         statusRect.pivot = new Vector2(1f, 0.5f);
         statusRect.anchoredPosition = new Vector2(-LeftMarginPx, 0f);
-        statusRect.sizeDelta = new Vector2(320f, 0f);
+        statusRect.sizeDelta = new Vector2(360f, 0f);
 
         TextMeshProUGUI statusTmp = statusObj.GetComponent<TextMeshProUGUI>();
         if (safeFont != null)
@@ -493,11 +542,27 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
         statusTmp.alignment = TextAlignmentOptions.MidlineRight;
         statusTmp.color = GwThemeTokens.TextSecondary;
         statusTmp.enableAutoSizing = true;
-        statusTmp.fontSizeMin = 10.5f;
-        statusTmp.fontSizeMax = 12.5f;
+        statusTmp.fontSizeMin = 10f;
+        statusTmp.fontSizeMax = 11.5f;
         statusTmp.textWrappingMode = TextWrappingModes.NoWrap;
         statusTmp.raycastTarget = false;
         txtTopMetaStatus = statusTmp;
+
+        // Titik hijau di sebelah kiri teks telemetri kanan atas
+        GameObject dotObj = new GameObject("Header_RightStatusDot", typeof(RectTransform), typeof(Image));
+        dotObj.transform.SetParent(barRect, false);
+        RectTransform dotRect = dotObj.GetComponent<RectTransform>();
+        dotRect.anchorMin = new Vector2(1f, 0.5f);
+        dotRect.anchorMax = new Vector2(1f, 0.5f);
+        dotRect.pivot = new Vector2(0.5f, 0.5f);
+        dotRect.anchoredPosition = new Vector2(-(LeftMarginPx + 276f), 0f);
+        dotRect.sizeDelta = new Vector2(6f, 6f);
+
+        topMetaDotImg = dotObj.GetComponent<Image>();
+        topMetaDotImg.sprite = GwThemeTokens.GetCircleSprite();
+        topMetaDotImg.type = Image.Type.Simple;
+        topMetaDotImg.color = GwThemeTokens.StatusPassEmerald;
+        topMetaDotImg.raycastTarget = false;
     }
 
     private void BuildLeftVerticalPanel(RectTransform parent)
@@ -518,11 +583,66 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
 
         const float padX = 32f;
         float innerW = PanelWidth - (padX * 2f);
-        float y = -30f;
+
+        // ---------------------------------------------------------------------
+        // EYEBROW ATAS: 01 / MENU UTAMA + indikator 2 segmen tipis (1:1 Figma)
+        // ---------------------------------------------------------------------
+        CreateTopLeftTmp(
+            "Txt_TitleEyebrow",
+            mainPanelRect,
+            new Vector2(padX, -28f),
+            new Vector2(220f, 18f),
+            "01 / MENU UTAMA",
+            10f,
+            11.5f,
+            GwThemeTokens.TextSecondary,
+            TextAlignmentOptions.MidlineLeft,
+            FontStyles.Bold);
+
+        CreateFlatImage(
+            "Eyebrow_SegActive",
+            mainPanelRect,
+            new Vector2(0f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(PanelWidth - padX - 30f, -36f),
+            new Vector2(18f, 3f),
+            GwThemeTokens.SignalHighTeal);
+
+        CreateFlatImage(
+            "Eyebrow_SegIdle",
+            mainPanelRect,
+            new Vector2(0f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(0f, 1f),
+            new Vector2(PanelWidth - padX - 8f, -36f),
+            new Vector2(8f, 3f),
+            GwThemeTokens.HairlineActive);
+
+        // Tombol tutup X tipis (HANYA tampil bila dibuka kembali lewat LAYAR UTAMA dari drawer)
+        btnCloseX = CreateRoundedFlatButton(
+            "Btn_TitleCloseX",
+            mainPanelRect,
+            PanelWidth - padX - 30f,
+            -22f,
+            30f,
+            30f,
+            "X",
+            GwThemeTokens.CardIdle,
+            GwThemeTokens.HairlineIdle,
+            GwThemeTokens.TextPrimary,
+            13f,
+            15f,
+            hasBorder: true,
+            HandleCloseXClicked,
+            out _);
+        btnCloseXObj = btnCloseX.gameObject;
+        btnCloseXObj.SetActive(false);
 
         // ---------------------------------------------------------------------
         // BRAND HEADER: GATEWEAVER AR + pil v8.5 + sub LOGIC CIRCUITS AR EDUCATIONAL TOOL
         // ---------------------------------------------------------------------
+        float y = -58f;
         CreateTopLeftTmp(
             "Txt_TitleBrand",
             mainPanelRect,
@@ -542,8 +662,8 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
         verPillRect.anchorMin = new Vector2(0f, 1f);
         verPillRect.anchorMax = new Vector2(0f, 1f);
         verPillRect.pivot = new Vector2(0f, 1f);
-        verPillRect.anchoredPosition = new Vector2(padX + 318f, y - 8f);
-        verPillRect.sizeDelta = new Vector2(64f, 28f);
+        verPillRect.anchoredPosition = new Vector2(padX + 316f, y - 9f);
+        verPillRect.sizeDelta = new Vector2(58f, 26f);
 
         Image verPillBg = verPillObj.GetComponent<Image>();
         GwThemeTokens.ApplyRoundedRect6(verPillBg, GwThemeTokens.SignalHighTeal);
@@ -553,66 +673,46 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
             "Txt_VersionV85",
             verPillRect,
             "v8.5",
-            12.5f,
-            15f,
+            11.5f,
+            14f,
             GwThemeTokens.PrimaryText,
             TextAlignmentOptions.Center,
             FontStyles.Bold);
-
-        // Tombol tutup X tipis (HANYA tampil bila dibuka kembali lewat LAYAR UTAMA dari drawer)
-        btnCloseX = CreateRoundedFlatButton(
-            "Btn_TitleCloseX",
-            mainPanelRect,
-            PanelWidth - padX - 34f,
-            y - 4f,
-            34f,
-            34f,
-            "X",
-            GwThemeTokens.CardIdle,
-            GwThemeTokens.HairlineIdle,
-            GwThemeTokens.TextPrimary,
-            14f,
-            17f,
-            hasBorder: true,
-            HandleCloseXClicked,
-            out _);
-        btnCloseXObj = btnCloseX.gameObject;
-        btnCloseXObj.SetActive(false);
 
         y -= 48f;
         CreateTopLeftTmp(
             "Txt_TitleSub",
             mainPanelRect,
             new Vector2(padX, y),
-            new Vector2(innerW, 22f),
+            new Vector2(innerW, 20f),
             "LOGIC CIRCUITS AR EDUCATIONAL TOOL",
-            11.5f,
-            13.5f,
+            11f,
+            13f,
             GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
-        y -= 34f;
+        y -= 36f;
         CreateHorizontalDivider("TitleDiv_Brand", mainPanelRect, padX, y, innerW);
-        y -= 18f;
+        y -= 28f;
 
         // ---------------------------------------------------------------------
-        // SEKSI PILIH MODE INTERAKSI (2 KARTU MODE)
+        // SEKSI PILIH MODE INTERAKSI AR (2 KARTU RINGKAS + RADIO BUTTON KANAN)
         // ---------------------------------------------------------------------
         CreateTopLeftTmp(
             "Txt_SelectModeLabel",
             mainPanelRect,
             new Vector2(padX, y),
-            new Vector2(innerW, 20f),
-            "PILIH MODE SIMULASI",
+            new Vector2(innerW, 18f),
+            "PILIH MODE INTERAKSI AR",
             10.5f,
-            12.5f,
+            12f,
             GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
         y -= 28f;
 
-        const float cardH = 122f;
+        const float cardH = 84f;
         const float cardGap = 14f;
 
         // Kartu 1 (default terpilih): MODE UDARA - Hand Tracking
@@ -625,7 +725,6 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
             cardH,
             "MODE UDARA - Hand Tracking",
             "AIRWEAVING ENGINE // 60 FPS",
-            "Rakit gerbang logika 3D melayang bebas dengan gestur tangan MediaPipe.",
             HandleSelectAirModeClicked);
         y -= (cardH + cardGap);
 
@@ -639,78 +738,59 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
             cardH,
             "MODE KARTU - Vuforia AR",
             "MARKER TRACKING // VUFORIA SDK",
-            "Pindai kartu marker fisik di atas meja nyata untuk simulasi gerbang.",
             HandleSelectCardModeClicked);
-        y -= (cardH + 20f);
-
-        CreateHorizontalDivider("TitleDiv_Actions", mainPanelRect, padX, y, innerW);
-        y -= 20f;
 
         // ---------------------------------------------------------------------
         // TOMBOL AKSI PRIMER (SOLID PUTIH) + SEKUNDER OUTLINE (SANDBOX)
+        // Ruang kosong tenang (negative space) di antara kartu mode & tombol aksi 1:1 Figma
         // ---------------------------------------------------------------------
+        const float startBtnY = -524f;
         btnStartSimulation = CreateRoundedFlatButton(
             "Btn_TitleStartSim",
             mainPanelRect,
             padX,
-            y,
+            startBtnY,
             innerW,
-            56f,
+            52f,
             "MULAI SIMULASI ->",
             GwThemeTokens.PrimaryFill,
             GwThemeTokens.PrimaryFill,
             GwThemeTokens.PrimaryText,
-            16f,
-            20f,
+            15f,
+            18.5f,
             hasBorder: false,
             HandleStartSimulationClicked,
             out _);
-        y -= 70f;
 
+        const float sandboxBtnY = -590f;
         btnSandboxMode = CreateRoundedFlatButton(
             "Btn_TitleSandbox",
             mainPanelRect,
             padX,
-            y,
+            sandboxBtnY,
             innerW,
-            48f,
+            46f,
             "SANDBOX (LABORATORIUM BEBAS)",
             GwThemeTokens.CardIdle,
             GwThemeTokens.HairlineActive,
             GwThemeTokens.TextPrimary,
-            13.5f,
-            16f,
+            13f,
+            15.5f,
             hasBorder: true,
             HandleSandboxClicked,
             out _);
-        y -= 58f;
-
-        txtSelectionSummary = CreateTopLeftTmp(
-            "Txt_TitleSelectionSummary",
-            mainPanelRect,
-            new Vector2(padX, y),
-            new Vector2(innerW, 20f),
-            StrTargetAirHint,
-            10.5f,
-            12.5f,
-            GwThemeTokens.TextSecondary,
-            TextAlignmentOptions.MidlineLeft,
-            FontStyles.Normal);
 
         // ---------------------------------------------------------------------
-        // FOOTER KECIL: FILKOM UNIVERSITAS BRAWIJAYA // 2026
+        // FOOTER KECIL: FILKOM UNIVERSITAS BRAWIJAYA // 2026 | FASE E
         // ---------------------------------------------------------------------
-        float footerDividerY = -(PanelHeight - 54f);
-        CreateHorizontalDivider("TitleDiv_Footer", mainPanelRect, padX, footerDividerY, innerW);
-
         CreateTopLeftTmp(
             "Txt_TitleFooterLeft",
             mainPanelRect,
-            new Vector2(padX, -(PanelHeight - 42f)),
-            new Vector2(innerW * 0.68f, 24f),
+            new Vector2(padX, -(PanelHeight - 44f)),
+            new Vector2(innerW * 0.72f, 22f),
             "FILKOM UNIVERSITAS BRAWIJAYA // 2026",
-            10.5f,
-            12.5f,
+            10f,
+            11.5f,
             GwThemeTokens.SignalLowSlate,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
@@ -718,14 +798,14 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
         CreateTopLeftTmp(
             "Txt_TitleFooterRight",
             mainPanelRect,
-            new Vector2(padX + (innerW * 0.68f), -(PanelHeight - 42f)),
-            new Vector2(innerW * 0.32f, 24f),
-            "FASE E // AR LAB",
+            new Vector2(padX + (innerW * 0.72f), -(PanelHeight - 44f)),
+            new Vector2(innerW * 0.28f, 22f),
+            "FASE E",
             10f,
-            12f,
+            11.5f,
             GwThemeTokens.SignalLowSlate,
             TextAlignmentOptions.MidlineRight,
-            FontStyles.Normal);
+            FontStyles.Bold);
     }
 
     private TitleModeCardUi CreateTitleModeCard(
@@ -737,7 +817,6 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
         float height,
         string title,
         string engineTag,
-        string description,
         UnityEngine.Events.UnityAction onClick)
     {
         GameObject obj = new GameObject(name, typeof(RectTransform), typeof(Image), typeof(Button));
@@ -755,18 +834,6 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
 
         Image border = GwThemeTokens.AttachHairlineBorder(rect, $"{name}_Border", GwThemeTokens.HairlineIdle);
 
-        // Strip aksen kiri tipis 3px untuk kartu yang terpilih
-        Image leftAccent = CreateFlatImage(
-            "LeftAccentBar",
-            rect,
-            new Vector2(0f, 0.5f),
-            new Vector2(0f, 0.5f),
-            new Vector2(0f, 0.5f),
-            new Vector2(2f, 0f),
-            new Vector2(3f, height - 20f),
-            GwThemeTokens.SignalHighTeal);
-        leftAccent.enabled = false;
-
         Button btn = obj.GetComponent<Button>();
         btn.targetGraphic = bg;
         btn.transition = Selectable.Transition.ColorTint;
@@ -776,69 +843,61 @@ public sealed class AirWeavingTitleOverlay : MonoBehaviour
             btn.onClick.AddListener(onClick);
         }
 
-        // Titik aktif di kiri atas judul
-        Image activeDot = CreateCircleDot("ActiveDot", rect, 22f, -28f, GwThemeTokens.StatusDotSizePx, GwThemeTokens.SignalLowSlate);
-
         TMP_Text titleTmp = CreateTopLeftTmp(
             "Txt_ModeTitle",
             rect,
-            new Vector2(36f, -15f),
-            new Vector2(width - 114f, 26f),
+            new Vector2(22f, -18f),
+            new Vector2(width - 72f, 24f),
             title,
             15f,
-            18.5f,
+            18f,
             GwThemeTokens.TextPrimary,
             TextAlignmentOptions.MidlineLeft,
-            FontStyles.Bold);
-
-        TMP_Text badgeTmp = CreateTopLeftTmp(
-            "Txt_ModeBadge",
-            rect,
-            new Vector2(width - 76f, -15f),
-            new Vector2(60f, 26f),
-            "PILIH",
-            10f,
-            12f,
-            GwThemeTokens.SignalLowSlate,
-            TextAlignmentOptions.MidlineRight,
             FontStyles.Bold);
 
         TMP_Text engineTmp = CreateTopLeftTmp(
             "Txt_ModeEngine",
             rect,
-            new Vector2(36f, -45f),
-            new Vector2(width - 52f, 20f),
+            new Vector2(22f, -46f),
+            new Vector2(width - 72f, 18f),
             engineTag,
-            11f,
-            13f,
+            10.5f,
+            12f,
             GwThemeTokens.SignalLowSlate,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
-        TMP_Text descTmp = CreateTopLeftTmp(
-            "Txt_ModeDesc",
-            rect,
-            new Vector2(36f, -70f),
-            new Vector2(width - 52f, 40f),
-            description,
-            11.5f,
-            13.5f,
-            GwThemeTokens.TextSecondary,
-            TextAlignmentOptions.TopLeft,
-            FontStyles.Normal,
-            allowWrap: true);
+        // Indikator Radio Button prosedural di sisi kanan tengah kartu (1:1 Figma)
+        float radioCenterX = width - 28f;
+        float radioCenterY = -height * 0.5f;
+
+        GameObject ringObj = new GameObject("Radio_OuterRing", typeof(RectTransform), typeof(Image));
+        ringObj.transform.SetParent(rect, false);
+        RectTransform ringRect = ringObj.GetComponent<RectTransform>();
+        ringRect.anchorMin = new Vector2(0f, 1f);
+        ringRect.anchorMax = new Vector2(0f, 1f);
+        ringRect.pivot = new Vector2(0.5f, 0.5f);
+        ringRect.anchoredPosition = new Vector2(radioCenterX, radioCenterY);
+        ringRect.sizeDelta = new Vector2(18f, 18f);
+
+        Image radioRing = ringObj.GetComponent<Image>();
+        radioRing.sprite = GwThemeTokens.GetCircleRingSprite();
+        radioRing.type = Image.Type.Simple;
+        radioRing.color = GwThemeTokens.HairlineActive;
+        radioRing.raycastTarget = false;
+
+        Image radioDot = CreateCircleDot("Radio_InnerDot", rect, radioCenterX, radioCenterY, 8f, GwThemeTokens.SignalHighTeal);
+        radioDot.enabled = false;
 
         return new TitleModeCardUi
         {
             button = btn,
             bgImage = bg,
             borderImage = border,
-            leftAccentBar = leftAccent,
-            activeDotImage = activeDot,
+            radioRingImage = radioRing,
+            radioDotImage = radioDot,
             txtTitle = titleTmp,
-            txtEngineTag = engineTmp,
-            txtDesc = descTmp,
-            txtSelectBadge = badgeTmp
+            txtEngineTag = engineTmp
         };
     }
 

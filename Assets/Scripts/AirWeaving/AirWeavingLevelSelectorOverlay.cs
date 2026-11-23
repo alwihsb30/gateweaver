@@ -61,6 +61,61 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
         "Kunci Biometrik De Morgan"
     };
 
+    private static readonly string[] CachedNodeUppercaseTitles =
+    {
+        "ALARM PINTU",
+        "SAKELAR TANGGA",
+        "KUNCI BRANKAS",
+        "PEMUTUS REAKTOR",
+        "INTI KEMBAR",
+        "SENSOR SERVER",
+        "KUNCI BIOMETRIK DE MORGAN"
+    };
+
+    private static readonly string[] CachedNodeClearedGateTags =
+    {
+        "OR",
+        "XOR",
+        "AND + NOT",
+        "NAND",
+        "XNOR",
+        "NOR",
+        "OR + NOT"
+    };
+
+    private static readonly string[] CachedNodeLockedConceptTags =
+    {
+        "LOGIKA DASAR",
+        "2 ARAH",
+        "2 GERBANG",
+        "PROTEKSI",
+        "SINKRON",
+        "HENING",
+        "DE MORGAN"
+    };
+
+    private static readonly string[] CachedDetailHeaderClearedTags =
+    {
+        "LEVEL 01 // GERBANG OR",
+        "LEVEL 02 // GERBANG XOR",
+        "LEVEL 03 // AND + NOT",
+        "LEVEL 04 // GERBANG NAND",
+        "LEVEL 05 // LOGIKA XNOR",
+        "LEVEL 06 // GERBANG NOR",
+        "LEVEL 07 // DE MORGAN"
+    };
+
+    private static readonly string[] CachedDetailHeaderLockedTags =
+    {
+        "LEVEL 01 // MISI DASAR",
+        "LEVEL 02 // SAKELAR 2 ARAH",
+        "LEVEL 03 // KUNCI BRANKAS",
+        "LEVEL 04 // PROTEKSI REAKTOR",
+        "LEVEL 05 // INTI KEMBAR",
+        "LEVEL 06 // RUANG SERVER",
+        "LEVEL 07 // DE MORGAN"
+    };
+
     private static readonly string[] CachedFallbackMissions =
     {
         "Bunyikan ALARM jika PINTU atau JENDELA terbuka",
@@ -83,15 +138,46 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
         "Y = A NAND B",
         "Y = NOT (A XOR B)",
         "Y = NOT (A OR B)",
-        "Y = A OR (NOT B)  ==  (NOT A) NAND B"
+        "Y = NOT (A OR B)"
     };
 
-    private static readonly string[] CachedAvailableGateNames =
+    // Konfigurasi Gerbang Target per level (HANYA dibuka jika GW_v3_LevelCleared_i == 1)
+    private static readonly int[] CachedTargetGateCounts = { 1, 1, 2, 1, 2, 2, 2 };
+
+    private static readonly GwThemeTokens.IeeeGateIconKind[] CachedPrimaryGateIcons =
     {
-        "AND", "OR", "NOT", "XOR", "NAND"
+        GwThemeTokens.IeeeGateIconKind.Or,
+        GwThemeTokens.IeeeGateIconKind.Xor,
+        GwThemeTokens.IeeeGateIconKind.And,
+        GwThemeTokens.IeeeGateIconKind.Nand,
+        GwThemeTokens.IeeeGateIconKind.Xor,
+        GwThemeTokens.IeeeGateIconKind.Or,
+        GwThemeTokens.IeeeGateIconKind.Or
     };
 
-    private const string StrFormulaLocked = "TERKUNCI - RAKIT UNTUK VERIFIKASI";
+    private static readonly string[] CachedPrimaryGateLabels =
+    {
+        "OR", "XOR", "AND", "NAND", "XOR", "OR", "OR"
+    };
+
+    private static readonly GwThemeTokens.IeeeGateIconKind[] CachedSecondaryGateIcons =
+    {
+        GwThemeTokens.IeeeGateIconKind.Not,
+        GwThemeTokens.IeeeGateIconKind.Not,
+        GwThemeTokens.IeeeGateIconKind.Not,
+        GwThemeTokens.IeeeGateIconKind.Not,
+        GwThemeTokens.IeeeGateIconKind.Not,
+        GwThemeTokens.IeeeGateIconKind.Not,
+        GwThemeTokens.IeeeGateIconKind.Not
+    };
+
+    private static readonly string[] CachedSecondaryGateLabels =
+    {
+        "NOT", "NOT", "NOT", "NOT", "NOT", "NOT", "NOT"
+    };
+
+    private const string StrFormulaLocked = "TERKUNCI - BELUM TERVERIFIKASI";
+    private const string StrTargetGateLocked = "TERKUNCI - RAKIT UNTUK MEMBUKA";
     private const string StrStatusCleared = "SELESAI";
     private const string StrStatusActive = "AKTIF";
     private const string StrStatusLocked = "TERKUNCI";
@@ -102,13 +188,11 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
         public UnityEngine.Events.UnityAction clickHandler;
         public Image bgImage;
         public Image borderImage;
-        public Image activeDotImage;
-        public Image topAccentBar;
+        public Image statusDotImage;
         public GameObject checkIconRoot;
         public TMP_Text txtNumber;
         public TMP_Text txtTitle;
-        public TMP_Text txtQuota;
-        public TMP_Text txtStatus;
+        public TMP_Text txtConceptTag;
     }
 
     private LevelAndUIManager levelManager;
@@ -120,6 +204,7 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
     private RectTransform safeAreaRect;
     private RectTransform contentContainerRect;
 
+    private Image progressPillBorderImg;
     private Image progressDotImg;
     private TMP_Text txtProgressPill;
     private Button btnExitX;
@@ -138,16 +223,23 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
 
     // Panel Detail Kanan
     private TMP_Text txtDetailLevelTag;
-    private Image detailStatusPillBg;
-    private Image detailStatusPillBorder;
-    private Image detailStatusDot;
-    private TMP_Text txtDetailStatus;
     private TMP_Text txtDetailTitle;
     private TMP_Text txtDetailMission;
     private TMP_Text txtDetailQuotaValue;
-    private TMP_Text txtDetailIoSummary;
+    private Image detailStatusCardBorder;
+    private Image detailStatusDot;
+    private TMP_Text txtDetailStatus;
+
+    private RectTransform targetGateSlot1Rect;
+    private Image targetGateSlot1Border;
+    private Image targetGateSlot1Icon;
+    private RectTransform targetGateSlot1LabelRect;
+    private TMP_Text txtTargetGateSlot1;
+    private GameObject targetGateSlot2Obj;
+    private Image targetGateSlot2Icon;
+    private TMP_Text txtTargetGateSlot2;
+
     private Image detailFormulaCardBorder;
-    private Image detailFormulaLockDot;
     private TMP_Text txtDetailFormulaHeading;
     private TMP_Text txtDetailFormulaValue;
     private Button btnStartSimulation;
@@ -307,6 +399,7 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
 
         safeAreaRect = null;
         contentContainerRect = null;
+        progressPillBorderImg = null;
         progressDotImg = null;
         txtProgressPill = null;
         btnExitX = null;
@@ -319,16 +412,21 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
         conn05To06 = null;
         conn06To07 = null;
         txtDetailLevelTag = null;
-        detailStatusPillBg = null;
-        detailStatusPillBorder = null;
-        detailStatusDot = null;
-        txtDetailStatus = null;
         txtDetailTitle = null;
         txtDetailMission = null;
         txtDetailQuotaValue = null;
-        txtDetailIoSummary = null;
+        detailStatusCardBorder = null;
+        detailStatusDot = null;
+        txtDetailStatus = null;
+        targetGateSlot1Rect = null;
+        targetGateSlot1Border = null;
+        targetGateSlot1Icon = null;
+        targetGateSlot1LabelRect = null;
+        txtTargetGateSlot1 = null;
+        targetGateSlot2Obj = null;
+        targetGateSlot2Icon = null;
+        txtTargetGateSlot2 = null;
         detailFormulaCardBorder = null;
-        detailFormulaLockDot = null;
         txtDetailFormulaHeading = null;
         txtDetailFormulaValue = null;
         btnStartSimulation = null;
@@ -413,7 +511,7 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
             RefreshSingleNodeCard(i, isCleared, isSelected, isCurrentGameplay);
         }
 
-        // Pil progres header: X/7 SELESAI
+        // Pil progres header: X/7 SELESAI tepat di sebelah kanan judul utama (1:1 Figma)
         if (txtProgressPill != null)
         {
             sb.Clear();
@@ -425,6 +523,11 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
         if (progressDotImg != null)
         {
             progressDotImg.color = clearedCount > 0 ? GwThemeTokens.StatusPassEmerald : GwThemeTokens.SignalLowSlate;
+        }
+
+        if (progressPillBorderImg != null)
+        {
+            progressPillBorderImg.color = clearedCount > 0 ? GwThemeTokens.StatusPassEmerald : GwThemeTokens.HairlineIdle;
         }
 
         // Garis penghubung ortogonal 1px (aksen hijau emerald bila node sumber sudah lulus)
@@ -456,7 +559,7 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
 
         if (selectedLevelIndex == fromLevelIndex || selectedLevelIndex == fromLevelIndex + 1)
         {
-            return GwThemeTokens.HairlineActive;
+            return GwThemeTokens.SignalHighTeal;
         }
 
         return GwThemeTokens.HairlineIdle;
@@ -483,7 +586,7 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
             }
             else if (isCleared)
             {
-                card.borderImage.color = GwThemeTokens.StatusPassEmerald;
+                card.borderImage.color = GwThemeTokens.HairlineIdle;
             }
             else
             {
@@ -491,42 +594,32 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
             }
         }
 
-        if (card.topAccentBar != null)
-        {
-            bool showBar = isSelected || isCleared;
-            if (card.topAccentBar.enabled != showBar)
-            {
-                card.topAccentBar.enabled = showBar;
-            }
-            if (showBar)
-            {
-                card.topAccentBar.color = isSelected ? GwThemeTokens.SignalHighTeal : GwThemeTokens.StatusPassEmerald;
-            }
-        }
-
-        if (card.activeDotImage != null)
-        {
-            bool showDot = isSelected || isCurrentGameplay;
-            if (card.activeDotImage.enabled != showDot)
-            {
-                card.activeDotImage.enabled = showDot;
-            }
-            if (showDot)
-            {
-                card.activeDotImage.color = GwThemeTokens.SignalHighTeal;
-            }
-        }
-
+        // Di pojok kanan atas kartu node: centang hijau jika lulus, atau titik status kecil jika belum lulus (1:1 Figma)
         if (card.checkIconRoot != null && card.checkIconRoot.activeSelf != isCleared)
         {
             card.checkIconRoot.SetActive(isCleared);
+        }
+
+        if (card.statusDotImage != null)
+        {
+            bool showDot = !isCleared;
+            if (card.statusDotImage.enabled != showDot)
+            {
+                card.statusDotImage.enabled = showDot;
+            }
+            if (showDot)
+            {
+                card.statusDotImage.color = (isSelected || isCurrentGameplay)
+                    ? GwThemeTokens.StatusErrorRed
+                    : GwThemeTokens.SignalLowSlate;
+            }
         }
 
         if (card.txtNumber != null)
         {
             card.txtNumber.color = isSelected
                 ? GwThemeTokens.SignalHighTeal
-                : (isCleared ? GwThemeTokens.StatusPassText : GwThemeTokens.TextSecondary);
+                : GwThemeTokens.TextPrimary;
         }
 
         if (card.txtTitle != null)
@@ -534,36 +627,17 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
             card.txtTitle.color = (isSelected || isCleared)
                 ? GwThemeTokens.TextPrimary
                 : GwThemeTokens.TextSecondary;
-            WriteCleanLevelTitleToBuilder(index, sb);
-            card.txtTitle.SetText(sb);
+            card.txtTitle.text = CachedNodeUppercaseTitles[index];
         }
 
-        int quota = ResolveLevelQuota(index);
-        if (card.txtQuota != null)
+        if (card.txtConceptTag != null)
         {
-            sb.Clear();
-            sb.Append("KUOTA: ").Append(quota);
-            card.txtQuota.SetText(sb);
-            card.txtQuota.color = GwThemeTokens.TextSecondary;
-        }
-
-        if (card.txtStatus != null)
-        {
-            if (isCleared)
-            {
-                card.txtStatus.text = StrStatusCleared;
-                card.txtStatus.color = GwThemeTokens.StatusPassText;
-            }
-            else if (isCurrentGameplay)
-            {
-                card.txtStatus.text = StrStatusActive;
-                card.txtStatus.color = GwThemeTokens.SignalHighTeal;
-            }
-            else
-            {
-                card.txtStatus.text = StrStatusLocked;
-                card.txtStatus.color = GwThemeTokens.SignalLowSlate;
-            }
+            card.txtConceptTag.text = isCleared
+                ? CachedNodeClearedGateTags[index]
+                : CachedNodeLockedConceptTags[index];
+            card.txtConceptTag.color = isSelected
+                ? GwThemeTokens.SignalHighTeal
+                : GwThemeTokens.SignalLowSlate;
         }
     }
 
@@ -576,38 +650,9 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
 
         if (txtDetailLevelTag != null)
         {
-            sb.Clear();
-            sb.Append("LEVEL ").Append(CachedLevelNumbers[safeIdx]).Append(" // DETAIL MISI");
-            txtDetailLevelTag.SetText(sb);
-        }
-
-        // Badge Status (SELESAI / AKTIF / TERKUNCI)
-        if (txtDetailStatus != null)
-        {
-            if (isCleared)
-            {
-                txtDetailStatus.text = StrStatusCleared;
-                txtDetailStatus.color = GwThemeTokens.StatusPassText;
-                SetImageColorIfChanged(detailStatusDot, GwThemeTokens.StatusPassEmerald);
-                SetImageColorIfChanged(detailStatusPillBorder, GwThemeTokens.StatusPassEmerald);
-                SetImageColorIfChanged(detailStatusPillBg, GwThemeTokens.SmokedGlass);
-            }
-            else if (isCurrentGameplay)
-            {
-                txtDetailStatus.text = StrStatusActive;
-                txtDetailStatus.color = GwThemeTokens.SignalHighTeal;
-                SetImageColorIfChanged(detailStatusDot, GwThemeTokens.SignalHighTeal);
-                SetImageColorIfChanged(detailStatusPillBorder, GwThemeTokens.SignalHighTeal);
-                SetImageColorIfChanged(detailStatusPillBg, GwThemeTokens.SmokedGlass);
-            }
-            else
-            {
-                txtDetailStatus.text = StrStatusLocked;
-                txtDetailStatus.color = GwThemeTokens.TextSecondary;
-                SetImageColorIfChanged(detailStatusDot, GwThemeTokens.StatusErrorRed);
-                SetImageColorIfChanged(detailStatusPillBorder, GwThemeTokens.HairlineIdle);
-                SetImageColorIfChanged(detailStatusPillBg, GwThemeTokens.CardIdle);
-            }
+            txtDetailLevelTag.text = isCleared
+                ? CachedDetailHeaderClearedTags[safeIdx]
+                : CachedDetailHeaderLockedTags[safeIdx];
         }
 
         if (txtDetailTitle != null)
@@ -624,47 +669,138 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
             txtDetailMission.text = mission;
         }
 
+        // Kotak 1 (Kiri): KUOTA GERBANG -> "X Gerbang"
         int quota = ResolveLevelQuota(safeIdx);
         if (txtDetailQuotaValue != null)
         {
             sb.Clear();
-            sb.Append("MAKS ").Append(quota).Append(" GERBANG LOGIKA");
+            sb.Append(quota).Append(" Gerbang");
             txtDetailQuotaValue.SetText(sb);
         }
 
-        if (txtDetailIoSummary != null)
+        // Kotak 2 (Kanan): STATUS -> SELESAI / AKTIF / TERKUNCI (1:1 Figma)
+        if (txtDetailStatus != null)
         {
-            string inA = (scenario != null && !string.IsNullOrEmpty(scenario.inputAName)) ? scenario.inputAName : "INPUT A";
-            string inB = (scenario != null && !string.IsNullOrEmpty(scenario.inputBName)) ? scenario.inputBName : "INPUT B";
-            string outY = (scenario != null && !string.IsNullOrEmpty(scenario.outputName)) ? scenario.outputName : "OUTPUT";
-            sb.Clear();
-            sb.Append("A: ").Append(inA).Append("  |  B: ").Append(inB).Append("  ->  Y: ").Append(outY);
-            txtDetailIoSummary.SetText(sb);
+            if (isCleared)
+            {
+                txtDetailStatus.text = StrStatusCleared;
+                txtDetailStatus.color = GwThemeTokens.StatusPassText;
+                SetImageColorIfChanged(detailStatusDot, GwThemeTokens.StatusPassEmerald);
+                SetImageColorIfChanged(detailStatusCardBorder, GwThemeTokens.StatusPassEmerald);
+            }
+            else if (isCurrentGameplay)
+            {
+                txtDetailStatus.text = StrStatusActive;
+                txtDetailStatus.color = GwThemeTokens.SignalHighTeal;
+                SetImageColorIfChanged(detailStatusDot, GwThemeTokens.SignalHighTeal);
+                SetImageColorIfChanged(detailStatusCardBorder, GwThemeTokens.SignalHighTeal);
+            }
+            else
+            {
+                txtDetailStatus.text = StrStatusLocked;
+                txtDetailStatus.color = GwThemeTokens.StatusErrorText;
+                SetImageColorIfChanged(detailStatusDot, GwThemeTokens.StatusErrorRed);
+                SetImageColorIfChanged(detailStatusCardBorder, GwThemeTokens.StatusErrorRed);
+            }
         }
 
-        // Proteksi Pedagogis (Anti-Bocoran): Rumus jawaban HANYA tampil jika level sudah LULUS
+        // Proteksi Pedagogis (Anti-Bocoran) pada GERBANG TARGET & EKSPRESI BOOLEAN
+        const float padX = 24f;
+        float innerW = DetailPanelWidth - (padX * 2f);
+        float halfSlotW = (innerW - 12f) * 0.5f;
+
         if (isCleared)
         {
-            SetImageColorIfChanged(detailFormulaCardBorder, GwThemeTokens.StatusPassEmerald);
-            SetImageColorIfChanged(detailFormulaLockDot, GwThemeTokens.StatusPassEmerald);
+            int gateCount = CachedTargetGateCounts[safeIdx];
+            bool hasTwoGates = gateCount >= 2;
+
+            if (targetGateSlot1Rect != null)
+            {
+                targetGateSlot1Rect.sizeDelta = new Vector2(hasTwoGates ? halfSlotW : innerW, 44f);
+            }
+            if (targetGateSlot1Border != null)
+            {
+                targetGateSlot1Border.color = GwThemeTokens.HairlineIdle;
+            }
+            if (targetGateSlot1Icon != null)
+            {
+                targetGateSlot1Icon.sprite = GwThemeTokens.GetIeeeGateSprite(CachedPrimaryGateIcons[safeIdx]);
+                targetGateSlot1Icon.color = GwThemeTokens.SignalHighTeal;
+            }
+            if (targetGateSlot1LabelRect != null)
+            {
+                targetGateSlot1LabelRect.sizeDelta = new Vector2((hasTwoGates ? halfSlotW : innerW) - 70f, 44f);
+            }
+            if (txtTargetGateSlot1 != null)
+            {
+                txtTargetGateSlot1.text = CachedPrimaryGateLabels[safeIdx];
+                txtTargetGateSlot1.color = GwThemeTokens.TextPrimary;
+            }
+
+            if (targetGateSlot2Obj != null && targetGateSlot2Obj.activeSelf != hasTwoGates)
+            {
+                targetGateSlot2Obj.SetActive(hasTwoGates);
+            }
+            if (hasTwoGates)
+            {
+                if (targetGateSlot2Icon != null)
+                {
+                    targetGateSlot2Icon.sprite = GwThemeTokens.GetIeeeGateSprite(CachedSecondaryGateIcons[safeIdx]);
+                    targetGateSlot2Icon.color = GwThemeTokens.SignalHighTeal;
+                }
+                if (txtTargetGateSlot2 != null)
+                {
+                    txtTargetGateSlot2.text = CachedSecondaryGateLabels[safeIdx];
+                    txtTargetGateSlot2.color = GwThemeTokens.TextPrimary;
+                }
+            }
+
+            SetImageColorIfChanged(detailFormulaCardBorder, GwThemeTokens.HairlineIdle);
             if (txtDetailFormulaHeading != null)
             {
-                txtDetailFormulaHeading.text = "RUMUS BOOLEAN TERVERIFIKASI";
-                txtDetailFormulaHeading.color = GwThemeTokens.StatusPassText;
+                txtDetailFormulaHeading.text = safeIdx == 6 ? "HUKUM DE MORGAN" : "EKSPRESI BOOLEAN";
+                txtDetailFormulaHeading.color = GwThemeTokens.TextSecondary;
             }
             if (txtDetailFormulaValue != null)
             {
                 txtDetailFormulaValue.text = CachedVerifiedFormulas[safeIdx];
-                txtDetailFormulaValue.color = GwThemeTokens.TextPrimary;
+                txtDetailFormulaValue.color = GwThemeTokens.SignalHighTeal;
             }
         }
         else
         {
+            if (targetGateSlot1Rect != null)
+            {
+                targetGateSlot1Rect.sizeDelta = new Vector2(innerW, 44f);
+            }
+            if (targetGateSlot1Border != null)
+            {
+                targetGateSlot1Border.color = GwThemeTokens.HairlineIdle;
+            }
+            if (targetGateSlot1Icon != null)
+            {
+                targetGateSlot1Icon.sprite = GwThemeTokens.GetIeeeGateSprite(GwThemeTokens.IeeeGateIconKind.And);
+                targetGateSlot1Icon.color = GwThemeTokens.SignalLowSlate;
+            }
+            if (targetGateSlot1LabelRect != null)
+            {
+                targetGateSlot1LabelRect.sizeDelta = new Vector2(innerW - 70f, 44f);
+            }
+            if (txtTargetGateSlot1 != null)
+            {
+                txtTargetGateSlot1.text = StrTargetGateLocked;
+                txtTargetGateSlot1.color = GwThemeTokens.SignalLowSlate;
+            }
+
+            if (targetGateSlot2Obj != null && targetGateSlot2Obj.activeSelf)
+            {
+                targetGateSlot2Obj.SetActive(false);
+            }
+
             SetImageColorIfChanged(detailFormulaCardBorder, GwThemeTokens.HairlineIdle);
-            SetImageColorIfChanged(detailFormulaLockDot, GwThemeTokens.StatusErrorRed);
             if (txtDetailFormulaHeading != null)
             {
-                txtDetailFormulaHeading.text = "RUMUS BOOLEAN (PROTEKSI MISI)";
+                txtDetailFormulaHeading.text = safeIdx == 6 ? "HUKUM DE MORGAN" : "EKSPRESI BOOLEAN";
                 txtDetailFormulaHeading.color = GwThemeTokens.TextSecondary;
             }
             if (txtDetailFormulaValue != null)
@@ -817,7 +953,7 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
 
     private void BuildHeaderBar(RectTransform parent)
     {
-        // Panel Header tipis di atas
+        // Panel Header tipis di atas (1:1 Figma: PILIH LEVEL // CIRCUIT MAP + pil progres di sebelahnya + X KELUAR di kanan)
         GameObject headerObj = new GameObject("Header_CircuitMap", typeof(RectTransform));
         headerObj.transform.SetParent(parent, false);
         RectTransform headerRect = headerObj.GetComponent<RectTransform>();
@@ -827,40 +963,23 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
         headerRect.anchoredPosition = Vector2.zero;
         headerRect.sizeDelta = new Vector2(ContentWidth, HeaderHeight);
 
-        // Titik aksen kiri + judul utama PILIH LEVEL // CIRCUIT MAP
-        CreateCircleDot("Header_AccentDot", headerRect, 6f, -24f, GwThemeTokens.StatusDotSizePx, GwThemeTokens.SignalHighTeal);
-
         CreateTopLeftTmp(
             "Txt_MapHeaderTitle",
             headerRect,
-            new Vector2(22f, -4f),
-            new Vector2(760f, 38f),
+            new Vector2(0f, -10f),
+            new Vector2(372f, 40f),
             "PILIH LEVEL // CIRCUIT MAP",
             22f,
-            28f,
+            26f,
             GwThemeTokens.TextPrimary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
-        CreateTopLeftTmp(
-            "Txt_MapHeaderSub",
-            headerRect,
-            new Vector2(22f, -42f),
-            new Vector2(760f, 20f),
-            "KURIKULUM MERDEKA FASE E  //  7 MISI GERBANG LOGIKA & ALJABAR BOOLEAN",
-            11f,
-            13f,
-            GwThemeTokens.TextSecondary,
-            TextAlignmentOptions.MidlineLeft,
-            FontStyles.Normal);
-
-        // Pil progres X/7 SELESAI di sebelah kiri tombol keluar
-        const float exitBtnW = 148f;
-        const float progressPillW = 186f;
-        const float headerCtrlH = 44f;
-        const float headerCtrlY = -10f;
-        float exitBtnX = ContentWidth - exitBtnW;
-        float progressPillX = exitBtnX - 14f - progressPillW;
+        // Pil progres X/7 SELESAI tepat di sebelah kanan judul utama (1:1 Figma)
+        const float progressPillW = 136f;
+        const float progressPillH = 30f;
+        const float progressPillX = 382f;
+        const float progressPillY = -15f;
 
         GameObject progObj = new GameObject("Pill_LevelProgress", typeof(RectTransform), typeof(Image));
         progObj.transform.SetParent(headerRect, false);
@@ -868,42 +987,44 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
         progRect.anchorMin = new Vector2(0f, 1f);
         progRect.anchorMax = new Vector2(0f, 1f);
         progRect.pivot = new Vector2(0f, 1f);
-        progRect.anchoredPosition = new Vector2(progressPillX, headerCtrlY);
-        progRect.sizeDelta = new Vector2(progressPillW, headerCtrlH);
+        progRect.anchoredPosition = new Vector2(progressPillX, progressPillY);
+        progRect.sizeDelta = new Vector2(progressPillW, progressPillH);
 
         Image progBg = progObj.GetComponent<Image>();
-        GwThemeTokens.ApplyRoundedRect6(progBg, GwThemeTokens.CardIdle);
+        GwThemeTokens.ApplyRoundedRect6(progBg, GwThemeTokens.SmokedGlass);
         progBg.raycastTarget = false;
-        GwThemeTokens.AttachHairlineBorder(progRect, "Pill_LevelProgress_Border", GwThemeTokens.HairlineIdle);
+        progressPillBorderImg = GwThemeTokens.AttachHairlineBorder(progRect, "Pill_LevelProgress_Border", GwThemeTokens.StatusPassEmerald);
 
-        progressDotImg = CreateCircleDot("Progress_Dot", progRect, 20f, -headerCtrlH * 0.5f, GwThemeTokens.StatusDotSizePx, GwThemeTokens.StatusPassEmerald);
+        progressDotImg = CreateCircleDot("Progress_Dot", progRect, 15f, -progressPillH * 0.5f, 6f, GwThemeTokens.StatusPassEmerald);
 
         txtProgressPill = CreateTopLeftTmp(
             "Txt_ProgressPill",
             progRect,
-            new Vector2(34f, 0f),
-            new Vector2(progressPillW - 44f, headerCtrlH),
+            new Vector2(26f, 0f),
+            new Vector2(progressPillW - 34f, progressPillH),
             "0/7 SELESAI",
-            13f,
-            16f,
-            GwThemeTokens.TextSecondary,
+            10.5f,
+            12f,
+            GwThemeTokens.StatusPassText,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
         // Tombol X KELUAR di pojok kanan atas
+        const float exitBtnW = 124f;
+        const float exitBtnH = 38f;
         btnExitX = CreateRoundedFlatButton(
             "Btn_LevelSelectorExit",
             headerRect,
-            exitBtnX,
-            headerCtrlY,
+            ContentWidth - exitBtnW,
+            -11f,
             exitBtnW,
-            headerCtrlH,
+            exitBtnH,
             "X  KELUAR",
             GwThemeTokens.CardIdle,
-            GwThemeTokens.HairlineActive,
+            GwThemeTokens.HairlineIdle,
             GwThemeTokens.TextPrimary,
-            13.5f,
-            16f,
+            12f,
+            14f,
             hasBorder: true,
             HandleExitClicked,
             out _);
@@ -915,7 +1036,7 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
             new Vector2(0f, 1f),
             new Vector2(0f, 1f),
             new Vector2(0f, 1f),
-            new Vector2(0f, -HeaderHeight - 8f),
+            new Vector2(0f, -HeaderHeight),
             new Vector2(ContentWidth, GwThemeTokens.HairlineBorderPx),
             GwThemeTokens.HairlineIdle);
     }
@@ -936,32 +1057,33 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
         mapBg.raycastTarget = true;
         GwThemeTokens.AttachHairlineBorder(mapRect, "Panel_CircuitMapArea_Border", GwThemeTokens.HairlineIdle);
 
-        // Label sub-seksi di kiri atas peta
+        // Label metadata tunggal tenang di kiri atas peta (1:1 Figma)
         CreateTopLeftTmp(
             "Txt_MapSectionLabel",
             mapRect,
-            new Vector2(28f, -20f),
-            new Vector2(MapPanelWidth - 56f, 22f),
-            "PETA PROGRESI SIRKUIT  //  PILIH NODE UNTUK INSPEKSI MISI",
-            11.5f,
-            13.5f,
+            new Vector2(28f, -22f),
+            new Vector2(MapPanelWidth - 56f, 20f),
+            "KURIKULUM MERDEKA FASE E  //  PROGRESI SIRKUIT 01-07",
+            10.5f,
+            12f,
             GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
-        // Geometri 2 baris node kartu (01-04 baris atas, 05-07 baris bawah terpusat)
-        const float mapPadX = 36f;
-        const float cardGapX = 42f;
-        const float cardW = (MapPanelWidth - (mapPadX * 2f) - (cardGapX * 3f)) / 4f; // ~272.5px
-        const float cardH = 224f;
-        const float row1TopY = -98f;
-        const float rowGapY = 92f;
-        const float row2TopY = row1TopY - cardH - rowGapY; // -414f
+        // Geometri 2 baris node kartu kompak (01-04 baris atas, 05-07 baris bawah terpusat, ruang grid lega seperti Figma)
+        const float cardW = 206f;
+        const float cardH = 148f;
+        const float cardGapX = 82f;
+        float row1TotalW = (4f * cardW) + (3f * cardGapX);
+        float row1StartX = (MapPanelWidth - row1TotalW) * 0.5f;
+        const float row1TopY = -176f;
+        const float rowGapY = 120f;
+        const float row2TopY = row1TopY - cardH - rowGapY;
 
         float[] row1LeftX = new float[4];
         for (int c = 0; c < 4; c++)
         {
-            row1LeftX[c] = mapPadX + (c * (cardW + cardGapX));
+            row1LeftX[c] = row1StartX + (c * (cardW + cardGapX));
         }
 
         float row2TotalW = (3f * cardW) + (2f * cardGapX);
@@ -1022,35 +1144,31 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
                 levelIdx);
         }
 
-        // Layer 3: Legenda status ringkas di tepi bawah panel peta
-        float legendY = -(BodyHeight - 44f);
-        CreateFlatImage(
-            "Map_LegendDivider",
-            mapRect,
-            new Vector2(0f, 1f),
-            new Vector2(0f, 1f),
-            new Vector2(0f, 1f),
-            new Vector2(28f, legendY + 14f),
-            new Vector2(MapPanelWidth - 56f, GwThemeTokens.HairlineBorderPx),
-            GwThemeTokens.HairlineIdle);
-
-        BuildLegendItem(mapRect, 28f, legendY, GwThemeTokens.SignalHighTeal, "DIPILIH / AKTIF");
-        BuildLegendItem(mapRect, 210f, legendY, GwThemeTokens.StatusPassEmerald, "SELESAI (RUMUS TERBUKA)");
-        BuildLegendItem(mapRect, 480f, legendY, GwThemeTokens.SignalLowSlate, "TERKUNCI (RAKIT UNTUK VERIFIKASI)");
-    }
-
-    private void BuildLegendItem(RectTransform parent, float leftX, float topY, Color dotColor, string label)
-    {
-        CreateCircleDot($"LegendDot_{label}", parent, leftX + 4f, topY - 12f, 8f, dotColor);
+        // Layer 3: Legenda 2 item tenang di kiri bawah peta tanpa garis divider (1:1 Figma)
+        float legendY = -(BodyHeight - 36f);
+        CreateGeometricCheckmark("Legend_Check", mapRect, 34f, legendY - 10f, GwThemeTokens.StatusPassText);
         CreateTopLeftTmp(
-            $"LegendTxt_{label}",
-            parent,
-            new Vector2(leftX + 16f, topY - 2f),
-            new Vector2(360f, 20f),
-            label,
-            10.5f,
-            12.5f,
-            GwThemeTokens.TextSecondary,
+            "LegendTxt_Cleared",
+            mapRect,
+            new Vector2(46f, legendY),
+            new Vector2(120f, 20f),
+            "SELESAI",
+            10f,
+            11.5f,
+            GwThemeTokens.StatusPassText,
+            TextAlignmentOptions.MidlineLeft,
+            FontStyles.Bold);
+
+        CreateCircleDot("Legend_ActiveDot", mapRect, 144f, legendY - 10f, 6f, GwThemeTokens.SignalHighTeal);
+        CreateTopLeftTmp(
+            "LegendTxt_Active",
+            mapRect,
+            new Vector2(154f, legendY),
+            new Vector2(260f, 20f),
+            "AKTIF / BELUM TERVERIFIKASI",
+            10f,
+            11.5f,
+            GwThemeTokens.SignalHighTeal,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
     }
@@ -1079,18 +1197,6 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
 
         Image border = GwThemeTokens.AttachHairlineBorder(rect, $"{name}_Border", GwThemeTokens.HairlineIdle);
 
-        // Strip tipis 2px di sisi atas kartu untuk penanda terpilih/lulus
-        Image topBar = CreateFlatImage(
-            "TopAccentBar",
-            rect,
-            new Vector2(0f, 1f),
-            new Vector2(1f, 1f),
-            new Vector2(0.5f, 1f),
-            new Vector2(0f, -1f),
-            new Vector2(-12f, 2f),
-            GwThemeTokens.SignalHighTeal);
-        topBar.enabled = false;
-
         int capturedIndex = levelIndex;
         UnityEngine.Events.UnityAction clickHandler = () => HandleNodeCardClicked(capturedIndex);
 
@@ -1100,87 +1206,64 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
         btn.colors = GwThemeTokens.FlatGlassButtonColors;
         btn.onClick.AddListener(clickHandler);
 
-        const float padX = 18f;
+        const float padX = 16f;
         float innerW = width - (padX * 2f);
 
-        // Baris atas: nomor level besar (01..07) + titik aktif + centang lulus
+        // 1. Kiri atas: Nomor level (01..07)
         TMP_Text numTmp = CreateTopLeftTmp(
             "Txt_NodeNum",
             rect,
-            new Vector2(padX, -18f),
-            new Vector2(68f, 36f),
+            new Vector2(padX, -14f),
+            new Vector2(60f, 28f),
             CachedLevelNumbers[levelIndex],
-            22f,
-            28f,
-            GwThemeTokens.TextSecondary,
+            17f,
+            21f,
+            GwThemeTokens.TextPrimary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
-        Image dotImg = CreateCircleDot(
-            "Icon_ActiveDot",
-            rect,
-            padX + 66f,
-            -36f,
-            GwThemeTokens.StatusDotSizePx,
-            GwThemeTokens.SignalHighTeal);
-        dotImg.enabled = false;
-
+        // Kanan atas: Centang hijau jika lulus, atau titik status kecil jika belum lulus (1:1 Figma)
         GameObject checkRoot = CreateGeometricCheckmark(
             "Icon_ClearedCheck",
             rect,
-            width - padX - 10f,
-            -36f,
+            width - padX - 6f,
+            -26f,
             GwThemeTokens.StatusPassText);
         checkRoot.SetActive(false);
 
-        // Judul level di tengah kartu (wrap 2 baris bersih)
+        Image statusDotImg = CreateCircleDot(
+            "Icon_StatusDot",
+            rect,
+            width - padX - 4f,
+            -26f,
+            6f,
+            GwThemeTokens.StatusErrorRed);
+
+        // 2. Tengah: Judul singkat uppercase (tanpa divider internal)
         TMP_Text titleTmp = CreateTopLeftTmp(
             "Txt_NodeTitle",
             rect,
-            new Vector2(padX, -66f),
-            new Vector2(innerW, 84f),
-            CachedLevelShortTitles[levelIndex],
-            14f,
-            18f,
+            new Vector2(padX, -56f),
+            new Vector2(innerW, 44f),
+            CachedNodeUppercaseTitles[levelIndex],
+            11.5f,
+            13.5f,
             GwThemeTokens.TextPrimary,
             TextAlignmentOptions.TopLeft,
             FontStyles.Bold,
             allowWrap: true);
 
-        // Pembatas bawah internal 1px
-        CreateFlatImage(
-            "Node_FooterDivider",
+        // 3. Kiri bawah: Tag konsep/gerbang singkat (tanpa pengulangan KUOTA: X dan SELESAI)
+        TMP_Text conceptTmp = CreateTopLeftTmp(
+            "Txt_NodeConceptTag",
             rect,
-            new Vector2(0f, 1f),
-            new Vector2(0f, 1f),
-            new Vector2(0f, 1f),
-            new Vector2(padX, -(height - 50f)),
-            new Vector2(innerW, GwThemeTokens.HairlineBorderPx),
-            GwThemeTokens.HairlineIdle);
-
-        // Baris footer: KUOTA kiri + STATUS kanan
-        TMP_Text quotaTmp = CreateTopLeftTmp(
-            "Txt_NodeQuota",
-            rect,
-            new Vector2(padX, -(height - 40f)),
-            new Vector2(innerW * 0.55f, 26f),
-            "KUOTA: 1",
+            new Vector2(padX, -(height - 30f)),
+            new Vector2(innerW, 18f),
+            CachedNodeLockedConceptTags[levelIndex],
+            9.5f,
             11f,
-            13f,
-            GwThemeTokens.TextSecondary,
-            TextAlignmentOptions.MidlineLeft,
-            FontStyles.Bold);
-
-        TMP_Text statusTmp = CreateTopLeftTmp(
-            "Txt_NodeStatus",
-            rect,
-            new Vector2(padX + (innerW * 0.50f), -(height - 40f)),
-            new Vector2(innerW * 0.50f, 26f),
-            StrStatusLocked,
-            11f,
-            13f,
             GwThemeTokens.SignalLowSlate,
-            TextAlignmentOptions.MidlineRight,
+            TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
         return new MapNodeCardUi
@@ -1189,13 +1272,11 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
             clickHandler = clickHandler,
             bgImage = bg,
             borderImage = border,
-            activeDotImage = dotImg,
-            topAccentBar = topBar,
+            statusDotImage = statusDotImg,
             checkIconRoot = checkRoot,
             txtNumber = numTmp,
             txtTitle = titleTmp,
-            txtQuota = quotaTmp,
-            txtStatus = statusTmp
+            txtConceptTag = conceptTmp
         };
     }
 
@@ -1217,121 +1298,104 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
 
         const float padX = 24f;
         float innerW = DetailPanelWidth - (padX * 2f);
-        float y = -24f;
 
-        // 1. Metadata nomor level + badge status (SELESAI / AKTIF / TERKUNCI)
-        txtDetailLevelTag = CreateTopLeftTmp(
-            "Txt_DetailLevelTag",
+        // ---------------------------------------------------------------------
+        // 1. HEADER DETAIL: Eyebrow NODE SIRKUIT TERPILIH + LEVEL 0X + Sub-judul
+        // ---------------------------------------------------------------------
+        CreateTopLeftTmp(
+            "Txt_DetailEyebrow",
             panelRect,
-            new Vector2(padX, y),
-            new Vector2(innerW - 116f, 26f),
-            "LEVEL 01 // DETAIL MISI",
+            new Vector2(padX, -24f),
+            new Vector2(innerW, 16f),
+            "NODE SIRKUIT TERPILIH",
+            10f,
             11.5f,
-            13.5f,
             GwThemeTokens.SignalHighTeal,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
-        GameObject statusPillObj = new GameObject("Pill_DetailStatus", typeof(RectTransform), typeof(Image));
-        statusPillObj.transform.SetParent(panelRect, false);
-        RectTransform statusPillRect = statusPillObj.GetComponent<RectTransform>();
-        statusPillRect.anchorMin = new Vector2(0f, 1f);
-        statusPillRect.anchorMax = new Vector2(0f, 1f);
-        statusPillRect.pivot = new Vector2(0f, 1f);
-        statusPillRect.anchoredPosition = new Vector2(padX + innerW - 112f, y - 1f);
-        statusPillRect.sizeDelta = new Vector2(112f, 28f);
-
-        detailStatusPillBg = statusPillObj.GetComponent<Image>();
-        GwThemeTokens.ApplyRoundedRect6(detailStatusPillBg, GwThemeTokens.CardIdle);
-        detailStatusPillBg.raycastTarget = false;
-        detailStatusPillBorder = GwThemeTokens.AttachHairlineBorder(statusPillRect, "Pill_DetailStatus_Border", GwThemeTokens.HairlineIdle);
-
-        detailStatusDot = CreateCircleDot("DetailStatus_Dot", statusPillRect, 14f, -14f, 7f, GwThemeTokens.StatusErrorRed);
-
-        txtDetailStatus = CreateTopLeftTmp(
-            "Txt_DetailStatus",
-            statusPillRect,
-            new Vector2(24f, 0f),
-            new Vector2(82f, 28f),
-            StrStatusLocked,
-            10.5f,
-            12f,
-            GwThemeTokens.TextSecondary,
+        txtDetailLevelTag = CreateTopLeftTmp(
+            "Txt_DetailLevelTag",
+            panelRect,
+            new Vector2(padX, -44f),
+            new Vector2(innerW, 30f),
+            CachedDetailHeaderLockedTags[0],
+            19f,
+            23f,
+            GwThemeTokens.TextPrimary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
-        y -= 38f;
-
-        // 2. Judul level besar
         txtDetailTitle = CreateTopLeftTmp(
             "Txt_DetailTitle",
             panelRect,
-            new Vector2(padX, y),
-            new Vector2(innerW, 64f),
+            new Vector2(padX, -76f),
+            new Vector2(innerW, 22f),
             CachedLevelShortTitles[0],
-            20f,
-            25f,
-            GwThemeTokens.TextPrimary,
-            TextAlignmentOptions.TopLeft,
-            FontStyles.Bold,
-            allowWrap: true);
-
-        y -= 74f;
-        CreateDetailDivider("DetailDiv_Title", panelRect, padX, y, innerW);
-        y -= 18f;
-
-        // 3. Kartu Misi Operasi
-        CreateTopLeftTmp(
-            "Txt_MissionLabel",
-            panelRect,
-            new Vector2(padX, y),
-            new Vector2(innerW, 18f),
-            "MISI OPERASI",
-            10.5f,
-            12.5f,
+            12f,
+            14f,
             GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
-            FontStyles.Bold);
-        y -= 24f;
+            FontStyles.Normal);
 
+        // ---------------------------------------------------------------------
+        // 2. KARTU MISI OPERASI (label MISI OPERASI di dalam kartu 1:1 Figma)
+        // ---------------------------------------------------------------------
         GameObject missionCardObj = new GameObject("Card_DetailMission", typeof(RectTransform), typeof(Image));
         missionCardObj.transform.SetParent(panelRect, false);
         RectTransform missionCardRect = missionCardObj.GetComponent<RectTransform>();
         missionCardRect.anchorMin = new Vector2(0f, 1f);
         missionCardRect.anchorMax = new Vector2(0f, 1f);
         missionCardRect.pivot = new Vector2(0f, 1f);
-        missionCardRect.anchoredPosition = new Vector2(padX, y);
-        missionCardRect.sizeDelta = new Vector2(innerW, 108f);
+        missionCardRect.anchoredPosition = new Vector2(padX, -118f);
+        missionCardRect.sizeDelta = new Vector2(innerW, 96f);
 
         Image missionBg = missionCardObj.GetComponent<Image>();
         GwThemeTokens.ApplyRoundedRect6(missionBg, GwThemeTokens.CardIdle);
         missionBg.raycastTarget = false;
         GwThemeTokens.AttachHairlineBorder(missionCardRect, "Card_DetailMission_Border", GwThemeTokens.HairlineIdle);
 
+        CreateTopLeftTmp(
+            "Txt_MissionLabel",
+            missionCardRect,
+            new Vector2(16f, -12f),
+            new Vector2(innerW - 32f, 16f),
+            "MISI OPERASI",
+            9.5f,
+            11f,
+            GwThemeTokens.TextSecondary,
+            TextAlignmentOptions.MidlineLeft,
+            FontStyles.Bold);
+
         txtDetailMission = CreateTopLeftTmp(
             "Txt_DetailMission",
             missionCardRect,
-            new Vector2(14f, -12f),
-            new Vector2(innerW - 28f, 84f),
+            new Vector2(16f, -32f),
+            new Vector2(innerW - 32f, 52f),
             CachedFallbackMissions[0],
-            14f,
-            17.5f,
+            13f,
+            15f,
             GwThemeTokens.TextPrimary,
             TextAlignmentOptions.TopLeft,
             FontStyles.Normal,
             allowWrap: true);
 
-        y -= 124f;
+        // ---------------------------------------------------------------------
+        // 3. DUA KOTAK METRIK 50:50 (KUOTA GERBANG | STATUS) 1:1 FIGMA
+        // ---------------------------------------------------------------------
+        const float metricGap = 12f;
+        float halfMetricW = (innerW - metricGap) * 0.5f;
+        const float metricCardY = -228f;
+        const float metricCardH = 66f;
 
-        // 4. Metrik Kuota Gerbang & Terminal I/O
         GameObject quotaCardObj = new GameObject("Card_DetailQuota", typeof(RectTransform), typeof(Image));
         quotaCardObj.transform.SetParent(panelRect, false);
         RectTransform quotaCardRect = quotaCardObj.GetComponent<RectTransform>();
         quotaCardRect.anchorMin = new Vector2(0f, 1f);
         quotaCardRect.anchorMax = new Vector2(0f, 1f);
         quotaCardRect.pivot = new Vector2(0f, 1f);
-        quotaCardRect.anchoredPosition = new Vector2(padX, y);
-        quotaCardRect.sizeDelta = new Vector2(innerW, 88f);
+        quotaCardRect.anchoredPosition = new Vector2(padX, metricCardY);
+        quotaCardRect.sizeDelta = new Vector2(halfMetricW, metricCardH);
 
         Image quotaBg = quotaCardObj.GetComponent<Image>();
         GwThemeTokens.ApplyRoundedRect6(quotaBg, GwThemeTokens.CardIdle);
@@ -1342,10 +1406,10 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
             "Txt_QuotaHeading",
             quotaCardRect,
             new Vector2(14f, -10f),
-            new Vector2(innerW - 28f, 18f),
-            "KUOTA GERBANG & TERMINAL",
-            10f,
-            12f,
+            new Vector2(halfMetricW - 28f, 16f),
+            "KUOTA GERBANG",
+            9.5f,
+            11f,
             GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
@@ -1354,99 +1418,126 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
             "Txt_DetailQuotaValue",
             quotaCardRect,
             new Vector2(14f, -30f),
-            new Vector2(innerW - 28f, 26f),
-            "MAKS 1 GERBANG LOGIKA",
+            new Vector2(halfMetricW - 28f, 24f),
+            "1 Gerbang",
             14f,
-            17f,
-            GwThemeTokens.SignalHighTeal,
+            16.5f,
+            GwThemeTokens.TextPrimary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
-        txtDetailIoSummary = CreateTopLeftTmp(
-            "Txt_DetailIoSummary",
-            quotaCardRect,
-            new Vector2(14f, -58f),
-            new Vector2(innerW - 28f, 22f),
-            "A: PINTU  |  B: JENDELA  ->  Y: ALARM",
-            10.5f,
-            12.5f,
-            GwThemeTokens.TextSecondary,
-            TextAlignmentOptions.MidlineLeft,
-            FontStyles.Normal);
+        GameObject statusCardObj = new GameObject("Card_DetailStatus", typeof(RectTransform), typeof(Image));
+        statusCardObj.transform.SetParent(panelRect, false);
+        RectTransform statusCardRect = statusCardObj.GetComponent<RectTransform>();
+        statusCardRect.anchorMin = new Vector2(0f, 1f);
+        statusCardRect.anchorMax = new Vector2(0f, 1f);
+        statusCardRect.pivot = new Vector2(0f, 1f);
+        statusCardRect.anchoredPosition = new Vector2(padX + halfMetricW + metricGap, metricCardY);
+        statusCardRect.sizeDelta = new Vector2(halfMetricW, metricCardH);
 
-        y -= 104f;
+        Image statusCardBg = statusCardObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(statusCardBg, GwThemeTokens.CardIdle);
+        statusCardBg.raycastTarget = false;
+        detailStatusCardBorder = GwThemeTokens.AttachHairlineBorder(statusCardRect, "Card_DetailStatus_Border", GwThemeTokens.StatusErrorRed);
 
-        // 5. Seksi Gerbang Tersedia (5 gerbang rak kerja, tanpa bocoran jawaban)
         CreateTopLeftTmp(
-            "Txt_AvailGatesHeading",
-            panelRect,
-            new Vector2(padX, y),
-            new Vector2(innerW, 18f),
-            "GERBANG TERSEDIA DI MEJA KERJA",
-            10.5f,
-            12f,
+            "Txt_StatusHeading",
+            statusCardRect,
+            new Vector2(14f, -10f),
+            new Vector2(halfMetricW - 28f, 16f),
+            "STATUS",
+            9.5f,
+            11f,
             GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
-        y -= 24f;
 
-        const float chipGap = 6f;
-        float chipW = (innerW - (chipGap * 4f)) / 5f;
-        const float chipH = 34f;
-        for (int g = 0; g < CachedAvailableGateNames.Length; g++)
-        {
-            GameObject chipObj = new GameObject($"Chip_Gate_{CachedAvailableGateNames[g]}", typeof(RectTransform), typeof(Image));
-            chipObj.transform.SetParent(panelRect, false);
-            RectTransform chipRect = chipObj.GetComponent<RectTransform>();
-            chipRect.anchorMin = new Vector2(0f, 1f);
-            chipRect.anchorMax = new Vector2(0f, 1f);
-            chipRect.pivot = new Vector2(0f, 1f);
-            chipRect.anchoredPosition = new Vector2(padX + (g * (chipW + chipGap)), y);
-            chipRect.sizeDelta = new Vector2(chipW, chipH);
+        detailStatusDot = CreateCircleDot("DetailStatus_Dot", statusCardRect, 18f, -42f, 6f, GwThemeTokens.StatusErrorRed);
 
-            Image chipBg = chipObj.GetComponent<Image>();
-            GwThemeTokens.ApplyRoundedRect6(chipBg, GwThemeTokens.CardIdle);
-            chipBg.raycastTarget = false;
-            GwThemeTokens.AttachHairlineBorder(chipRect, $"Chip_Gate_{g}_Border", GwThemeTokens.HairlineIdle);
+        txtDetailStatus = CreateTopLeftTmp(
+            "Txt_DetailStatus",
+            statusCardRect,
+            new Vector2(28f, -30f),
+            new Vector2(halfMetricW - 38f, 24f),
+            StrStatusLocked,
+            12f,
+            14f,
+            GwThemeTokens.StatusErrorText,
+            TextAlignmentOptions.MidlineLeft,
+            FontStyles.Bold);
 
-            CreateStretchedTmp(
-                $"Txt_ChipGate_{g}",
-                chipRect,
-                CachedAvailableGateNames[g],
-                10.5f,
-                13f,
-                GwThemeTokens.TextPrimary,
-                TextAlignmentOptions.Center,
-                FontStyles.Bold);
-        }
+        // ---------------------------------------------------------------------
+        // 4. SEKSI GERBANG TARGET (dengan Simbol IEEE & Proteksi Pedagogis)
+        // ---------------------------------------------------------------------
+        CreateTopLeftTmp(
+            "Txt_TargetGatesHeading",
+            panelRect,
+            new Vector2(padX, -310f),
+            new Vector2(innerW, 16f),
+            "GERBANG TARGET",
+            10f,
+            11.5f,
+            GwThemeTokens.TextSecondary,
+            TextAlignmentOptions.MidlineLeft,
+            FontStyles.Bold);
 
-        y -= (chipH + 18f);
+        const float gateSlotY = -332f;
+        const float gateSlotH = 44f;
 
-        // 6. Kartu Rumus Boolean (Proteksi Pedagogis: terkunci hingga level lulus)
+        targetGateSlot1Rect = BuildTargetGateSlot(
+            "Slot_TargetGate_1",
+            panelRect,
+            padX,
+            gateSlotY,
+            halfMetricW,
+            gateSlotH,
+            GwThemeTokens.IeeeGateIconKind.Or,
+            "OR",
+            out targetGateSlot1Border,
+            out targetGateSlot1Icon,
+            out targetGateSlot1LabelRect,
+            out txtTargetGateSlot1);
+
+        RectTransform slot2Rect = BuildTargetGateSlot(
+            "Slot_TargetGate_2",
+            panelRect,
+            padX + halfMetricW + metricGap,
+            gateSlotY,
+            halfMetricW,
+            gateSlotH,
+            GwThemeTokens.IeeeGateIconKind.Not,
+            "NOT",
+            out _,
+            out targetGateSlot2Icon,
+            out _,
+            out txtTargetGateSlot2);
+        targetGateSlot2Obj = slot2Rect.gameObject;
+
+        // ---------------------------------------------------------------------
+        // 5. KARTU EKSPRESI BOOLEAN / HUKUM DE MORGAN (Proteksi Pedagogis)
+        // ---------------------------------------------------------------------
         GameObject formulaObj = new GameObject("Card_DetailFormula", typeof(RectTransform), typeof(Image));
         formulaObj.transform.SetParent(panelRect, false);
         RectTransform formulaRect = formulaObj.GetComponent<RectTransform>();
         formulaRect.anchorMin = new Vector2(0f, 1f);
         formulaRect.anchorMax = new Vector2(0f, 1f);
         formulaRect.pivot = new Vector2(0f, 1f);
-        formulaRect.anchoredPosition = new Vector2(padX, y);
-        formulaRect.sizeDelta = new Vector2(innerW, 88f);
+        formulaRect.anchoredPosition = new Vector2(padX, -392f);
+        formulaRect.sizeDelta = new Vector2(innerW, 74f);
 
         Image formulaBg = formulaObj.GetComponent<Image>();
-        GwThemeTokens.ApplyRoundedRect6(formulaBg, GwThemeTokens.SmokedGlass);
+        GwThemeTokens.ApplyRoundedRect6(formulaBg, GwThemeTokens.CardIdle);
         formulaBg.raycastTarget = false;
         detailFormulaCardBorder = GwThemeTokens.AttachHairlineBorder(formulaRect, "Card_DetailFormula_Border", GwThemeTokens.HairlineIdle);
-
-        detailFormulaLockDot = CreateCircleDot("Formula_LockDot", formulaRect, 18f, -20f, 8f, GwThemeTokens.StatusErrorRed);
 
         txtDetailFormulaHeading = CreateTopLeftTmp(
             "Txt_DetailFormulaHeading",
             formulaRect,
-            new Vector2(30f, -10f),
-            new Vector2(innerW - 44f, 20f),
-            "RUMUS BOOLEAN (PROTEKSI MISI)",
-            10f,
-            12f,
+            new Vector2(16f, -10f),
+            new Vector2(innerW - 32f, 16f),
+            "EKSPRESI BOOLEAN",
+            9.5f,
+            11f,
             GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
@@ -1454,32 +1545,31 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
         txtDetailFormulaValue = CreateTopLeftTmp(
             "Txt_DetailFormulaValue",
             formulaRect,
-            new Vector2(14f, -36f),
-            new Vector2(innerW - 28f, 40f),
+            new Vector2(16f, -30f),
+            new Vector2(innerW - 32f, 32f),
             StrFormulaLocked,
-            12f,
-            18f,
+            12.5f,
+            16.5f,
             GwThemeTokens.SignalLowSlate,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
-        // 7. Tombol Aksi Bawah: MULAI SIMULASI -> (Primer Solid Putih) & SANDBOX MODE (Outline)
-        float footerDividerY = -(BodyHeight - 148f);
-        CreateDetailDivider("DetailDiv_Footer", panelRect, padX, footerDividerY, innerW);
-
+        // ---------------------------------------------------------------------
+        // 6. TOMBOL AKSI BAWAH: MULAI SIMULASI -> & SANDBOX MODE (tanpa divider)
+        // ---------------------------------------------------------------------
         btnStartSimulation = CreateRoundedFlatButton(
             "Btn_StartSelectedLevel",
             panelRect,
             padX,
-            -(BodyHeight - 132f),
+            -(BodyHeight - 122f),
             innerW,
-            54f,
+            52f,
             "MULAI SIMULASI ->",
             GwThemeTokens.PrimaryFill,
             GwThemeTokens.PrimaryFill,
             GwThemeTokens.PrimaryText,
-            15f,
-            19f,
+            14.5f,
+            18f,
             hasBorder: false,
             HandleStartSimulationClicked,
             out _);
@@ -1488,18 +1578,78 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
             "Btn_OpenSandboxFromMap",
             panelRect,
             padX,
-            -(BodyHeight - 66f),
+            -(BodyHeight - 58f),
             innerW,
-            46f,
+            44f,
             "SANDBOX MODE",
             GwThemeTokens.CardIdle,
             GwThemeTokens.HairlineActive,
             GwThemeTokens.TextPrimary,
-            13.5f,
-            16f,
+            13f,
+            15.5f,
             hasBorder: true,
             HandleSandboxClicked,
             out _);
+    }
+
+    private RectTransform BuildTargetGateSlot(
+        string name,
+        RectTransform parent,
+        float leftX,
+        float topY,
+        float width,
+        float height,
+        GwThemeTokens.IeeeGateIconKind initialKind,
+        string initialLabel,
+        out Image borderOut,
+        out Image iconOut,
+        out RectTransform labelRectOut,
+        out TMP_Text labelOut)
+    {
+        GameObject slotObj = new GameObject(name, typeof(RectTransform), typeof(Image));
+        slotObj.transform.SetParent(parent, false);
+        RectTransform slotRect = slotObj.GetComponent<RectTransform>();
+        slotRect.anchorMin = new Vector2(0f, 1f);
+        slotRect.anchorMax = new Vector2(0f, 1f);
+        slotRect.pivot = new Vector2(0f, 1f);
+        slotRect.anchoredPosition = new Vector2(leftX, topY);
+        slotRect.sizeDelta = new Vector2(width, height);
+
+        Image slotBg = slotObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(slotBg, GwThemeTokens.CardIdle);
+        slotBg.raycastTarget = false;
+        borderOut = GwThemeTokens.AttachHairlineBorder(slotRect, $"{name}_Border", GwThemeTokens.HairlineIdle);
+
+        GameObject iconObj = new GameObject("Icon_IeeeGate", typeof(RectTransform), typeof(Image));
+        iconObj.transform.SetParent(slotRect, false);
+        RectTransform iconRect = iconObj.GetComponent<RectTransform>();
+        iconRect.anchorMin = new Vector2(0f, 0.5f);
+        iconRect.anchorMax = new Vector2(0f, 0.5f);
+        iconRect.pivot = new Vector2(0f, 0.5f);
+        iconRect.anchoredPosition = new Vector2(12f, 0f);
+        iconRect.sizeDelta = new Vector2(40f, 24f);
+
+        iconOut = iconObj.GetComponent<Image>();
+        iconOut.sprite = GwThemeTokens.GetIeeeGateSprite(initialKind);
+        iconOut.type = Image.Type.Simple;
+        iconOut.preserveAspect = true;
+        iconOut.color = GwThemeTokens.SignalHighTeal;
+        iconOut.raycastTarget = false;
+
+        labelOut = CreateTopLeftTmp(
+            "Txt_GateLabel",
+            slotRect,
+            new Vector2(56f, 0f),
+            new Vector2(width - 68f, height),
+            initialLabel,
+            11.5f,
+            13.5f,
+            GwThemeTokens.TextPrimary,
+            TextAlignmentOptions.MidlineLeft,
+            FontStyles.Bold);
+        labelRectOut = labelOut.rectTransform;
+
+        return slotRect;
     }
 
     // =========================================================================
@@ -1564,19 +1714,6 @@ public sealed class AirWeavingLevelSelectorOverlay : MonoBehaviour
             new Vector2(0f, 1f),
             new Vector2(leftX, topY),
             new Vector2(width, height),
-            GwThemeTokens.HairlineIdle);
-    }
-
-    private static void CreateDetailDivider(string name, RectTransform parent, float leftX, float topY, float width)
-    {
-        CreateFlatImage(
-            name,
-            parent,
-            new Vector2(0f, 1f),
-            new Vector2(0f, 1f),
-            new Vector2(0f, 1f),
-            new Vector2(leftX, topY),
-            new Vector2(width, GwThemeTokens.HairlineBorderPx),
             GwThemeTokens.HairlineIdle);
     }
 

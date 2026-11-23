@@ -22,25 +22,28 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
     private const int OverlayCanvasSortingOrder = 20;
     private const float ReferenceCanvasWidth = 1920f;
     private const float ReferenceCanvasHeight = 1080f;
-    private const float ModalWidth = 820f;
-    private const float ModalHeight = 626f;
+    private const float ModalWidth = 760f;
+    private const float ModalHeight = 588f;
     private const float ShowDelayAfterVerifySeconds = 0.35f;
 
     private static readonly string[] CachedLevelTitles =
     {
-        "Alarm Pintu & Jendela",
-        "Sakelar Tangga Dua Arah",
-        "Kunci Keamanan Brankas",
-        "Pemutus Darurat Reaktor",
-        "Sinkronisasi Inti Kembar",
-        "Sensor Hening Server (NOR)",
-        "Kunci Biometrik De Morgan"
+        "ALARM PINTU & JENDELA",
+        "SAKELAR TANGGA DUA ARAH",
+        "KUNCI KEAMANAN BRANKAS",
+        "PEMUTUS DARURAT REAKTOR",
+        "SINKRONISASI INTI KEMBAR",
+        "SENSOR HENING SERVER (NOR)",
+        "KUNCI BIOMETRIK DE MORGAN"
+    };
+
+    private static readonly string[] CachedLevelNumberStrings =
+    {
+        "01", "02", "03", "04", "05", "06", "07"
     };
 
     private static readonly string[] RowInputALabels = { "0", "0", "1", "1" };
     private static readonly string[] RowInputBLabels = { "0", "1", "0", "1" };
-    private static readonly bool[] RowInputABits = { false, false, true, true };
-    private static readonly bool[] RowInputBBits = { false, true, false, true };
 
     private sealed class SummaryRowUi
     {
@@ -61,7 +64,6 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
     private Button scrimCloseButton;
     private RectTransform safeAreaRect;
     private RectTransform cardRect;
-    private Button btnCloseX;
 
     private TMP_Text txtLevelSubtitle;
     private TMP_Text txtVerifiedFormula;
@@ -222,7 +224,6 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
     public void CleanupImmediate()
     {
         RemoveBtnListener(scrimCloseButton, HandleDismissClicked);
-        RemoveBtnListener(btnCloseX, HandleDismissClicked);
         RemoveBtnListener(btnReplayLevel, HandleReplayLevelClicked);
         RemoveBtnListener(btnNextLevel, HandleNextLevelClicked);
 
@@ -240,7 +241,6 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
         scrimCloseButton = null;
         safeAreaRect = null;
         cardRect = null;
-        btnCloseX = null;
         txtLevelSubtitle = null;
         txtVerifiedFormula = null;
         for (int i = 0; i < summaryRows.Length; i++)
@@ -314,18 +314,21 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
             ? levelManager.levels[lvlIdx]
             : null;
 
-        // 1. Sub-header level
+        // 1. Judul utama level selesai (LEVEL 07 SELESAI - KUNCI BIOMETRIK DE MORGAN, 1:1 Figma)
         if (txtLevelSubtitle != null)
         {
             sb.Clear();
-            sb.Append("LVL ").Append(lvlIdx + 1).Append('/').Append(levelCount).Append("  //  ");
+            string numStr = lvlIdx < CachedLevelNumberStrings.Length
+                ? CachedLevelNumberStrings[lvlIdx]
+                : (lvlIdx + 1).ToString();
+            sb.Append("LEVEL ").Append(numStr).Append(" SELESAI - ");
             if (lvlIdx < CachedLevelTitles.Length)
             {
                 sb.Append(CachedLevelTitles[lvlIdx]);
             }
             else if (scenario != null && !string.IsNullOrEmpty(scenario.levelTitle))
             {
-                sb.Append(scenario.levelTitle);
+                sb.Append(scenario.levelTitle.ToUpperInvariant());
             }
             else
             {
@@ -334,7 +337,7 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
             txtLevelSubtitle.SetText(sb);
         }
 
-        // 2. Rumus Boolean terverifikasi (Y = ...)
+        // 2. Ekspresi Boolean terverifikasi (Y = ...)
         if (txtVerifiedFormula != null)
         {
             string formula = pedagogicalHud != null
@@ -347,7 +350,7 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
             txtVerifiedFormula.text = formula;
         }
 
-        // 3. Ringkasan tabel kebenaran 4 baris (A | B | Y | TGT | OK dalam #34D399)
+        // 3. Ringkasan tabel kebenaran 4 baris (1 = SignalHighTeal #38BDF8, 0 = TextPrimary, STATUS = OK #34D399)
         for (int row = 0; row < TruthRowCount; row++)
         {
             SummaryRowUi rowUi = summaryRows[row];
@@ -361,16 +364,17 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
                                && row < scenario.expectedTruthTable.Length
                                && scenario.expectedTruthTable[row];
             string bitStr = expectedBit ? "1" : "0";
+            Color bitCol = expectedBit ? GwThemeTokens.SignalHighTeal : GwThemeTokens.TextPrimary;
 
             if (rowUi.txtY != null)
             {
                 rowUi.txtY.text = bitStr;
-                rowUi.txtY.color = GwThemeTokens.StatusPassText;
+                rowUi.txtY.color = bitCol;
             }
             if (rowUi.txtTgt != null)
             {
                 rowUi.txtTgt.text = bitStr;
-                rowUi.txtTgt.color = GwThemeTokens.StatusPassText;
+                rowUi.txtTgt.color = bitCol;
             }
             if (rowUi.txtStatus != null)
             {
@@ -379,23 +383,21 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
             }
         }
 
-        // 4. Metrik Kuota Gerbang & Status Verifikasi
+        // 4. Metrik Kuota Gerbang ringkas ("X/Y") & Status Lab ("TERBUKA") 1:1 Figma
         int usedGates = circuitManager != null ? circuitManager.activeGateCardsCount : 1;
         int maxGates = scenario != null ? Mathf.Max(1, scenario.maxGateCardsQuota) : 1;
         if (txtQuotaValue != null)
         {
             sb.Clear();
-            sb.Append(usedGates).Append(" / ").Append(maxGates).Append(" GERBANG (EFISIEN)");
+            sb.Append(usedGates).Append('/').Append(maxGates);
             txtQuotaValue.SetText(sb);
-            txtQuotaValue.color = GwThemeTokens.StatusPassText;
+            txtQuotaValue.color = GwThemeTokens.TextPrimary;
         }
 
         bool isLastLevel = lvlIdx >= (levelCount - 1);
         if (txtVerifySummaryValue != null)
         {
-            txtVerifySummaryValue.text = isLastLevel
-                ? "SEMUA 7 MISI SELESAI"
-                : "4/4 KOMBINASI TERVERIFIKASI";
+            txtVerifySummaryValue.text = "TERBUKA";
             txtVerifySummaryValue.color = GwThemeTokens.StatusPassText;
         }
 
@@ -552,7 +554,7 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
         float contentW = ModalWidth - (padX * 2f);
 
         // ---------------------------------------------------------------------
-        // HEADER: VERIFIKASI LULUS 4/4 (StatusPassText #34D399) + Sub Level + X
+        // HEADER: Eyebrow hijau VERIFIKASI LULUS 4/4 + Judul putih LEVEL 0X SELESAI + Badge 4/4 kanan atas (1:1 Figma)
         // ---------------------------------------------------------------------
         GameObject statusDotObj = new GameObject("Header_PassDot", typeof(RectTransform), typeof(Image));
         statusDotObj.transform.SetParent(cardRect, false);
@@ -560,8 +562,8 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
         dotRect.anchorMin = new Vector2(0f, 1f);
         dotRect.anchorMax = new Vector2(0f, 1f);
         dotRect.pivot = new Vector2(0.5f, 0.5f);
-        dotRect.anchoredPosition = new Vector2(padX + 6f, -38f);
-        dotRect.sizeDelta = new Vector2(10f, 10f);
+        dotRect.anchoredPosition = new Vector2(padX + 4f, -34f);
+        dotRect.sizeDelta = new Vector2(8f, 8f);
 
         Image dotImg = statusDotObj.GetComponent<Image>();
         dotImg.sprite = GwThemeTokens.GetCircleSprite();
@@ -569,52 +571,61 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
         dotImg.color = GwThemeTokens.StatusPassEmerald;
         dotImg.raycastTarget = false;
 
-        TMP_Text headerTmp = CreateTopLeftTmp(
+        CreateTopLeftTmp(
             "Txt_VerifyHeader",
             cardRect,
-            new Vector2(padX + 20f, -20f),
-            new Vector2(contentW - 72f, 36f),
+            new Vector2(padX + 16f, -24f),
+            new Vector2(contentW - 104f, 20f),
             "VERIFIKASI LULUS 4/4",
-            22f,
-            27f,
+            11.5f,
+            13f,
             GwThemeTokens.StatusPassText,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
-        _ = headerTmp;
 
         txtLevelSubtitle = CreateTopLeftTmp(
             "Txt_LevelSubtitle",
             cardRect,
-            new Vector2(padX, -56f),
-            new Vector2(contentW - 52f, 22f),
-            "LVL 1/7  //  Alarm Pintu & Jendela",
-            12.5f,
-            15f,
-            GwThemeTokens.TextSecondary,
-            TextAlignmentOptions.MidlineLeft,
-            FontStyles.Normal);
-
-        btnCloseX = CreateFlatActionButton(
-            "Btn_LevelCompleteCloseX",
-            cardRect,
-            ModalWidth - padX - 36f,
-            -22f,
-            36f,
-            36f,
-            "X",
-            GwThemeTokens.CardIdle,
-            GwThemeTokens.HairlineIdle,
+            new Vector2(padX, -48f),
+            new Vector2(contentW - 84f, 30f),
+            "LEVEL 01 SELESAI - ALARM PINTU & JENDELA",
+            17f,
+            21f,
             GwThemeTokens.TextPrimary,
-            16f,
-            20f,
-            hasBorder: true,
-            HandleDismissClicked,
-            out _);
+            TextAlignmentOptions.MidlineLeft,
+            FontStyles.Bold);
 
-        CreateFlatDivider("Divider_Header", cardRect, padX, -88f, contentW, GwThemeTokens.HairlineBorderPx);
+        // Lencana hijau kanan atas: centang geometris + 4/4 (tanpa tombol X & tanpa Divider_Header, 1:1 Figma)
+        GameObject passBadgeObj = new GameObject("Badge_PassFourOfFour", typeof(RectTransform), typeof(Image));
+        passBadgeObj.transform.SetParent(cardRect, false);
+        RectTransform passBadgeRect = passBadgeObj.GetComponent<RectTransform>();
+        passBadgeRect.anchorMin = new Vector2(0f, 1f);
+        passBadgeRect.anchorMax = new Vector2(0f, 1f);
+        passBadgeRect.pivot = new Vector2(0f, 1f);
+        passBadgeRect.anchoredPosition = new Vector2(ModalWidth - padX - 68f, -32f);
+        passBadgeRect.sizeDelta = new Vector2(68f, 30f);
+
+        Image passBadgeBg = passBadgeObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(passBadgeBg, GwThemeTokens.SmokedGlass);
+        passBadgeBg.raycastTarget = false;
+        GwThemeTokens.AttachHairlineBorder(passBadgeRect, "Badge_PassFourOfFour_Border", GwThemeTokens.StatusPassEmerald);
+
+        CreateGeometricCheckmark("Badge_Check", passBadgeRect, 17f, -15f, GwThemeTokens.StatusPassText);
+
+        CreateTopLeftTmp(
+            "Txt_BadgeFourOfFour",
+            passBadgeRect,
+            new Vector2(28f, 0f),
+            new Vector2(34f, 30f),
+            "4/4",
+            11.5f,
+            13f,
+            GwThemeTokens.StatusPassText,
+            TextAlignmentOptions.MidlineLeft,
+            FontStyles.Bold);
 
         // ---------------------------------------------------------------------
-        // KARTU RUMUS BOOLEAN TERVERIFIKASI (Y = ... dalam TextPrimary bold)
+        // KARTU EKSPRESI BOOLEAN TERVERIFIKASI (Y = ... dalam TextPrimary bold)
         // ---------------------------------------------------------------------
         GameObject formulaCardObj = new GameObject("Card_VerifiedFormula", typeof(RectTransform), typeof(Image));
         formulaCardObj.transform.SetParent(cardRect, false);
@@ -622,8 +633,8 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
         formulaRect.anchorMin = new Vector2(0f, 1f);
         formulaRect.anchorMax = new Vector2(0f, 1f);
         formulaRect.pivot = new Vector2(0f, 1f);
-        formulaRect.anchoredPosition = new Vector2(padX, -104f);
-        formulaRect.sizeDelta = new Vector2(contentW, 86f);
+        formulaRect.anchoredPosition = new Vector2(padX, -96f);
+        formulaRect.sizeDelta = new Vector2(contentW, 82f);
 
         Image formulaBg = formulaCardObj.GetComponent<Image>();
         GwThemeTokens.ApplyRoundedRect6(formulaBg, GwThemeTokens.CardIdle);
@@ -633,11 +644,11 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
         CreateTopLeftTmp(
             "Txt_FormulaLabel",
             formulaRect,
-            new Vector2(18f, -10f),
-            new Vector2(contentW - 36f, 20f),
-            "RUMUS BOOLEAN TERVERIFIKASI",
-            11f,
-            12.5f,
+            new Vector2(20f, -12f),
+            new Vector2(contentW - 40f, 18f),
+            "EKSPRESI BOOLEAN TERVERIFIKASI",
+            10f,
+            11.5f,
             GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
@@ -645,157 +656,173 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
         txtVerifiedFormula = CreateTopLeftTmp(
             "Txt_VerifiedFormula",
             formulaRect,
-            new Vector2(18f, -34f),
-            new Vector2(contentW - 36f, 42f),
+            new Vector2(20f, -34f),
+            new Vector2(contentW - 40f, 38f),
             "Y = A AND B",
             20f,
-            28f,
+            26f,
             GwThemeTokens.TextPrimary,
             TextAlignmentOptions.MidlineLeft,
             FontStyles.Bold);
 
         // ---------------------------------------------------------------------
-        // RINGKASAN TABEL KEBENARAN 4 BARIS (A | B | Y | TGT | OK dalam #34D399)
+        // TABEL KEBENARAN 1 KONTAINER UTUH (GARIS GRID 1PX TANPA KOTAK PER BARIS, 1:1 FIGMA)
         // ---------------------------------------------------------------------
+        const float tableTopY = -194f;
+        const float rowH = 40f;
+        const float tableTotalH = rowH * 5f; // 1 header + 4 baris = 200px
+
         GameObject tableCardObj = new GameObject("Card_TruthTableSummary", typeof(RectTransform), typeof(Image));
         tableCardObj.transform.SetParent(cardRect, false);
         RectTransform tableRect = tableCardObj.GetComponent<RectTransform>();
         tableRect.anchorMin = new Vector2(0f, 1f);
         tableRect.anchorMax = new Vector2(0f, 1f);
         tableRect.pivot = new Vector2(0f, 1f);
-        tableRect.anchoredPosition = new Vector2(padX, -204f);
-        tableRect.sizeDelta = new Vector2(contentW, 224f);
+        tableRect.anchoredPosition = new Vector2(padX, tableTopY);
+        tableRect.sizeDelta = new Vector2(contentW, tableTotalH);
 
         Image tableBg = tableCardObj.GetComponent<Image>();
-        GwThemeTokens.ApplyRoundedRect6(tableBg, GwThemeTokens.SmokedGlass);
+        GwThemeTokens.ApplyRoundedRect6(tableBg, GwThemeTokens.CardIdle);
         tableBg.raycastTarget = false;
         GwThemeTokens.AttachHairlineBorder(tableRect, "Card_TruthTableSummary_Border", GwThemeTokens.HairlineIdle);
 
-        // Header 5 kolom sejajar: A | B | Y | TGT | OK
-        const float tablePadX = 16f;
-        float tableInnerW = contentW - (tablePadX * 2f);
-        BuildTableHeaderRow(tableRect, tablePadX, -10f, tableInnerW, 28f);
-        CreateFlatDivider("Table_HeaderDivider", tableRect, tablePadX, -42f, tableInnerW, GwThemeTokens.HairlineBorderPx);
-
-        const float rowH = 38f;
-        const float rowGap = 6f;
-        float rowY = -50f;
+        BuildTableHeaderRow(tableRect, 0f, 0f, contentW, rowH);
 
         for (int r = 0; r < TruthRowCount; r++)
         {
+            float lineY = -rowH * (r + 1);
+            CreateFlatDivider($"Table_RowDiv_{r}", tableRect, 1f, lineY, contentW - 2f, GwThemeTokens.HairlineBorderPx);
+
             summaryRows[r] = BuildTruthSummaryRow(
                 $"TruthSummaryRow_{r}",
                 tableRect,
-                tablePadX,
-                rowY,
-                tableInnerW,
+                0f,
+                lineY,
+                contentW,
                 rowH,
                 r);
-            rowY -= (rowH + rowGap);
+        }
+
+        // 4 garis grid vertikal 1px penuh dari atas ke bawah tabel (A:17% | B:17% | Y:17% | TGT:17% | STATUS:32%)
+        float colStep = contentW * 0.17f;
+        for (int c = 1; c <= 4; c++)
+        {
+            CreateFlatDivider($"Table_ColDiv_{c}", tableRect, colStep * c, -1f, GwThemeTokens.HairlineBorderPx, tableTotalH - 2f);
         }
 
         // ---------------------------------------------------------------------
-        // METRIK KUOTA GERBANG & STATUS VERIFIKASI
+        // BARIS METRIK: 2 PIL RAMPING 1-BARIS BERDAMPINGAN (Kuota Gerbang X/Y | Status Lab TERBUKA)
         // ---------------------------------------------------------------------
-        GameObject metricsObj = new GameObject("Card_QuotaMetrics", typeof(RectTransform), typeof(Image));
-        metricsObj.transform.SetParent(cardRect, false);
-        RectTransform metricsRect = metricsObj.GetComponent<RectTransform>();
-        metricsRect.anchorMin = new Vector2(0f, 1f);
-        metricsRect.anchorMax = new Vector2(0f, 1f);
-        metricsRect.pivot = new Vector2(0f, 1f);
-        metricsRect.anchoredPosition = new Vector2(padX, -442f);
-        metricsRect.sizeDelta = new Vector2(contentW, 72f);
+        const float metricY = -410f;
+        const float metricH = 44f;
+        const float metricGap = 14f;
+        float leftPillW = (contentW - metricGap) * 0.48f;
+        float rightPillW = contentW - metricGap - leftPillW;
 
-        Image metricsBg = metricsObj.GetComponent<Image>();
-        GwThemeTokens.ApplyRoundedRect6(metricsBg, GwThemeTokens.CardIdle);
-        metricsBg.raycastTarget = false;
-        GwThemeTokens.AttachHairlineBorder(metricsRect, "Card_QuotaMetrics_Border", GwThemeTokens.HairlineIdle);
+        GameObject quotaPillObj = new GameObject("Pill_QuotaMetric", typeof(RectTransform), typeof(Image));
+        quotaPillObj.transform.SetParent(cardRect, false);
+        RectTransform quotaPillRect = quotaPillObj.GetComponent<RectTransform>();
+        quotaPillRect.anchorMin = new Vector2(0f, 1f);
+        quotaPillRect.anchorMax = new Vector2(0f, 1f);
+        quotaPillRect.pivot = new Vector2(0f, 1f);
+        quotaPillRect.anchoredPosition = new Vector2(padX, metricY);
+        quotaPillRect.sizeDelta = new Vector2(leftPillW, metricH);
 
-        float halfMetricW = (contentW * 0.5f) - 24f;
+        Image quotaPillBg = quotaPillObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(quotaPillBg, GwThemeTokens.CardIdle);
+        quotaPillBg.raycastTarget = false;
+        GwThemeTokens.AttachHairlineBorder(quotaPillRect, "Pill_QuotaMetric_Border", GwThemeTokens.HairlineIdle);
+
         CreateTopLeftTmp(
             "Txt_QuotaTitle",
-            metricsRect,
-            new Vector2(18f, -10f),
-            new Vector2(halfMetricW, 18f),
-            "KUOTA GERBANG",
-            10.5f,
-            12.5f,
+            quotaPillRect,
+            new Vector2(16f, 0f),
+            new Vector2(leftPillW * 0.62f, metricH),
+            "Kuota Gerbang",
+            12f,
+            14f,
             GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
-            FontStyles.Bold);
+            FontStyles.Normal);
 
         txtQuotaValue = CreateTopLeftTmp(
             "Txt_QuotaValue",
-            metricsRect,
-            new Vector2(18f, -32f),
-            new Vector2(halfMetricW, 30f),
-            "1 / 1 GERBANG (EFISIEN)",
-            15f,
-            19f,
-            GwThemeTokens.StatusPassText,
-            TextAlignmentOptions.MidlineLeft,
+            quotaPillRect,
+            new Vector2(leftPillW * 0.55f, 0f),
+            new Vector2((leftPillW * 0.45f) - 16f, metricH),
+            "1/1",
+            14f,
+            16.5f,
+            GwThemeTokens.TextPrimary,
+            TextAlignmentOptions.MidlineRight,
             FontStyles.Bold);
 
-        // Pembatas vertikal tengah
-        CreateFlatDivider("Metrics_MidDivider", metricsRect, contentW * 0.5f, -12f, GwThemeTokens.HairlineBorderPx, 48f);
+        GameObject labPillObj = new GameObject("Pill_LabStatusMetric", typeof(RectTransform), typeof(Image));
+        labPillObj.transform.SetParent(cardRect, false);
+        RectTransform labPillRect = labPillObj.GetComponent<RectTransform>();
+        labPillRect.anchorMin = new Vector2(0f, 1f);
+        labPillRect.anchorMax = new Vector2(0f, 1f);
+        labPillRect.pivot = new Vector2(0f, 1f);
+        labPillRect.anchoredPosition = new Vector2(padX + leftPillW + metricGap, metricY);
+        labPillRect.sizeDelta = new Vector2(rightPillW, metricH);
 
-        float rightMetricX = (contentW * 0.5f) + 18f;
+        Image labPillBg = labPillObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(labPillBg, GwThemeTokens.SmokedGlass);
+        labPillBg.raycastTarget = false;
+        GwThemeTokens.AttachHairlineBorder(labPillRect, "Pill_LabStatusMetric_Border", GwThemeTokens.StatusPassEmerald);
+
         CreateTopLeftTmp(
             "Txt_VerifyStatusTitle",
-            metricsRect,
-            new Vector2(rightMetricX, -10f),
-            new Vector2(halfMetricW, 18f),
-            "HASIL PENGUJIAN",
-            10.5f,
-            12.5f,
+            labPillRect,
+            new Vector2(16f, 0f),
+            new Vector2(rightPillW * 0.52f, metricH),
+            "Status Lab",
+            12f,
+            14f,
             GwThemeTokens.TextSecondary,
             TextAlignmentOptions.MidlineLeft,
-            FontStyles.Bold);
+            FontStyles.Normal);
+
+        GameObject labDotObj = new GameObject("LabStatus_Dot", typeof(RectTransform), typeof(Image));
+        labDotObj.transform.SetParent(labPillRect, false);
+        RectTransform labDotRect = labDotObj.GetComponent<RectTransform>();
+        labDotRect.anchorMin = new Vector2(1f, 0.5f);
+        labDotRect.anchorMax = new Vector2(1f, 0.5f);
+        labDotRect.pivot = new Vector2(0.5f, 0.5f);
+        labDotRect.anchoredPosition = new Vector2(-92f, 0f);
+        labDotRect.sizeDelta = new Vector2(6f, 6f);
+
+        Image labDotImg = labDotObj.GetComponent<Image>();
+        labDotImg.sprite = GwThemeTokens.GetCircleSprite();
+        labDotImg.type = Image.Type.Simple;
+        labDotImg.color = GwThemeTokens.StatusPassEmerald;
+        labDotImg.raycastTarget = false;
 
         txtVerifySummaryValue = CreateTopLeftTmp(
             "Txt_VerifyStatusValue",
-            metricsRect,
-            new Vector2(rightMetricX, -32f),
-            new Vector2(halfMetricW, 30f),
-            "4/4 KOMBINASI COCOK",
-            15f,
-            19f,
+            labPillRect,
+            new Vector2(rightPillW - 96f, 0f),
+            new Vector2(80f, metricH),
+            "TERBUKA",
+            12.5f,
+            14.5f,
             GwThemeTokens.StatusPassText,
-            TextAlignmentOptions.MidlineLeft,
+            TextAlignmentOptions.MidlineRight,
             FontStyles.Bold);
 
         // ---------------------------------------------------------------------
-        // FOOTER: ULANGI LEVEL (OUTLINE SEKUNDER) + LANJUT LEVEL -> (PRIMER PUTIH)
+        // FOOTER: LANJUT LEVEL -> (PRIMER PUTIH LEBAR DI KIRI) + ULANGI LEVEL (OUTLINE DI KANAN) 1:1 FIGMA
         // ---------------------------------------------------------------------
-        CreateFlatDivider("Divider_Footer", cardRect, padX, -530f, contentW, GwThemeTokens.HairlineBorderPx);
-
-        const float footerBtnY = -548f;
-        const float footerBtnH = 54f;
-        const float btnGap = 16f;
-        float replayBtnW = 240f;
+        const float footerBtnY = -504f;
+        const float footerBtnH = 52f;
+        const float btnGap = 14f;
+        float replayBtnW = 220f;
         float nextBtnW = contentW - replayBtnW - btnGap;
-
-        btnReplayLevel = CreateFlatActionButton(
-            "Btn_ReplayLevel_V85",
-            cardRect,
-            padX,
-            footerBtnY,
-            replayBtnW,
-            footerBtnH,
-            "ULANGI LEVEL",
-            GwThemeTokens.CardIdle,
-            GwThemeTokens.HairlineActive,
-            GwThemeTokens.TextPrimary,
-            14.5f,
-            18f,
-            hasBorder: true,
-            HandleReplayLevelClicked,
-            out _);
 
         btnNextLevel = CreateFlatActionButton(
             "Btn_NextLevel_V85",
             cardRect,
-            padX + replayBtnW + btnGap,
+            padX,
             footerBtnY,
             nextBtnW,
             footerBtnH,
@@ -803,23 +830,41 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
             GwThemeTokens.PrimaryFill,
             GwThemeTokens.PrimaryFill,
             GwThemeTokens.PrimaryText,
-            16f,
-            20f,
+            15f,
+            18f,
             hasBorder: false,
             HandleNextLevelClicked,
             out txtNextLevelLabel);
+
+        btnReplayLevel = CreateFlatActionButton(
+            "Btn_ReplayLevel_V85",
+            cardRect,
+            padX + nextBtnW + btnGap,
+            footerBtnY,
+            replayBtnW,
+            footerBtnH,
+            "ULANGI LEVEL",
+            GwThemeTokens.CardIdle,
+            GwThemeTokens.HairlineActive,
+            GwThemeTokens.TextPrimary,
+            13.5f,
+            16f,
+            hasBorder: true,
+            HandleReplayLevelClicked,
+            out _);
 
         modalRootObj.SetActive(false);
     }
 
     private void BuildTableHeaderRow(RectTransform parent, float leftX, float topY, float width, float height)
     {
-        float colW = width / 5f;
-        CreateTopLeftTmp("Hdr_A", parent, new Vector2(leftX + (colW * 0f), topY), new Vector2(colW, height), "A", 12f, 14f, GwThemeTokens.TextSecondary, TextAlignmentOptions.Center, FontStyles.Bold);
-        CreateTopLeftTmp("Hdr_B", parent, new Vector2(leftX + (colW * 1f), topY), new Vector2(colW, height), "B", 12f, 14f, GwThemeTokens.TextSecondary, TextAlignmentOptions.Center, FontStyles.Bold);
-        CreateTopLeftTmp("Hdr_Y", parent, new Vector2(leftX + (colW * 2f), topY), new Vector2(colW, height), "Y", 12f, 14f, GwThemeTokens.TextSecondary, TextAlignmentOptions.Center, FontStyles.Bold);
-        CreateTopLeftTmp("Hdr_TGT", parent, new Vector2(leftX + (colW * 3f), topY), new Vector2(colW, height), "TGT", 12f, 14f, GwThemeTokens.TextSecondary, TextAlignmentOptions.Center, FontStyles.Bold);
-        CreateTopLeftTmp("Hdr_OK", parent, new Vector2(leftX + (colW * 4f), topY), new Vector2(colW, height), "STATUS", 12f, 14f, GwThemeTokens.TextSecondary, TextAlignmentOptions.Center, FontStyles.Bold);
+        float colW = width * 0.17f;
+        float statusW = width - (colW * 4f);
+        CreateTopLeftTmp("Hdr_A", parent, new Vector2(leftX + (colW * 0f), topY), new Vector2(colW, height), "A", 11f, 12.5f, GwThemeTokens.TextSecondary, TextAlignmentOptions.Center, FontStyles.Bold);
+        CreateTopLeftTmp("Hdr_B", parent, new Vector2(leftX + (colW * 1f), topY), new Vector2(colW, height), "B", 11f, 12.5f, GwThemeTokens.TextSecondary, TextAlignmentOptions.Center, FontStyles.Bold);
+        CreateTopLeftTmp("Hdr_Y", parent, new Vector2(leftX + (colW * 2f), topY), new Vector2(colW, height), "Y", 11f, 12.5f, GwThemeTokens.TextSecondary, TextAlignmentOptions.Center, FontStyles.Bold);
+        CreateTopLeftTmp("Hdr_TGT", parent, new Vector2(leftX + (colW * 3f), topY), new Vector2(colW, height), "TGT", 11f, 12.5f, GwThemeTokens.TextSecondary, TextAlignmentOptions.Center, FontStyles.Bold);
+        CreateTopLeftTmp("Hdr_OK", parent, new Vector2(leftX + (colW * 4f), topY), new Vector2(statusW, height), "STATUS", 11f, 12.5f, GwThemeTokens.TextSecondary, TextAlignmentOptions.Center, FontStyles.Bold);
     }
 
     private SummaryRowUi BuildTruthSummaryRow(
@@ -831,7 +876,7 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
         float height,
         int rowIndex)
     {
-        GameObject rowObj = new GameObject(name, typeof(RectTransform), typeof(Image));
+        GameObject rowObj = new GameObject(name, typeof(RectTransform));
         rowObj.transform.SetParent(parent, false);
         RectTransform rect = rowObj.GetComponent<RectTransform>();
         rect.anchorMin = new Vector2(0f, 1f);
@@ -840,28 +885,30 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
         rect.anchoredPosition = new Vector2(leftX, topY);
         rect.sizeDelta = new Vector2(width, height);
 
-        Image bg = rowObj.GetComponent<Image>();
-        GwThemeTokens.ApplyRoundedRect6(bg, GwThemeTokens.CardIdle);
-        bg.raycastTarget = false;
+        float colW = width * 0.17f;
+        float statusX = colW * 4f;
+        float statusW = width - statusX;
 
-        GwThemeTokens.AttachHairlineBorder(rect, $"{name}_Border", GwThemeTokens.HairlineIdle);
+        CreateTopLeftTmp("Col_A", rect, new Vector2(colW * 0f, 0f), new Vector2(colW, height), RowInputALabels[rowIndex], 13.5f, 16f, GwThemeTokens.TextPrimary, TextAlignmentOptions.Center, FontStyles.Bold);
+        CreateTopLeftTmp("Col_B", rect, new Vector2(colW * 1f, 0f), new Vector2(colW, height), RowInputBLabels[rowIndex], 13.5f, 16f, GwThemeTokens.TextPrimary, TextAlignmentOptions.Center, FontStyles.Bold);
 
-        float colW = width / 5f;
-        Color colA = GwThemeTokens.GetSignalColor(RowInputABits[rowIndex]);
-        Color colB = GwThemeTokens.GetSignalColor(RowInputBBits[rowIndex]);
+        TMP_Text txtY = CreateTopLeftTmp("Col_Y", rect, new Vector2(colW * 2f, 0f), new Vector2(colW, height), "0", 13.5f, 16f, GwThemeTokens.TextPrimary, TextAlignmentOptions.Center, FontStyles.Bold);
+        TMP_Text txtTgt = CreateTopLeftTmp("Col_TGT", rect, new Vector2(colW * 3f, 0f), new Vector2(colW, height), "0", 13.5f, 16f, GwThemeTokens.TextPrimary, TextAlignmentOptions.Center, FontStyles.Bold);
 
-        CreateTopLeftTmp("Col_A", rect, new Vector2(colW * 0f, 0f), new Vector2(colW, height), RowInputALabels[rowIndex], 14f, 17f, colA, TextAlignmentOptions.Center, FontStyles.Bold);
-        CreateTopLeftTmp("Col_B", rect, new Vector2(colW * 1f, 0f), new Vector2(colW, height), RowInputBLabels[rowIndex], 14f, 17f, colB, TextAlignmentOptions.Center, FontStyles.Bold);
+        float checkCenterX = statusX + (statusW * 0.5f) - 14f;
+        CreateGeometricCheckmark("Icon_RowCheck", rect, checkCenterX, -height * 0.5f, GwThemeTokens.StatusPassText);
 
-        TMP_Text txtY = CreateTopLeftTmp("Col_Y", rect, new Vector2(colW * 2f, 0f), new Vector2(colW, height), "0", 14f, 17f, GwThemeTokens.StatusPassText, TextAlignmentOptions.Center, FontStyles.Bold);
-        TMP_Text txtTgt = CreateTopLeftTmp("Col_TGT", rect, new Vector2(colW * 3f, 0f), new Vector2(colW, height), "0", 14f, 17f, GwThemeTokens.StatusPassText, TextAlignmentOptions.Center, FontStyles.Bold);
-        TMP_Text txtStatus = CreateTopLeftTmp("Col_OK", rect, new Vector2(colW * 4f, 0f), new Vector2(colW, height), "OK", 13.5f, 16.5f, GwThemeTokens.StatusPassText, TextAlignmentOptions.Center, FontStyles.Bold);
-
-        // Pembatas kolom tipis 1px HairlineIdle antar sel tabel
-        for (int c = 1; c <= 4; c++)
-        {
-            CreateFlatDivider($"ColDiv_{c}", rect, colW * c, -8f, GwThemeTokens.HairlineBorderPx, height - 16f);
-        }
+        TMP_Text txtStatus = CreateTopLeftTmp(
+            "Col_OK",
+            rect,
+            new Vector2(statusX + (statusW * 0.5f) - 2f, 0f),
+            new Vector2(44f, height),
+            "OK",
+            12.5f,
+            15f,
+            GwThemeTokens.StatusPassText,
+            TextAlignmentOptions.MidlineLeft,
+            FontStyles.Bold);
 
         return new SummaryRowUi
         {
@@ -869,6 +916,44 @@ public sealed class AirWeavingLevelCompleteModal : MonoBehaviour
             txtTgt = txtTgt,
             txtStatus = txtStatus
         };
+    }
+
+    private static void CreateGeometricCheckmark(string name, RectTransform parent, float centerX, float centerY, Color color)
+    {
+        GameObject root = new GameObject(name, typeof(RectTransform));
+        root.transform.SetParent(parent, false);
+        RectTransform rootRect = root.GetComponent<RectTransform>();
+        rootRect.anchorMin = new Vector2(0f, 1f);
+        rootRect.anchorMax = new Vector2(0f, 1f);
+        rootRect.pivot = new Vector2(0.5f, 0.5f);
+        rootRect.anchoredPosition = new Vector2(centerX, centerY);
+        rootRect.sizeDelta = new Vector2(12f, 12f);
+
+        GameObject shortObj = new GameObject("Check_Short", typeof(RectTransform), typeof(Image));
+        shortObj.transform.SetParent(rootRect, false);
+        RectTransform shortRect = shortObj.GetComponent<RectTransform>();
+        shortRect.anchorMin = new Vector2(0.5f, 0.5f);
+        shortRect.anchorMax = new Vector2(0.5f, 0.5f);
+        shortRect.pivot = new Vector2(0.5f, 0.5f);
+        shortRect.anchoredPosition = new Vector2(-2.4f, -1.0f);
+        shortRect.sizeDelta = new Vector2(4.4f, 1.6f);
+        shortRect.localRotation = Quaternion.Euler(0f, 0f, -45f);
+        Image shortImg = shortObj.GetComponent<Image>();
+        shortImg.color = color;
+        shortImg.raycastTarget = false;
+
+        GameObject longObj = new GameObject("Check_Long", typeof(RectTransform), typeof(Image));
+        longObj.transform.SetParent(rootRect, false);
+        RectTransform longRect = longObj.GetComponent<RectTransform>();
+        longRect.anchorMin = new Vector2(0.5f, 0.5f);
+        longRect.anchorMax = new Vector2(0.5f, 0.5f);
+        longRect.pivot = new Vector2(0.5f, 0.5f);
+        longRect.anchoredPosition = new Vector2(1.2f, 0.3f);
+        longRect.sizeDelta = new Vector2(7.8f, 1.6f);
+        longRect.localRotation = Quaternion.Euler(0f, 0f, 45f);
+        Image longImg = longObj.GetComponent<Image>();
+        longImg.color = color;
+        longImg.raycastTarget = false;
     }
 
     private void ApplySafeAreaAndResponsiveScaleIfNeeded(bool force)

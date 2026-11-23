@@ -56,8 +56,6 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     };
 
     private static readonly Color TestHaloCyanColor = new Color(GwThemeTokens.SignalHighTeal.r, GwThemeTokens.SignalHighTeal.g, GwThemeTokens.SignalHighTeal.b, 0.72f);
-    private static readonly Color OverQuotaHaloRedColor = new Color(GwThemeTokens.StatusErrorRed.r, GwThemeTokens.StatusErrorRed.g, GwThemeTokens.StatusErrorRed.b, 0.88f);
-    private static readonly Color CheckRedHaloErrorColor = new Color(GwThemeTokens.StatusErrorRed.r, GwThemeTokens.StatusErrorRed.g, GwThemeTokens.StatusErrorRed.b, 0.84f);
     private static readonly Color WinHaloGreenColor = new Color(GwThemeTokens.StatusPassEmerald.r, GwThemeTokens.StatusPassEmerald.g, GwThemeTokens.StatusPassEmerald.b, 0.92f);
     private static readonly Color WinHaloOuterColor = new Color(GwThemeTokens.StatusPassText.r, GwThemeTokens.StatusPassText.g, GwThemeTokens.StatusPassText.b, 0.50f);
 
@@ -79,8 +77,6 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
     private Material badgeBackdropMat;
     private Material badgeBorderMat;
 
-    private readonly Vector3[] invitationRingPoints = new Vector3[RingSegments];
-    private readonly Vector3[] winOuterRingPoints = new Vector3[RingSegments];
     private readonly Vector3[] progressArcPoints = new Vector3[RingSegments + 1];
 
     private bool isVisualInitialized = false;
@@ -367,7 +363,6 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         float camDepth = Mathf.Max(0.85f, Vector3.Dot(outputWorldPos - camT.position, camForward));
         float distFactor = Mathf.Clamp(camDepth / ReferenceCameraDepth, 0.32f, 1.65f);
         float effectiveHaloScale = Mathf.Clamp(zoomScale, 0.22f, AirWeavingStageController.MaxZoomScale);
-        float haloWidthScale = Mathf.Clamp(effectiveHaloScale, 0.72f, 2.60f);
         float scaledHaloRadius = HaloRadius * effectiveHaloScale;
 
         // Halo 3D sejajar bidang meja XZ mengitari dudukan Output secara spasial (bukan stiker 2D di layar)
@@ -376,38 +371,9 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
         Vector3 tableUp = stageRoot != null ? stageRoot.up : camUp;
         Vector3 haloCenter = outputWorldPos + (tableUp * (HaloCenterUpOffset * effectiveHaloScale));
 
-        // A. Halo Diegetik 3D sesuai status debugging live (hijau HANYA jika rangkaian live benar-benar PassedAllFour)
-        if (guidanceState == OutputDebugGuidanceState.PassedAllFour)
-        {
-            float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 5.0f));
-            float innerR = scaledHaloRadius + (0.010f * pulse * effectiveHaloScale);
-            float outerR = scaledHaloRadius + ((0.024f + (0.010f * pulse)) * effectiveHaloScale);
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, innerR, WinHaloGreenColor, 0.0080f * haloWidthScale);
-            DrawFullCircle(winOuterRingRenderer, winOuterRingPoints, haloCenter, ringAxisA, ringAxisB, outerR, WinHaloOuterColor, 0.0052f * haloWidthScale);
-        }
-        else if (guidanceState == OutputDebugGuidanceState.ReduceGates)
-        {
-            float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 6.5f));
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.008f * pulse * effectiveHaloScale), OverQuotaHaloRedColor, 0.0080f * haloWidthScale);
-            SetRingEnabled(winOuterRingRenderer, false);
-        }
-        else if (guidanceState == OutputDebugGuidanceState.CheckRedCells)
-        {
-            float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 5.5f));
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.007f * pulse * effectiveHaloScale), CheckRedHaloErrorColor, 0.0072f * haloWidthScale);
-            SetRingEnabled(winOuterRingRenderer, false);
-        }
-        else if (guidanceState == OutputDebugGuidanceState.TestSwitches)
-        {
-            float pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 2.6f));
-            DrawFullCircle(invitationRingRenderer, invitationRingPoints, haloCenter, ringAxisA, ringAxisB, scaledHaloRadius + (0.005f * pulse * effectiveHaloScale), TestHaloCyanColor, 0.0062f * haloWidthScale);
-            SetRingEnabled(winOuterRingRenderer, false);
-        }
-        else
-        {
-            SetRingEnabled(invitationRingRenderer, false);
-            SetRingEnabled(winOuterRingRenderer, false);
-        }
+        // A. v8.5 Output Vault memakai plinth fisik titanium-grafit; cincin neon lantai dinonaktifkan
+        SetRingEnabled(invitationRingRenderer, false);
+        SetRingEnabled(winOuterRingRenderer, false);
 
         // B. Cincin Progres 0 -> 360 derajat (hanya pasca-Auto-Win saat menahan Kepal untuk lanjut level)
         if (chargeProgress > 0.01f && progressArcRenderer != null)
@@ -588,38 +554,6 @@ public sealed class AirWeavingOutputTrigger : MonoBehaviour
             sr.sharedMaterial = mat;
         }
         return sr;
-    }
-
-    private static void DrawFullCircle(
-        LineRenderer lr,
-        Vector3[] buffer,
-        Vector3 center,
-        Vector3 axisA,
-        Vector3 axisB,
-        float radius,
-        Color color,
-        float width)
-    {
-        if (lr == null || buffer == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < RingSegments; i++)
-        {
-            float angle = (i / (float)RingSegments) * Mathf.PI * 2f;
-            buffer[i] = center + (axisA * (Mathf.Cos(angle) * radius)) + (axisB * (Mathf.Sin(angle) * radius));
-        }
-
-        if (lr.sharedMaterial != null)
-        {
-            lr.sharedMaterial.color = color;
-        }
-        lr.enabled = true;
-        lr.widthMultiplier = width;
-        lr.startColor = color;
-        lr.endColor = color;
-        lr.SetPositions(buffer);
     }
 
     private static LineRenderer CreateRingRenderer(string name, Transform parent, int positionCount, bool loop, float width, Material mat)

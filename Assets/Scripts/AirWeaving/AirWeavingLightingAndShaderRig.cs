@@ -5,10 +5,10 @@ using UnityEngine.Rendering;
 
 /// <summary>
 /// Pengendali Custom Shader, 3-Point + Hemisphere Lighting Rig 1-Pass, &amp; Fresnel Rim Glow khusus Mode Udara
-/// (GateWeaver AR v8.0 Tahap 6 — Built-in Forward, Linear Color Space, OpenGLES3, 60 FPS Zero-GC):
+/// (GateWeaver AR v8.0 Tahap 6 -- Built-in Forward, Linear Color Space, OpenGLES3, 60 FPS Zero-GC):
 /// - Memuat shader ARBackdropDimming &amp; HologramFresnelHardware melalui manifest Assets/Resources/Shaders/ (anti-stripping APK).
 /// - Mendorong 3-Point Lighting (Key + Fill + Rim) &amp; Hemisphere Ambient secara analitik di 1 pass ForwardBase
-///   melalui global vector (0 lampu Unity baru, 0 pass ForwardAdd, 0 pass shadow map di Mode Udara, aman orbit 360°).
+///   melalui global vector (0 lampu Unity baru, 0 pass ForwardAdd, 0 pass shadow map di Mode Udara, aman orbit 360 deg).
 /// - Menyimpan &amp; memulihkan 100% lampu scene, RenderSettings, dan shader bawaan GateNode saat kembali ke Mode Kartu (v5).
 /// </summary>
 public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
@@ -47,32 +47,28 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
     private const float DefaultVignetteSoftness = 0.65f;
     private const float DefaultVignetteStrength = 0.40f;
 
-    // Warna 3-Point + Hemisphere Lighting dalam Linear Space eksplisit (dikirim lewat Shader.SetGlobalVector -> 0 konversi ganda)
-    private static readonly Vector4 KeyLightColorLinear = ToLinearLightVector(1.00f, 0.97f, 0.92f, 1.05f);
-    private static readonly Vector4 FillLightColorLinear = ToLinearLightVector(0.58f, 0.78f, 0.98f, 0.44f);
-    private static readonly Vector4 RimLightColorLinear = ToLinearLightVector(0.46f, 0.90f, 1.00f, 0.60f);
-    private static readonly Vector4 HemiSkyColorLinear = ToLinearLightVector(0.56f, 0.66f, 0.78f, 0.52f);
-    private static readonly Vector4 HemiGroundColorLinear = ToLinearLightVector(0.38f, 0.46f, 0.58f, 0.48f);
+    // Warna 3-Point + Hemisphere Studio Softbox Lighting dalam Linear Space eksplisit (dikirim lewat Shader.SetGlobalVector -> 0 konversi ganda)
+    private static readonly Vector4 KeyLightColorLinear = ToLinearLightVector(1.00f, 0.98f, 0.96f, 1.18f);
+    private static readonly Vector4 FillLightColorLinear = ToLinearLightVector(0.78f, 0.85f, 0.94f, 0.58f);
+    private static readonly Vector4 RimLightColorLinear = ToLinearLightVector(0.86f, 0.91f, 0.98f, 0.66f);
+    private static readonly Vector4 HemiSkyColorLinear = ToLinearLightVector(0.78f, 0.83f, 0.90f, 0.64f);
+    private static readonly Vector4 HemiGroundColorLinear = ToLinearLightVector(0.56f, 0.62f, 0.70f, 0.56f);
 
     // Palet Backdrop dalam Linear Space eksplisit
     private static readonly Color BackdropTintLinear = SrgbToLinearColor(0.94f, 0.97f, 1.00f);
     private static readonly Color VignetteNavyLinear = SrgbToLinearColor(0.015f, 0.035f, 0.070f);
 
-    // Palet Fresnel Rim Glow dalam Linear Space eksplisit untuk MaterialPropertyBlock.SetColor (tajam, tidak pucat!)
-    private static readonly Color RimHighEmeraldLinear = SrgbToLinearColor(0.14f, 1.00f, 0.78f);
-    private static readonly Color RimHighInputACyanLinear = SrgbToLinearColor(0.18f, 0.94f, 1.00f);
-    private static readonly Color RimHighInputBGoldLinear = SrgbToLinearColor(1.00f, 0.88f, 0.24f);
-    private static readonly Color RimLowCopperLinear = SrgbToLinearColor(0.86f, 0.28f, 0.12f);
-    private static readonly Color RimLowInputALinear = SrgbToLinearColor(0.28f, 0.62f, 0.74f);
-    private static readonly Color RimLowInputBLinear = SrgbToLinearColor(0.76f, 0.54f, 0.16f);
-    private static readonly Color RimOutputHighLinear = SrgbToLinearColor(0.18f, 1.00f, 0.82f);
-    private static readonly Color RimOutputLowLinear = SrgbToLinearColor(0.74f, 0.26f, 0.14f);
-    private static readonly Color RimParkedIceLinear = SrgbToLinearColor(0.24f, 0.80f, 0.98f);
-    private static readonly Color RimHoverCyanLinear = SrgbToLinearColor(0.34f, 0.98f, 1.00f);
-    private static readonly Color RimHoverGoldLinear = SrgbToLinearColor(1.00f, 0.88f, 0.28f);
-    private static readonly Color RimPortFocusMintLinear = SrgbToLinearColor(0.30f, 1.00f, 0.84f);
-    private static readonly Color RimGrabGoldLinear = SrgbToLinearColor(1.00f, 0.86f, 0.22f);
-    private static readonly Color RimDeleteRedLinear = SrgbToLinearColor(1.00f, 0.22f, 0.18f);
+    // Palet Fresnel Rim Glow v8.5 (Brushed Titanium + SignalTeal + PassEmerald) dalam Linear Space eksplisit untuk MaterialPropertyBlock.SetColor
+    private static readonly Color RimHighTealLinear = SrgbToLinearColor(0x38 / 255f, 0xBD / 255f, 0xF8 / 255f);
+    private static readonly Color RimLowSlateLinear = SrgbToLinearColor(0x64 / 255f, 0x74 / 255f, 0x8B / 255f);
+    private static readonly Color RimOutputHighLinear = SrgbToLinearColor(0x10 / 255f, 0xB9 / 255f, 0x81 / 255f);
+    private static readonly Color RimOutputLowLinear = SrgbToLinearColor(0x47 / 255f, 0x55 / 255f, 0x69 / 255f);
+    private static readonly Color RimParkedTitaniumLinear = SrgbToLinearColor(0x94 / 255f, 0xA3 / 255f, 0xB8 / 255f);
+    private static readonly Color RimHoverTealLinear = SrgbToLinearColor(0x38 / 255f, 0xBD / 255f, 0xF8 / 255f);
+    private static readonly Color RimHoverOrangeLinear = SrgbToLinearColor(0xF9 / 255f, 0x73 / 255f, 0x16 / 255f);
+    private static readonly Color RimPortFocusTealLinear = SrgbToLinearColor(0x38 / 255f, 0xBD / 255f, 0xF8 / 255f);
+    private static readonly Color RimGrabOrangeLinear = SrgbToLinearColor(0xF9 / 255f, 0x73 / 255f, 0x16 / 255f);
+    private static readonly Color RimDeleteRedLinear = SrgbToLinearColor(0xEF / 255f, 0x44 / 255f, 0x44 / 255f);
 
     private static Shader cachedBackdropShader;
     private static Shader cachedHardwareShader;
@@ -233,6 +229,7 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
     public void ActivateForAirWeaving(Camera mainCam, Transform stageRoot, List<GateNode> nodes)
     {
         SnapshotAndConfigureSceneLightsForAirMode();
+        GwIndustrial3DKit.ApplyStudioReflectionEnvironment();
 
         trackedNodes.Clear();
         Shader hardwareShader = ResolveHardwareFresnelShader();
@@ -267,7 +264,7 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
 
     /// <summary>
     /// Memperbarui vektor arah 3-Point + Hemisphere Lighting Rig (terikat kamera + bias halus panggung)
-    /// sekali per frame via Shader.SetGlobalVector (100% Zero-GC, 1-pass ForwardBase, aman orbit 360°).
+    /// sekali per frame via Shader.SetGlobalVector (100% Zero-GC, 1-pass ForwardBase, aman orbit 360 deg).
     /// </summary>
     public void TickLightingRig(Camera mainCam, Transform stageRoot)
     {
@@ -282,7 +279,7 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
         Vector3 camF = camT.forward;
 
         // Bias orientasi panggung halus (~14%) hanya bila meja masih menghadap atas relatif terhadap kamera;
-        // saat panggung dibalik 180°, bias meluruh halus ke 0 sehingga sisi bawah tetap diterangi tajam.
+        // saat panggung dibalik 180 deg, bias meluruh halus ke 0 sehingga sisi bawah tetap diterangi tajam.
         Vector3 stageBias = Vector3.zero;
         if (stageRoot != null)
         {
@@ -338,70 +335,64 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
         if (isOutput && outputHoldProgress > 0.02f)
         {
             float holdPulse = 0.5f + (0.5f * Mathf.Sin(timeNow * 10.5f));
-            rimColor = Color.Lerp(RimOutputHighLinear, RimGrabGoldLinear, Mathf.Clamp01(outputHoldProgress));
-            rimPower = Mathf.Lerp(2.3f, 1.85f, outputHoldProgress);
-            rimIntensity = Mathf.Lerp(1.00f, 1.55f, outputHoldProgress) + (0.14f * holdPulse);
+            rimColor = Color.Lerp(RimOutputHighLinear, RimGrabOrangeLinear, Mathf.Clamp01(outputHoldProgress));
+            rimPower = Mathf.Lerp(2.5f, 1.95f, outputHoldProgress);
+            rimIntensity = Mathf.Lerp(0.85f, 1.35f, outputHoldProgress) + (0.12f * holdPulse);
         }
         else if (state == AirWeavingHologramVisual.NodeHoloState.ReturningToRack)
         {
             float warnPulse = 0.5f + (0.5f * Mathf.Sin(timeNow * 11.0f));
             rimColor = RimDeleteRedLinear;
-            rimPower = 1.90f;
-            rimIntensity = 1.38f + (0.28f * warnPulse);
+            rimPower = 2.00f;
+            rimIntensity = 1.24f + (0.24f * warnPulse);
         }
         else if (state == AirWeavingHologramVisual.NodeHoloState.Grabbed)
         {
             float grabPulse = 0.5f + (0.5f * Mathf.Sin(timeNow * 6.5f));
-            rimColor = RimGrabGoldLinear;
-            rimPower = 2.10f;
-            rimIntensity = 1.24f + (0.16f * grabPulse);
+            rimColor = RimGrabOrangeLinear;
+            rimPower = 2.25f;
+            rimIntensity = 0.96f + (0.14f * grabPulse);
         }
         else if (state == AirWeavingHologramVisual.NodeHoloState.BodyHovered)
         {
             float hoverPulse = 0.5f + (0.5f * Mathf.Sin(timeNow * 5.8f));
-            rimColor = isInputB ? RimHoverGoldLinear : RimHoverCyanLinear;
-            rimPower = 2.20f;
-            rimIntensity = 1.12f + (0.14f * hoverPulse);
+            rimColor = (isInputA || isInputB) ? RimHoverOrangeLinear : RimHoverTealLinear;
+            rimPower = 2.35f;
+            rimIntensity = 0.88f + (0.12f * hoverPulse);
         }
         else if (state == AirWeavingHologramVisual.NodeHoloState.PortFocused)
         {
-            rimColor = RimPortFocusMintLinear;
-            rimPower = 2.40f;
-            rimIntensity = 0.92f;
+            rimColor = RimPortFocusTealLinear;
+            rimPower = 2.55f;
+            rimIntensity = 0.72f;
         }
         else if (state == AirWeavingHologramVisual.NodeHoloState.Parked)
         {
-            rimColor = RimParkedIceLinear;
-            rimPower = 2.65f;
-            rimIntensity = 0.56f;
+            rimColor = RimParkedTitaniumLinear;
+            rimPower = 3.10f;
+            rimIntensity = 0.26f;
         }
         else
         {
-            // Idle aktif di meja kerja: pendar Fresnel mencerminkan status logika biner LOW (0) vs HIGH (1)
+            // Idle aktif di meja kerja: pendar Fresnel halus agar bodi Brushed Titanium tetap bersih & bervolume
             bool isHigh = node.currentOutputValue;
             if (isOutput)
             {
                 rimColor = isHigh ? RimOutputHighLinear : RimOutputLowLinear;
-                rimPower = isHigh ? 2.35f : 2.95f;
-                rimIntensity = isHigh ? 0.96f : 0.44f;
+                rimPower = isHigh ? 2.55f : 3.25f;
+                rimIntensity = isHigh ? 0.68f : 0.24f;
             }
-            else if (isInputA)
+            else if (isInputA || isInputB)
             {
-                rimColor = isHigh ? RimHighInputACyanLinear : RimLowInputALinear;
-                rimPower = isHigh ? 2.35f : 2.90f;
-                rimIntensity = isHigh ? 0.92f : 0.44f;
-            }
-            else if (isInputB)
-            {
-                rimColor = isHigh ? RimHighInputBGoldLinear : RimLowInputBLinear;
-                rimPower = isHigh ? 2.35f : 2.90f;
-                rimIntensity = isHigh ? 0.92f : 0.44f;
+                rimColor = isHigh ? RimHighTealLinear : RimLowSlateLinear;
+                rimPower = isHigh ? 2.60f : 3.25f;
+                rimIntensity = isHigh ? 0.62f : 0.24f;
             }
             else
             {
-                rimColor = isHigh ? RimHighEmeraldLinear : RimLowCopperLinear;
-                rimPower = isHigh ? 2.40f : 3.00f;
-                rimIntensity = isHigh ? 0.88f : 0.42f;
+                rimColor = isHigh ? RimHighTealLinear : RimLowSlateLinear;
+                rimPower = isHigh ? 2.65f : 3.30f;
+                rimIntensity = isHigh ? 0.58f : 0.22f;
             }
         }
 
@@ -428,6 +419,7 @@ public sealed class AirWeavingLightingAndShaderRig : MonoBehaviour
         trackedNodes.Clear();
 
         Shader.SetGlobalVector(GwKeyLightDirPropId, Vector4.zero);
+        GwIndustrial3DKit.RestoreSceneReflectionEnvironment();
         RestoreSceneLightsToCardMode();
         isRigActive = false;
     }

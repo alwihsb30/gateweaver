@@ -727,33 +727,33 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         float contentW = GuideCardWidth - (padX * 2f);
 
         // ---------------------------------------------------------------------
-        // HEADER MODAL
+        // HEADER MODAL (1:1 Figma: PANDUAN INTERAKSI & GESTUR TANGAN + sub sian pendek)
         // ---------------------------------------------------------------------
         TMP_Text titleTmp = CreateTopLeftText(
             "Txt_GuideHeader",
             guideCardRect,
             new Vector2(padX, -20f),
-            new Vector2(contentW - 52f, 34f),
-            "PANDUAN GESTUR MODE UDARA",
+            new Vector2(contentW - 52f, 32f),
+            "PANDUAN INTERAKSI & GESTUR TANGAN",
             TextAlignmentOptions.MidlineLeft,
             GwThemeTokens.TextPrimary,
             20f,
-            25f,
+            24f,
             TextWrappingModes.NoWrap);
         titleTmp.fontStyle = FontStyles.Bold;
 
         TMP_Text subTmp = CreateTopLeftText(
             "Txt_GuideSubtitle",
             guideCardRect,
-            new Vector2(padX, -54f),
-            new Vector2(contentW - 52f, 22f),
-            "KONTROL SPASIAL 3D TANPA SENTUH LAYAR  //  BUKA ULANG KAPAN SAJA VIA TOMBOL ?",
+            new Vector2(padX, -52f),
+            new Vector2(contentW - 52f, 20f),
+            "MODE UDARA // AIRWEAVING v8.5",
             TextAlignmentOptions.MidlineLeft,
-            GwThemeTokens.TextSecondary,
-            12f,
-            14f,
+            GwThemeTokens.SignalHighTeal,
+            11.5f,
+            13f,
             TextWrappingModes.NoWrap);
-        subTmp.fontStyle = FontStyles.Normal;
+        subTmp.fontStyle = FontStyles.Bold;
 
         btnCloseTopX = CreateCardActionButton(
             "Btn_GuideCloseTopX",
@@ -766,43 +766,40 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
             GwThemeTokens.CardIdle,
             GwThemeTokens.HairlineIdle,
             GwThemeTokens.TextPrimary,
-            16f,
-            20f,
+            15f,
+            18f,
             hasBorder: true,
             OnCloseGuideClicked);
 
-        CreateDivider("Divider_Top", guideCardRect, padX, -88f, contentW, GwThemeTokens.HairlineBorderPx);
+        CreateDivider("Divider_Top", guideCardRect, padX, -86f, contentW, GwThemeTokens.HairlineBorderPx);
 
         // ---------------------------------------------------------------------
-        // KONTEN 2 KOLOM SEJAJAR (KIRI: 3 GESTUR UTAMA | KANAN: 5 POSE SUMMON)
+        // KONTEN 2 KOLOM SEJAJAR (KIRI: 3 GESTUR UTAMA | KANAN: GRID 3x2 = 6 KARTU)
+        // Tanpa Divider_CenterCols & tanpa Divider_Bottom (1:1 Figma)
         // ---------------------------------------------------------------------
-        const float colsTopY = -106f;
-        const float colGap = 28f;
-        float leftColW = (contentW - colGap) * 0.485f;
+        const float colsTopY = -102f;
+        const float colGap = 24f;
+        float leftColW = (contentW - colGap) * 0.42f;
         float rightColW = contentW - colGap - leftColW;
         float rightColX = padX + leftColW + colGap;
-        float midDividerX = padX + leftColW + (colGap * 0.5f);
 
-        // Garis pembatas vertikal 1px HairlineIdle antar kolom
-        CreateDivider("Divider_CenterCols", guideCardRect, midDividerX, colsTopY, GwThemeTokens.HairlineBorderPx, 450f);
-
-        // --- KOLOM KIRI: 3 GESTUR UTAMA ---
+        // --- KOLOM KIRI: 01 // 3 GESTUR UTAMA ---
         TMP_Text leftSecTmp = CreateTopLeftText(
             "Txt_LeftColHeader",
             guideCardRect,
             new Vector2(padX, colsTopY),
-            new Vector2(leftColW, 24f),
-            "GESTUR INTERAKSI UTAMA",
+            new Vector2(leftColW, 20f),
+            "01 // 3 GESTUR UTAMA",
             TextAlignmentOptions.MidlineLeft,
             GwThemeTokens.TextSecondary,
+            10.5f,
             12f,
-            14f,
             TextWrappingModes.NoWrap);
         leftSecTmp.fontStyle = FontStyles.Bold;
 
         const float mainCardGap = 14f;
-        const float mainCardH = 128f;
-        float leftCardY = colsTopY - 34f;
+        const float mainCardH = 136f;
+        float leftCardY = colsTopY - 30f;
 
         CreateMainGestureCard(
             "Card_GestureFist",
@@ -811,9 +808,11 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
             leftCardY,
             leftColW,
             mainCardH,
+            gestureKind: 0,
             "KEPAL (FIST)",
-            "SAKELAR & GERBANG",
-            "Arahkan ke sakelar kiri lalu kepal untuk membalik nilai 0 <-> 1. Kepal badan gerbang untuk memindahkan; tarik keluar batas zona rakit lalu lepas untuk menghapus.");
+            "Toggle Input A/B",
+            GwThemeTokens.AccentSwitchOrange,
+            "Kepalkan tangan dekat sakelar atau blok gerbang untuk memicu & memindahkan.");
         leftCardY -= (mainCardH + mainCardGap);
 
         CreateMainGestureCard(
@@ -823,9 +822,11 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
             leftCardY,
             leftColW,
             mainCardH,
+            gestureKind: 1,
             "CUBIT (PINCH)",
-            "KABEL MANUAL",
-            "Cubit Jempol + Telunjuk pada orb port untuk menarik dan mencolok kabel antar terminal. Lepas cubitan di ruang kosong untuk memutus kabel.");
+            "Tarik Kabel / Pindah Gerbang",
+            GwThemeTokens.SignalHighTeal,
+            "Satukan ibu jari & telunjuk pada port untuk menyambung atau melepas rute logika.");
         leftCardY -= (mainCardH + mainCardGap);
 
         CreateMainGestureCard(
@@ -835,123 +836,167 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
             leftCardY,
             leftColW,
             mainCardH,
+            gestureKind: 2,
             "DUA TANGAN",
-            "ORBIT, ZOOM & PAN",
-            "2 Cubit untuk orbit 360 deg dan zoom panggung meja. 1 Cubit + 1 Kepal untuk geser bebas. Tahan 2 Kepal sejenak untuk memusatkan ulang kamera.");
+            "Orbit & Zoom Panggung",
+            GwThemeTokens.TextPrimary,
+            "Gunakan dua tangan untuk memutar meja 360 deg dan mengatur jarak pandang AR.");
 
-        // --- KOLOM KANAN: GRID 5 KARTU POSE SUMMON + CATATAN ALUR 2-TAHAP ---
+        // --- KOLOM KANAN: 02 // 5 POSE SUMMON GERBANG (GRID 3x2 = 6 KARTU SEJAJAR) ---
         TMP_Text rightSecTmp = CreateTopLeftText(
             "Txt_RightColHeader",
             guideCardRect,
             new Vector2(rightColX, colsTopY),
-            new Vector2(rightColW, 24f),
-            "POSE SUMMON GERBANG (5 GERBANG)",
+            new Vector2(rightColW, 20f),
+            "02 // 5 POSE SUMMON GERBANG (CIRCLE-CHARGE -> OPEN-5)",
             TextAlignmentOptions.MidlineLeft,
             GwThemeTokens.TextSecondary,
+            10.5f,
             12f,
-            14f,
             TextWrappingModes.NoWrap);
         rightSecTmp.fontStyle = FontStyles.Bold;
 
         const float poseGap = 12f;
-        const float poseRowH = 132f;
-        float poseTopY = colsTopY - 34f;
+        float gridCardW = (rightColW - (poseGap * 2f)) / 3f;
+        const float gridCardH = 211f;
+        float row1Y = colsTopY - 30f;
+        float row2Y = row1Y - (gridCardH + poseGap);
 
-        // Baris 1 (3 kartu sejajar): AND (1 Telunjuk), OR (2 Jari V), NOT (Jempol Atas)
-        float topRowCardW = (rightColW - (poseGap * 2f)) / 3f;
+        // Baris 1 Grid 3x2: AND (1 Telunjuk), OR (2 Jari V), NOT (Jempol Atas)
         CreateSummonPoseCard(
             "Card_PoseAnd",
             guideCardRect,
             rightColX,
-            poseTopY,
-            topRowCardW,
-            poseRowH,
+            row1Y,
+            gridCardW,
+            gridCardH,
             "AND",
-            "1 Telunjuk",
-            "Y = A AND B");
+            "A . B",
+            GwThemeTokens.IeeeGateIconKind.And,
+            GwThemeTokens.FingerPoseIconKind.OneIndex,
+            "POSE: 1 Telunjuk");
 
         CreateSummonPoseCard(
             "Card_PoseOr",
             guideCardRect,
-            rightColX + topRowCardW + poseGap,
-            poseTopY,
-            topRowCardW,
-            poseRowH,
+            rightColX + gridCardW + poseGap,
+            row1Y,
+            gridCardW,
+            gridCardH,
             "OR",
-            "2 Jari V",
-            "Y = A OR B");
+            "A + B",
+            GwThemeTokens.IeeeGateIconKind.Or,
+            GwThemeTokens.FingerPoseIconKind.TwoV,
+            "POSE: 2 Jari V");
 
         CreateSummonPoseCard(
             "Card_PoseNot",
             guideCardRect,
-            rightColX + ((topRowCardW + poseGap) * 2f),
-            poseTopY,
-            topRowCardW,
-            poseRowH,
+            rightColX + ((gridCardW + poseGap) * 2f),
+            row1Y,
+            gridCardW,
+            gridCardH,
             "NOT",
-            "Jempol Atas",
-            "Y = NOT A");
+            "!A",
+            GwThemeTokens.IeeeGateIconKind.Not,
+            GwThemeTokens.FingerPoseIconKind.ThumbUp,
+            "POSE: Jempol Atas");
 
-        // Baris 2 (2 kartu sejajar): XOR (3 Jari), NAND (4 Jari) - selaras 1:1 AirWeavingHandGestureDetector & GDD
-        float botRowY = poseTopY - (poseRowH + poseGap);
-        float botRowCardW = (rightColW - poseGap) * 0.5f;
+        // Baris 2 Grid 3x2: XOR (3 Jari), NAND (4 Jari), dan Sel ke-6 ALUR SUMMON 2-TAHAP
+        // 100% Akurasi Gameplay: XOR = 3 Jari, NAND = 4 Jari
         CreateSummonPoseCard(
             "Card_PoseXor",
             guideCardRect,
             rightColX,
-            botRowY,
-            botRowCardW,
-            poseRowH,
+            row2Y,
+            gridCardW,
+            gridCardH,
             "XOR",
-            "3 Jari",
-            "Y = A XOR B");
+            "A (+) B",
+            GwThemeTokens.IeeeGateIconKind.Xor,
+            GwThemeTokens.FingerPoseIconKind.ThreeFingers,
+            "POSE: 3 Jari");
 
         CreateSummonPoseCard(
             "Card_PoseNand",
             guideCardRect,
-            rightColX + botRowCardW + poseGap,
-            botRowY,
-            botRowCardW,
-            poseRowH,
+            rightColX + gridCardW + poseGap,
+            row2Y,
+            gridCardW,
+            gridCardH,
             "NAND",
-            "4 Jari",
-            "Y = A NAND B");
+            "!(A . B)",
+            GwThemeTokens.IeeeGateIconKind.Nand,
+            GwThemeTokens.FingerPoseIconKind.FourFingers,
+            "POSE: 4 Jari");
 
-        // Kotak catatan alur 2-tahap (Circle-Charge -> Open-5)
-        float noteY = botRowY - (poseRowH + poseGap);
-        const float noteH = 122f;
-        CreateTwoStageFlowNoteCard(guideCardRect, rightColX, noteY, rightColW, noteH);
+        CreateTwoStageFlowNoteCard(
+            guideCardRect,
+            rightColX + ((gridCardW + poseGap) * 2f),
+            row2Y,
+            gridCardW,
+            gridCardH);
 
         // ---------------------------------------------------------------------
-        // FOOTER: LATIHAN CEPAT (SEKUNDER) + PAHAM, KEMBALI KE SIMULASI (PRIMER SOLID PUTIH)
+        // FOOTER: Tips Jarak Kamera (Kiri) + Latihan Cepat & Paham, Kembali (Kanan)
         // ---------------------------------------------------------------------
-        CreateDivider("Divider_Bottom", guideCardRect, padX, -574f, contentW, GwThemeTokens.HairlineBorderPx);
+        const float footerBtnY = -596f;
+        const float footerBtnH = 46f;
+        const float primaryCloseBtnW = 284f;
+        const float practiceBtnW = 166f;
 
-        const float footerBtnY = -594f;
-        const float footerBtnH = 52f;
-        const float practiceBtnW = 340f;
-        const float primaryCloseBtnW = 420f;
+        GameObject camIconObj = new GameObject("Icon_CameraTip", typeof(RectTransform), typeof(Image));
+        camIconObj.transform.SetParent(guideCardRect, false);
+        RectTransform camIconRect = camIconObj.GetComponent<RectTransform>();
+        camIconRect.anchorMin = new Vector2(0f, 1f);
+        camIconRect.anchorMax = new Vector2(0f, 1f);
+        camIconRect.pivot = new Vector2(0f, 0.5f);
+        camIconRect.anchoredPosition = new Vector2(padX, footerBtnY - (footerBtnH * 0.5f));
+        camIconRect.sizeDelta = new Vector2(18f, 18f);
+
+        Image camIconImg = camIconObj.GetComponent<Image>();
+        camIconImg.sprite = GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.CameraTip);
+        camIconImg.type = Image.Type.Simple;
+        camIconImg.preserveAspect = true;
+        camIconImg.color = GwThemeTokens.SignalHighTeal;
+        camIconImg.raycastTarget = false;
+
+        TMP_Text tipTmp = CreateTopLeftText(
+            "Txt_CameraDistanceTip",
+            guideCardRect,
+            new Vector2(padX + 26f, footerBtnY),
+            new Vector2(contentW - primaryCloseBtnW - practiceBtnW - 56f, footerBtnH),
+            "Jarak ideal tangan 35-60 cm di depan kamera dengan pencahayaan ruangan merata.",
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.TextSecondary,
+            11.5f,
+            13.5f,
+            TextWrappingModes.NoWrap);
+        tipTmp.fontStyle = FontStyles.Normal;
+
+        float primaryLeftX = GuideCardWidth - padX - primaryCloseBtnW;
+        float practiceLeftX = primaryLeftX - 12f - practiceBtnW;
 
         btnStartPractice = CreateCardActionButton(
             "Btn_StartQuickPractice",
             guideCardRect,
-            padX,
+            practiceLeftX,
             footerBtnY,
             practiceBtnW,
             footerBtnH,
-            "LATIHAN CEPAT (4 LANGKAH)",
+            "LATIHAN CEPAT",
             GwThemeTokens.CardIdle,
             GwThemeTokens.HairlineIdle,
-            GwThemeTokens.TextPrimary,
+            GwThemeTokens.TextSecondary,
+            12f,
             14f,
-            17f,
             hasBorder: true,
             OnStartPracticeClicked);
 
         btnCloseGuide = CreateCardActionButton(
             "Btn_CloseGestureGuide",
             guideCardRect,
-            GuideCardWidth - padX - primaryCloseBtnW,
+            primaryLeftX,
             footerBtnY,
             primaryCloseBtnW,
             footerBtnH,
@@ -959,8 +1004,8 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
             GwThemeTokens.PrimaryFill,
             GwThemeTokens.PrimaryFill,
             GwThemeTokens.PrimaryText,
-            15f,
-            18.5f,
+            13.5f,
+            16f,
             hasBorder: false,
             OnCloseGuideClicked);
 
@@ -974,8 +1019,10 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         float topY,
         float width,
         float height,
+        int gestureKind,
         string gestureTitle,
-        string roleBadge,
+        string roleSubtitle,
+        Color roleColor,
         string description)
     {
         GameObject cardObj = new GameObject(name, typeof(RectTransform), typeof(Image));
@@ -993,56 +1040,103 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
 
         GwThemeTokens.AttachHairlineBorder(rect, $"{name}_Border", GwThemeTokens.HairlineIdle);
 
-        // Baris atas kartu: Judul Gestur (kiri) + Badge Peran (kanan)
+        // Kotak Ikon 44x44 di sisi kiri kartu (1:1 Figma)
+        GameObject iconBoxObj = new GameObject("Box_GestureIcon", typeof(RectTransform), typeof(Image));
+        iconBoxObj.transform.SetParent(rect, false);
+        RectTransform iconBoxRect = iconBoxObj.GetComponent<RectTransform>();
+        iconBoxRect.anchorMin = new Vector2(0f, 1f);
+        iconBoxRect.anchorMax = new Vector2(0f, 1f);
+        iconBoxRect.pivot = new Vector2(0f, 1f);
+        iconBoxRect.anchoredPosition = new Vector2(18f, -24f);
+        iconBoxRect.sizeDelta = new Vector2(44f, 44f);
+
+        Image iconBoxBg = iconBoxObj.GetComponent<Image>();
+        GwThemeTokens.ApplyRoundedRect6(iconBoxBg, GwThemeTokens.SmokedGlassDense);
+        iconBoxBg.raycastTarget = false;
+        GwThemeTokens.AttachHairlineBorder(iconBoxRect, "Box_GestureIcon_Border", GwThemeTokens.HairlineIdle);
+
+        if (gestureKind == 0)
+        {
+            CreateCenteredSpriteIcon(
+                "Icon_FistBase",
+                iconBoxRect,
+                new Vector2(30f, 30f),
+                GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.FistBase),
+                GwThemeTokens.TextPrimary);
+            CreateCenteredSpriteIcon(
+                "Icon_FistOrangeDot",
+                iconBoxRect,
+                new Vector2(30f, 30f),
+                GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.FistOrangeDot),
+                GwThemeTokens.AccentSwitchOrange);
+        }
+        else if (gestureKind == 1)
+        {
+            CreateCenteredSpriteIcon(
+                "Icon_PinchCyan",
+                iconBoxRect,
+                new Vector2(30f, 30f),
+                GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.PinchCyan),
+                GwThemeTokens.SignalHighTeal);
+        }
+        else
+        {
+            CreateCenteredSpriteIcon(
+                "Icon_TwoHandChevrons",
+                iconBoxRect,
+                new Vector2(30f, 30f),
+                GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.TwoHandChevrons),
+                GwThemeTokens.TextPrimary);
+            CreateCenteredSpriteIcon(
+                "Icon_TwoHandCrosshair",
+                iconBoxRect,
+                new Vector2(30f, 30f),
+                GwThemeTokens.GetGestureGuideSprite(GwThemeTokens.GestureGuideIconKind.TwoHandCrosshair),
+                GwThemeTokens.SignalHighTeal);
+        }
+
+        const float textLeftX = 78f;
+        float textW = width - textLeftX - 18f;
+
+        // Baris 1: Judul Gestur
         TMP_Text titleTmp = CreateTopLeftText(
             "Txt_Title",
             rect,
-            new Vector2(18f, -14f),
-            new Vector2(width - 210f, 28f),
+            new Vector2(textLeftX, -18f),
+            new Vector2(textW, 22f),
             gestureTitle,
             TextAlignmentOptions.MidlineLeft,
             GwThemeTokens.TextPrimary,
+            13.5f,
             16f,
-            20f,
             TextWrappingModes.NoWrap);
         titleTmp.fontStyle = FontStyles.Bold;
 
-        GameObject badgeObj = new GameObject("Badge_Role", typeof(RectTransform), typeof(Image));
-        badgeObj.transform.SetParent(rect, false);
-        RectTransform badgeRect = badgeObj.GetComponent<RectTransform>();
-        badgeRect.anchorMin = new Vector2(1f, 1f);
-        badgeRect.anchorMax = new Vector2(1f, 1f);
-        badgeRect.pivot = new Vector2(1f, 1f);
-        badgeRect.anchoredPosition = new Vector2(-16f, -14f);
-        badgeRect.sizeDelta = new Vector2(174f, 26f);
-
-        Image badgeBg = badgeObj.GetComponent<Image>();
-        GwThemeTokens.ApplyRoundedRect6(badgeBg, GwThemeTokens.SmokedGlass);
-        badgeBg.raycastTarget = false;
-        GwThemeTokens.AttachHairlineBorder(badgeRect, "Badge_Role_Border", GwThemeTokens.HairlineIdle);
-
-        TMP_Text badgeTxt = CreateStretchedText(
-            "Txt_Role",
-            badgeRect,
-            roleBadge,
-            TextAlignmentOptions.Center,
-            GwThemeTokens.SignalHighTeal,
-            10.5f,
-            12.5f,
+        // Baris 2: Sub-judul peran berwarna tanpa kotak pil (1:1 Figma)
+        TMP_Text roleTmp = CreateTopLeftText(
+            "Txt_RoleSubtitle",
+            rect,
+            new Vector2(textLeftX, -42f),
+            new Vector2(textW, 18f),
+            roleSubtitle,
+            TextAlignmentOptions.MidlineLeft,
+            roleColor,
+            11f,
+            13f,
             TextWrappingModes.NoWrap);
-        badgeTxt.fontStyle = FontStyles.Bold;
+        roleTmp.fontStyle = FontStyles.Bold;
 
-        // Deskripsi rapi multi-baris
+        // Baris 3: Deskripsi ringkas 1 kalimat (maks 2 baris)
         TMP_Text descTmp = CreateTopLeftText(
             "Txt_Desc",
             rect,
-            new Vector2(18f, -48f),
-            new Vector2(width - 36f, height - 60f),
+            new Vector2(textLeftX, -66f),
+            new Vector2(textW, 54f),
             description,
             TextAlignmentOptions.TopLeft,
             GwThemeTokens.TextSecondary,
-            13.5f,
-            16f,
+            11f,
+            13f,
             TextWrappingModes.Normal);
         descTmp.fontStyle = FontStyles.Normal;
     }
@@ -1055,8 +1149,10 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         float width,
         float height,
         string gateName,
-        string fingerPoseLabel,
-        string formulaHint)
+        string booleanNotation,
+        GwThemeTokens.IeeeGateIconKind ieeeKind,
+        GwThemeTokens.FingerPoseIconKind poseKind,
+        string fingerPoseLabel)
     {
         GameObject cardObj = new GameObject(name, typeof(RectTransform), typeof(Image));
         cardObj.transform.SetParent(parent, false);
@@ -1073,42 +1169,75 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
 
         GwThemeTokens.AttachHairlineBorder(rect, $"{name}_Border", GwThemeTokens.HairlineIdle);
 
-        // Strip aksen tipis SignalHighTeal (#38BDF8) di tepi atas dalam kartu
-        GameObject accentObj = new GameObject("TopAccentBar", typeof(RectTransform), typeof(Image));
-        accentObj.transform.SetParent(rect, false);
-        RectTransform accentRect = accentObj.GetComponent<RectTransform>();
-        accentRect.anchorMin = new Vector2(0f, 1f);
-        accentRect.anchorMax = new Vector2(1f, 1f);
-        accentRect.pivot = new Vector2(0.5f, 1f);
-        accentRect.offsetMin = new Vector2(14f, -3f);
-        accentRect.offsetMax = new Vector2(-14f, -1f);
-        Image accentImg = accentObj.GetComponent<Image>();
-        accentImg.color = GwThemeTokens.SignalHighTeal;
-        accentImg.raycastTarget = false;
-
-        // Nama gerbang besar dengan aksen SignalHighTeal (#38BDF8)
+        // Baris atas kartu: Nama Gerbang putih tebal (kiri) + Notasi Boolean ringkas (kanan)
         TMP_Text gateTmp = CreateTopLeftText(
             "Txt_GateName",
             rect,
-            new Vector2(14f, -16f),
-            new Vector2(width - 28f, 36f),
+            new Vector2(16f, -14f),
+            new Vector2(width * 0.5f, 24f),
             gateName,
-            TextAlignmentOptions.Center,
-            GwThemeTokens.SignalHighTeal,
-            20f,
-            26f,
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.TextPrimary,
+            15f,
+            18f,
             TextWrappingModes.NoWrap);
         gateTmp.fontStyle = FontStyles.Bold;
 
-        // Pil pose jari (1 Telunjuk, 2 Jari V, Jempol Atas, 3 Jari, 4 Jari)
+        TMP_Text notationTmp = CreateTopLeftText(
+            "Txt_BooleanNotation",
+            rect,
+            new Vector2(width * 0.45f, -16f),
+            new Vector2((width * 0.55f) - 16f, 20f),
+            booleanNotation,
+            TextAlignmentOptions.MidlineRight,
+            GwThemeTokens.TextSecondary,
+            10.5f,
+            12f,
+            TextWrappingModes.NoWrap);
+        notationTmp.fontStyle = FontStyles.Bold;
+
+        // Area Visual Tengah: Simbol IEEE Sian (kiri-tengah) + Siluet Pose Jari (kanan-tengah) 1:1 Figma
+        GameObject ieeeObj = new GameObject("Icon_IeeeSymbol", typeof(RectTransform), typeof(Image));
+        ieeeObj.transform.SetParent(rect, false);
+        RectTransform ieeeRect = ieeeObj.GetComponent<RectTransform>();
+        ieeeRect.anchorMin = new Vector2(0f, 1f);
+        ieeeRect.anchorMax = new Vector2(0f, 1f);
+        ieeeRect.pivot = new Vector2(0.5f, 0.5f);
+        ieeeRect.anchoredPosition = new Vector2(width * 0.33f, -104f);
+        ieeeRect.sizeDelta = new Vector2(74f, 43f);
+
+        Image ieeeImg = ieeeObj.GetComponent<Image>();
+        ieeeImg.sprite = GwThemeTokens.GetIeeeGateSprite(ieeeKind);
+        ieeeImg.type = Image.Type.Simple;
+        ieeeImg.preserveAspect = true;
+        ieeeImg.color = GwThemeTokens.SignalHighTeal;
+        ieeeImg.raycastTarget = false;
+
+        GameObject poseIconObj = new GameObject("Icon_FingerPose", typeof(RectTransform), typeof(Image));
+        poseIconObj.transform.SetParent(rect, false);
+        RectTransform poseIconRect = poseIconObj.GetComponent<RectTransform>();
+        poseIconRect.anchorMin = new Vector2(0f, 1f);
+        poseIconRect.anchorMax = new Vector2(0f, 1f);
+        poseIconRect.pivot = new Vector2(0.5f, 0.5f);
+        poseIconRect.anchoredPosition = new Vector2(width * 0.76f, -104f);
+        poseIconRect.sizeDelta = new Vector2(44f, 44f);
+
+        Image poseIconImg = poseIconObj.GetComponent<Image>();
+        poseIconImg.sprite = GwThemeTokens.GetFingerPoseSprite(poseKind);
+        poseIconImg.type = Image.Type.Simple;
+        poseIconImg.preserveAspect = true;
+        poseIconImg.color = GwThemeTokens.SignalLowSlate;
+        poseIconImg.raycastTarget = false;
+
+        // Pil pose jari di bawah kartu (POSE: 1 Telunjuk, dst.)
         GameObject posePillObj = new GameObject("Pill_FingerPose", typeof(RectTransform), typeof(Image));
         posePillObj.transform.SetParent(rect, false);
         RectTransform pillRect = posePillObj.GetComponent<RectTransform>();
         pillRect.anchorMin = new Vector2(0f, 1f);
         pillRect.anchorMax = new Vector2(1f, 1f);
         pillRect.pivot = new Vector2(0.5f, 1f);
-        pillRect.offsetMin = new Vector2(14f, -90f);
-        pillRect.offsetMax = new Vector2(-14f, -58f);
+        pillRect.offsetMin = new Vector2(14f, -(height - 14f));
+        pillRect.offsetMax = new Vector2(-14f, -(height - 42f));
 
         Image pillBg = posePillObj.GetComponent<Image>();
         GwThemeTokens.ApplyRoundedRect6(pillBg, GwThemeTokens.SmokedGlass);
@@ -1120,25 +1249,11 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
             pillRect,
             fingerPoseLabel,
             TextAlignmentOptions.Center,
-            GwThemeTokens.TextPrimary,
-            13f,
-            16f,
+            GwThemeTokens.SignalHighTeal,
+            10.5f,
+            12.5f,
             TextWrappingModes.NoWrap);
         poseTmp.fontStyle = FontStyles.Bold;
-
-        // Rumus singkat gerbang
-        TMP_Text hintTmp = CreateTopLeftText(
-            "Txt_FormulaHint",
-            rect,
-            new Vector2(12f, -98f),
-            new Vector2(width - 24f, 22f),
-            formulaHint,
-            TextAlignmentOptions.Center,
-            GwThemeTokens.TextSecondary,
-            11.5f,
-            13.5f,
-            TextWrappingModes.NoWrap);
-        hintTmp.fontStyle = FontStyles.Normal;
     }
 
     private void CreateTwoStageFlowNoteCard(RectTransform parent, float leftX, float topY, float width, float height)
@@ -1153,36 +1268,87 @@ public sealed class AirWeavingGestureGuide : MonoBehaviour
         rect.sizeDelta = new Vector2(width, height);
 
         Image bg = noteObj.GetComponent<Image>();
-        GwThemeTokens.ApplyRoundedRect6(bg, GwThemeTokens.SmokedGlass);
+        GwThemeTokens.ApplyRoundedRect6(bg, GwThemeTokens.CardIdle);
         bg.raycastTarget = false;
 
-        GwThemeTokens.AttachHairlineBorder(rect, "Card_TwoStageSummonFlow_Border", GwThemeTokens.SignalHighTeal);
+        // Border HairlineIdle tenang (tanpa border menyala berlebihan) pada sel ke-6 grid 3x2
+        GwThemeTokens.AttachHairlineBorder(rect, "Card_TwoStageSummonFlow_Border", GwThemeTokens.HairlineIdle);
 
         TMP_Text headerTmp = CreateTopLeftText(
             "Txt_FlowHeader",
             rect,
-            new Vector2(16f, -12f),
-            new Vector2(width - 32f, 24f),
-            "ALUR 2-TAHAP: CIRCLE-CHARGE -> OPEN-5",
+            new Vector2(16f, -16f),
+            new Vector2(width - 32f, 20f),
+            "ALUR SUMMON 2-TAHAP",
             TextAlignmentOptions.MidlineLeft,
             GwThemeTokens.SignalHighTeal,
-            13f,
-            15.5f,
+            10.5f,
+            12f,
             TextWrappingModes.NoWrap);
         headerTmp.fontStyle = FontStyles.Bold;
 
-        TMP_Text bodyTmp = CreateTopLeftText(
-            "Txt_FlowBody",
+        TMP_Text step1Tmp = CreateTopLeftText(
+            "Txt_FlowStep1",
             rect,
-            new Vector2(16f, -40f),
-            new Vector2(width - 32f, height - 50f),
-            "1. Arahkan pose jari di area tengah lalu putar melingkar hingga cincin penuh (Circle-Charge).\n2. Buka lebar 5 jari (Open-5) untuk menempatkan gerbang; kepal (Fist) untuk membatalkan.",
+            new Vector2(16f, -52f),
+            new Vector2(width - 32f, 54f),
+            "1. Bentuk pose jari & gambar lingkaran 360 deg hingga cincin penuh.",
             TextAlignmentOptions.TopLeft,
             GwThemeTokens.TextPrimary,
+            10.5f,
             12.5f,
-            15f,
             TextWrappingModes.Normal);
-        bodyTmp.fontStyle = FontStyles.Normal;
+        step1Tmp.fontStyle = FontStyles.Normal;
+
+        TMP_Text step2Tmp = CreateTopLeftText(
+            "Txt_FlowStep2",
+            rect,
+            new Vector2(16f, -114f),
+            new Vector2(width - 32f, 52f),
+            "2. Buka 5 jari (Open-5 Bloom) untuk memunculkan gerbang.",
+            TextAlignmentOptions.TopLeft,
+            GwThemeTokens.TextPrimary,
+            10.5f,
+            12.5f,
+            TextWrappingModes.Normal);
+        step2Tmp.fontStyle = FontStyles.Normal;
+
+        TMP_Text tagTmp = CreateTopLeftText(
+            "Txt_FlowFooterTag",
+            rect,
+            new Vector2(16f, -(height - 30f)),
+            new Vector2(width - 32f, 16f),
+            "DUAL-KANAL // ZERO-FALSE-SPAWN",
+            TextAlignmentOptions.MidlineLeft,
+            GwThemeTokens.SignalLowSlate,
+            8.5f,
+            10f,
+            TextWrappingModes.NoWrap);
+        tagTmp.fontStyle = FontStyles.Bold;
+    }
+
+    private static void CreateCenteredSpriteIcon(
+        string name,
+        RectTransform parent,
+        Vector2 sizeDelta,
+        Sprite sprite,
+        Color color)
+    {
+        GameObject obj = new GameObject(name, typeof(RectTransform), typeof(Image));
+        obj.transform.SetParent(parent, false);
+        RectTransform rect = obj.GetComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 0.5f);
+        rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = Vector2.zero;
+        rect.sizeDelta = sizeDelta;
+
+        Image img = obj.GetComponent<Image>();
+        img.sprite = sprite;
+        img.type = Image.Type.Simple;
+        img.preserveAspect = true;
+        img.color = color;
+        img.raycastTarget = false;
     }
 
     private void BuildPracticePillUi(Transform canvasTransform)
